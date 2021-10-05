@@ -46,3 +46,17 @@ ________
 Use inductive synthesis (bottom-up enumeration with decision trees) to find `f'` given `x_i` and `z_i` such that `f'(z_i) ~ x_i` for all `x_i`.
 
 Once an `f'` is found that approximates each `x_i` (minimizing wrt L2 norm (sum of squared diffs)), fix `f'` and perturb random inputs `z_i` giving `z_i'` so that `f'(z')` better approximates `x_i`.
+
+### Notes
+#### Storing/managing `z`
+- associate one `z_i` with each `x_i` and learn a pattern for manipulating `z_i` to get `x_i`
+- generate each `z_i` as part of the problem input?
+
+#### False and Num(0)
+Python treats `bool` as a subclass of `int`, so 
+```
+False == 0
+>> True
+```
+
+This means that generated programs will conflate `False` and `0`. (We don't need to worry about `True` because we don't have a `True` literal.)

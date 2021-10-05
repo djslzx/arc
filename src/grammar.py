@@ -1,10 +1,15 @@
 import util
 
+# input dimensions
 IMG_WIDTH=8
 IMG_HEIGHT=8
 
-class Expr():
+# constants for z_n, z_b
+Z_LO = -8                       # min poss value in z_n
+Z_HI = 8                        # max poss value in z_n
+Z_SIZE = 16                     # length of z_n, z_b 
 
+class Expr():
     def eval(self, environment):
         assert False, f"not implemented for {self}"
 
@@ -87,6 +92,7 @@ class Zn(Expr):
 
     def eval(self, env):
         i = self.i.eval(env)
+        # print(f"eval {self.pretty_print()}, i={i}, len={len(env['z_n'])}")
         assert isinstance(i, int)
         return env["z_n"][i]
 
