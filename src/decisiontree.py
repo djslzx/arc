@@ -18,19 +18,22 @@ def covered(cover, n_pts):
 def dt_works(dt, pts):
     """Returns true if the decision tree works, false otherwise"""
     if dt is None: return False
-    return all(dt.evaluate(x) == y for (x,y) in pts)
+    return all(dt.eval(x) == y for (x,y) in pts)
 
 def dcsolve(ops, consts, pts):
     """
-    ops: list of classes, such as [Times, Not, ...]. Note that `If` does not have to be here, because the decision tree learner inserts such expressions
+    ops: list of classes, such as [Times, Not, ...]. Note that `If` does not have to be here, because the decision tree learner inserts such exprs
     consts: list of possible leaves in syntax tree, such as [Number(1)]. Variables can also be leaves, but these are automatically inferred from `pts`
     pts: list of tuples of environment (the input) and desired output, such as [({'x': 5}, 6), ({'x': 1}, 2)]
-    returns: an expression `p` which should satisfy `all( p.evaluate(input) == output for input, output in pts )`
+    returns: an expr `p` which should satisfy `all( p.eval(input) == output for input, output in pts )`
     """
     terms = []              # list(expr)
     preds = set()           # set(expr)
     cover = dict()          # expr -> tuple(bool) : term -> i -> bool
     n_pts = len(pts)
+
+    # add z_b, z_n if not already populated
+    add_zs(pts)
 
     # determine range(f)
     (x,y) = next(iter(pts))
@@ -61,7 +64,7 @@ def distinct_pred_gen(global_bound, ops, consts, pts, preds):
     gen = bottom_up_generator(global_bound, ops, consts, pts)
     for t in gen:
         if t.return_type == "bool": # and outs not in seen:
-            outs = tuple(t.evaluate(x) for (x,_) in pts)
+            outs = tuple(t.eval(x) for (x,_) in pts)
             yield (t, outs)
 
 def distinct_term_gen(global_bound, ops, consts, pts, terms, cover, return_type):
@@ -69,7 +72,7 @@ def distinct_term_gen(global_bound, ops, consts, pts, terms, cover, return_type)
     gen = bottom_up_generator(global_bound, ops, consts, pts)
     seen = set(cover[s] for s in terms)
     for t in gen:
-        cover[t] = tuple(t.evaluate(x) == y for (x,y) in pts)
+        cover[t] = tuple(t.eval(x) == y for (x,y) in pts)
         if t.return_type == return_type and cover[t] not in seen:
             yield t
             seen.add(cover[t])
@@ -77,15 +80,14 @@ def distinct_term_gen(global_bound, ops, consts, pts, terms, cover, return_type)
 def learn_decision_tree(cover, terms, predicates, examples_we_care_about):
     """
     You may find this utility function helpful
-    cover: dictionary mapping from expression to tuple of bool's. `cover[e][i] == True` iff expression `e` predicts the correct output for `i`th input
-    terms: set of expressions that we can use as leaves in the decision tree
-    predicates: predicates we can use as branches in the decision tree. each element of `predicates` should be a tuple of `(expression, outputs)` where `outputs` is a tuple of bool's. Should satisfy `outputs[i] == expression.evaluate(pts[i][0])`
+    cover: dictionary mapping from expr to tuple of bool's. `cover[e][i] == True` iff expr `e` predicts the correct output for `i`th input
+    terms: set of exprs that we can use as leaves in the decision tree
+    predicates: predicates we can use as branches in the decision tree. each element of `predicates` should be a tuple of `(expr, outputs)` where `outputs` is a tuple of bool's. Should satisfy `outputs[i] == expr.eval(pts[i][0])`
     examples_we_care_about: a set of integers, telling which input outputs we care about solving for. For example if we are done, then this will be the empty set. If we are just starting out synthesizing the decision tree, then this will be the numbers 0-(len(pts)-1)
     """
-
-    for expression in terms:
-        if all( cover[expression][i] for i in examples_we_care_about ):
-            return expression
+    for expr in terms:
+        if all( cover[expr][i] for i in examples_we_care_about ):
+            return expr
 
     if len(predicates) == 0: return None # no more predicates to split on
 
@@ -109,17 +111,17 @@ def learn_decision_tree(cover, terms, predicates, examples_we_care_about):
         # len of `distribution` will be the number of terms
         distribution = []
 
-        for expression in terms:
-            # calculate probability that we used this expression, assuming uniform distribution over which example is being run
+        for expr in terms:
+            # calculate probability that we used this expr, assuming uniform distribution over which example is being run
             ps = []
             for example_index in example_indices:
-                if not cover[expression][example_index]: # we can't explain this example, definitely are not a candidate term
+                if not cover[expr][example_index]: # we can't explain this example, definitely are not a candidate term
                     p = 0
                 else:
-                    p = sum( cover[expression][i] for i in example_indices )
-                    p /= sum( cover[other_expression][i]
-                              for other_expression in terms
-                              if cover[other_expression][example_index]
+                    p = sum( cover[expr][i] for i in example_indices )
+                    p /= sum( cover[other_expr][i]
+                              for other_expr in terms
+                              if cover[other_expr][example_index]
                               for i in example_indices)
                 ps.append(p)
             
@@ -146,40 +148,31 @@ def learn_decision_tree(cover, terms, predicates, examples_we_care_about):
     return If(predicate, lhs, rhs)
     
 def test_dcsolve():
-    ops = [Plus,Times,LessThan,And,Not]
-    terminals = [FALSE(),Number(0),Number(1),Number(-1)]
+    operators = [Plus,Minus,Times,Div,Lt,And,Not,If,Point,Rect]
+    terminals = [FALSE()] + [Num(i) for i in range(Z_LO, Z_HI+1)]
 
     # collection of input-output specifications
-    test_cases = []
-    test_cases.append([({"x": 1}, 1),
-                       ({"x": 4}, 16),
-                       ({"x": 5}, 25)])
-    test_cases.append([({"x": 1, "y": 2}, 1),
-                       ({"x": 5, "y": 2}, 2),
-                       ({"x": 99, "y": 98}, 98),
-                       ({"x": 97, "y": 98}, 97),])
-    test_cases.append([({'x':10, 'y':7}, 17),
-	                    ({'x':4, 'y':7}, -7),
-	                    ({'x':10, 'y':3}, 13),
-	                    ({'x':1, 'y':-7}, -6),
-	                    ({'x':1, 'y':8}, -8)])
-    test_cases.append([({'x':10, 'y':10}, 20),
-                       ({'x':15, 'y':15}, 30),
-	               ({'x':4, 'y':7}, 16),
-	               ({'x':10, 'y':3}, 9),
-	               ({'x':1, 'y':-7}, 49),
-	               ({'x':1, 'y':8}, 1)])
+    test_cases = [
+        [({}, 1)],
+        [({}, 10)],
+        [({}, Point(1,1))],
+        [({}, Rect(Point(1,1), 
+                   Point(5,6)))],
+        [({"z_n": list(range(Z_SIZE))}, Rect(Point(1,1), 
+                                             Point(5,6)))],
+        [({"z_n": [100+x for x in range(Z_SIZE)]}, 
+          Rect(Point(100,100), Point(105,106)))],
+    ]
 
     for test_case in test_cases:
         start_time = time.time()
-        expression = dcsolve(ops, terminals, test_case)
-        print(f"synthesized program:\t {expression.pretty_print()} in {time.time() - start_time} seconds")
+        print(f"Testing case: {test_case}")
+        expr = dcsolve(operators, terminals, test_case)
+        print(f"synthesized program:\t {expr.pretty_print()} in {time.time() - start_time} seconds")
         for xs, y in test_case:
-            assert expression.evaluate(xs) == y, f"synthesized program {expression.pretty_print()} does not satisfy the following test case: {xs} --> {y}"
+            assert expr.eval(xs) == y, f"synthesized program {expr.pretty_print()} does not satisfy the following test case: {xs} --> {y}"
             print(f"passes test case {xs} --> {y}")
-
         print()
-
     print(" [+] dcsolver passes tests")
 
 def test_covered():

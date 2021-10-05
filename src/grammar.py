@@ -249,7 +249,7 @@ class If(Expr):
         return yes if test else no
 
 class Point(Expr):
-    return_type = "tuple(int)"
+    return_type = "Point"
     argument_types = ["int", "int"]
 
     def __init__(self, x, y):
@@ -266,13 +266,14 @@ class Point(Expr):
         x = self.x.eval(env)
         y = self.y.eval(env)
         assert isinstance(x, int) and isinstance(y, int)
-        return (x, y)
+        return Point(x, y)
 
 class Rect(Expr):
-    return_type = "tuple(tuple(int), tuple(int))"
-    argument_types = ["tuple(int)","tuple(int)"]
+    return_type = "Rect"
+    argument_types = ["Point", "Point"]
     
     def __init__(self, p1, p2):
+        # assert isinstance(p1, Point) and isinstance(p2, Point)
         self.p1 = p1
         self.p2 = p2
         
@@ -286,7 +287,7 @@ class Rect(Expr):
         p1 = self.p1.eval(env)
         p2 = self.p2.eval(env)
         # assert isinstance(p1, tuple(int)) and isinstance(p2, tuple(int))
-        return (p1, p2)
+        return Rect(p1, p2)
 
     def render(self, env):
         """

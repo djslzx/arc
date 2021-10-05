@@ -3,11 +3,23 @@ import time
 import random
 from grammar import *
 
+VERBOSE = True
+
 def gen_zb():
     return [bool(random.randint(0,1)) for _ in range(Z_SIZE)]
 
 def gen_zn():
     return [random.randint(Z_LO, Z_HI) for _ in range(Z_SIZE)]
+
+def add_zs(exs):
+    """
+    Generate z_i = z_i_b, z_i_n for each x_i and add to env
+    """
+    for x, y in exs:
+        if 'z_n' not in x:
+            x['z_n'] = gen_zn()
+        if 'z_b' not in x:
+            x['z_b'] = gen_zb()
 
 def bottom_up(global_bound, operators, constants, exs):
     """
@@ -20,11 +32,7 @@ def bottom_up(global_bound, operators, constants, exs):
     target_outputs = tuple(y for _, y in exs)
 
     # generate z_i = z_i_b, z_i_n for each x_i and add to env
-    for x, y in exs:
-        if 'z_n' not in x:
-            x['z_n'] = gen_zn()
-        if 'z_b' not in x:
-            x['z_b'] = gen_zb()
+    add_zs(exs)
 
     for expr in bottom_up_generator(global_bound, operators, constants, exs):
         outputs = tuple(expr.eval(input) for input, _ in exs)
@@ -67,7 +75,7 @@ def bottom_up_generator(global_bound, operators, constants, exs):
 
     # Generate all trees of size `size` and add to `trees`
     for size in range(1, global_bound+1):
-        print(f"Generating trees of size {size}... ", end='')
+        if VERBOSE: print(f"Generating trees of size {size}... ", end='')
         # For each operator, determine how many args it needs and fill in using integer_partitions
         for op in operators:
             in_types = op.argument_types
@@ -79,7 +87,7 @@ def bottom_up_generator(global_bound, operators, constants, exs):
                     tree = op(*args)
                     yield tree
                     add_tree((op.return_type, size), tree)
-        print(f"|trees| = {sum(len(l) for l in trees.values())}")
+        if VERBOSE: print(f"|trees| = {sum(len(l) for l in trees.values())}")
 
 def integer_partitions(target_value, number_of_arguments):
     """
