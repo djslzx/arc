@@ -1,6 +1,6 @@
-class Expression():
+class Expr():
 
-    def evaluate(self, environment):
+    def eval(self, environment):
         assert False, f"not implemented for {self}"
 
     def __repr__(self):
@@ -17,7 +17,7 @@ class Expression():
 
     def __lt__(self, other): return str(self) < str(other)
 
-class FALSE(Expression):
+class FALSE(Expr):
     return_type = "bool"
     argument_types = []
     
@@ -29,10 +29,27 @@ class FALSE(Expression):
     def pretty_print(self):
         return "False"
 
-    def evaluate(self, environment):
+    def eval(self, env):
         return False
     
-class Number(Expression):
+class Zb(Expr):
+    return_type = "bool"
+    argument_types = ["int"]
+    
+    def __init__(self, i):
+        assert isinstance(i, int)
+        self.i = i
+
+    def __str__(self):
+        return f"Zb('{self.i}')"
+
+    def pretty_print(self):
+        return f"z_b[{self.i}]"
+
+    def eval(self, env):
+        return env["z_b"][self.i]
+
+class Number(Expr):
     return_type = "int"
     argument_types = []
     
@@ -45,26 +62,28 @@ class Number(Expression):
     def pretty_print(self):
         return str(self.n)
 
-    def evaluate(self, environment):
+    def eval(self, env):
         return self.n
 
-class NumberVariable(Expression):
+class Zn(Expr):
+    """z_n"""
     return_type = "int"
-    argument_types = []
+    argument_types = ["int"]
     
-    def __init__(self, name):
-        self.name = name
+    def __init__(self, i):
+        assert isinstance(i, int)
+        self.i = i
 
     def __str__(self):
-        return f"NumberVariable('{self.name}')"
+        return f"Zn('{self.i}')"
 
     def pretty_print(self):
-        return self.name
+        return f"z_n[{self.i}]"
 
-    def evaluate(self, environment):
-        return environment[self.name]
+    def eval(self, env):
+        return env["z_n"][self.i]
 
-class Plus(Expression):
+class Plus(Expr):
     return_type = "int"
     argument_types = ["int","int"]
     
@@ -77,13 +96,13 @@ class Plus(Expression):
     def pretty_print(self):
         return f"(+ {self.x.pretty_print()} {self.y.pretty_print()})"
 
-    def evaluate(self, environment):
-        x = self.x.evaluate(environment)
-        y = self.y.evaluate(environment)
+    def eval(self, env):
+        x = self.x.eval(env)
+        y = self.y.eval(env)
         assert isinstance(x, int) and isinstance(y, int)
         return x + y
 
-class Minus(Expression):
+class Minus(Expr):
     return_type = "int"
     argument_types = ["int","int"]
     
@@ -96,13 +115,13 @@ class Minus(Expression):
     def pretty_print(self):
         return f"(- {self.x.pretty_print()} {self.y.pretty_print()})"
 
-    def evaluate(self, environment):
-        x = self.x.evaluate(environment)
-        y = self.y.evaluate(environment)
+    def eval(self, env):
+        x = self.x.eval(env)
+        y = self.y.eval(env)
         assert isinstance(x, int) and isinstance(y, int)
         return x - y
 
-class Times(Expression):
+class Times(Expr):
     return_type = "int"
     argument_types = ["int","int"]
     
@@ -115,13 +134,13 @@ class Times(Expression):
     def pretty_print(self):
         return f"(* {self.x.pretty_print()} {self.y.pretty_print()})"
 
-    def evaluate(self, environment):
-        x = self.x.evaluate(environment)
-        y = self.y.evaluate(environment)
+    def eval(self, env):
+        x = self.x.eval(env)
+        y = self.y.eval(env)
         assert isinstance(x, int) and isinstance(y, int)
         return x * y
 
-class Div(Expression):
+class Div(Expr):
     return_type = "int"
     argument_types = ["int","int"]
     
@@ -134,13 +153,13 @@ class Div(Expression):
     def pretty_print(self):
         return f"(/ {self.x.pretty_print()} {self.y.pretty_print()})"
 
-    def evaluate(self, environment):
-        x = self.x.evaluate(environment)
-        y = self.y.evaluate(environment)
+    def eval(self, env):
+        x = self.x.eval(env)
+        y = self.y.eval(env)
         assert isinstance(x, int) and isinstance(y, int)
         return x // y
 
-class LessThan(Expression):
+class LessThan(Expr):
     return_type = "bool"
     argument_types = ["int","int"]
     
@@ -153,13 +172,13 @@ class LessThan(Expression):
     def pretty_print(self):
         return f"(< {self.x.pretty_print()} {self.y.pretty_print()})"
 
-    def evaluate(self, environment):
-        x = self.x.evaluate(environment)
-        y = self.y.evaluate(environment)
+    def eval(self, env):
+        x = self.x.eval(env)
+        y = self.y.eval(env)
         assert isinstance(x, int) and isinstance(y, int)
         return x < y
 
-class And(Expression):
+class And(Expr):
     return_type = "bool"
     argument_types = ["bool","bool"]
     
@@ -172,13 +191,13 @@ class And(Expression):
     def pretty_print(self):
         return f"(and {self.x.pretty_print()} {self.y.pretty_print()})"
 
-    def evaluate(self, environment):
-        x = self.x.evaluate(environment)
-        y = self.y.evaluate(environment)
+    def eval(self, env):
+        x = self.x.eval(env)
+        y = self.y.eval(env)
         assert isinstance(x, bool) and isinstance(y, bool)
         return x and y
 
-class Not(Expression):
+class Not(Expr):
     return_type = "bool"
     argument_types = ["bool"]
     
@@ -191,12 +210,12 @@ class Not(Expression):
     def pretty_print(self):
         return f"(not {self.x.pretty_print()})"
 
-    def evaluate(self, environment):
-        x = self.x.evaluate(environment)
+    def eval(self, env):
+        x = self.x.eval(env)
         assert isinstance(x, bool)
         return not x
 
-class If(Expression):
+class If(Expr):
     return_type = "int"
     argument_types = ["bool","int","int"]
     
@@ -209,9 +228,49 @@ class If(Expression):
     def pretty_print(self):
         return f"(if {self.test.pretty_print()} {self.yes.pretty_print()} {self.no.pretty_print()})"
 
-    def evaluate(self, environment):
-        test = self.test.evaluate(environment)
-        yes = self.yes.evaluate(environment)
-        no = self.no.evaluate(environment)
+    def eval(self, env):
+        test = self.test.eval(env)
+        yes = self.yes.eval(env)
+        no = self.no.eval(env)
         assert isinstance(test, bool) and isinstance(yes, int) and isinstance(no, int)
         return yes if test else no
+
+class Point(Expr):
+    return_type = "tuple(int)"
+    argument_types = ["int", "int"]
+
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        
+    def __str__(self):
+        return f"Point({self.x}, {self.y})"
+
+    def pretty_print(self):
+        return f"({self.x.pretty_print()}, {self.y.pretty_print()})"
+
+    def eval(self, env):
+        x = self.x.eval(env)
+        y = self.y.eval(env)
+        assert isinstance(x, int) and isinstance(y, int)
+        return (x, y)
+
+class Rect(Expr):
+    return_type = "tuple(tuple(int), tuple(int))"
+    argument_types = ["tuple(int)","tuple(int)"]
+    
+    def __init__(self, p1, p2):
+        self.p1 = p1
+        self.p2 = p2
+        
+    def __str__(self):
+        return f"Rect({self.p1}, {self.p2})"
+
+    def pretty_print(self):
+        return f"({self.p1.pretty_print()}, {self.p2.pretty_print()})"
+
+    def eval(self, env):
+        p1 = self.p1.eval(env)
+        p2 = self.p2.eval(env)
+        assert isinstance(p1, int) and isinstance(p2, int)
+        return (p1, p2)

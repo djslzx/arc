@@ -8,9 +8,9 @@ Given `z = (z_b, z_n)`, a tuple of random vectors over booleans and integers;
 p := rect | rect p
 rect := (pt, pt)
 pt := (n, n)
-n := int | n + n | n * n | n - n | n / n
-   | if b then n else n
-b := z_b[i]
+n := 0 | 1 | ... | 9 | n + n | n * n | n - n | n / n
+   | if b then n else n | z_n[i]
+b := z_b[i] | false | not b
 
 ```
 
