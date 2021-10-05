@@ -10,12 +10,10 @@ def bottom_up(global_bound, operators, constants, input_outputs):
     input_outputs: list of tuples of environment (the input) and desired output, such as [({'x': 5}, 6), ({'x': 1}, 2)]
     returns: either None if no program can be found that satisfies the input outputs, or the smallest such program. If a program `p` is returned, it should satisfy `all( p.evaluate(input) == output for input, output in input_outputs )`
     """
-
     target_outputs = tuple( y for _, y in input_outputs )
 
     for expression in bottom_up_generator(global_bound, operators, constants, input_outputs):
         outputs = tuple(expression.evaluate(input) for input, _ in input_outputs)
-
         if outputs == target_outputs:
             return expression
 
@@ -85,21 +83,7 @@ def bottom_up_generator(global_bound, operators, constants, input_outputs):
 def integer_partitions(target_value, number_of_arguments):
     """
     Returns all ways of summing up to `target_value` by adding `number_of_arguments` nonnegative integers
-    You may find this useful when implementing `bottom_up_generator`:
-
-    Imagine that you are trying to enumerate all expressions of size 10, and you are considering using an operator with 3 arguments.
-    So the total size has to be 10, which includes +1 from this operator, as well as 3 other terms from the 3 arguments, which together have to sum to 10.
-    Therefore: 10 = 1 + size_of_first_argument + size_of_second_argument + size_of_third_argument
-    Also, every argument has to be of size at least one, because you can't have a syntax tree of size 0
-    Therefore: 10 = 1 + (1 + size_of_first_argument_minus_one) + (1 + size_of_second_argument_minus_one) + (1 + size_of_third_argument_minus_one)
-    So, by algebra:
-         10 - 1 - 3 = size_of_first_argument_minus_one + size_of_second_argument_minus_one + size_of_third_argument_minus_one
-    where: size_of_first_argument_minus_one >= 0
-           size_of_second_argument_minus_one >= 0
-           size_of_third_argument_minus_one >= 0
-    Therefore: the set of allowed assignments to {size_of_first_argument_minus_one,size_of_second_argument_minus_one,size_of_third_argument_minus_one} is just the integer partitions of (10 - 1 - 3).
     """
-
     if target_value < 0:
         return []
 
@@ -134,7 +118,6 @@ def test_bottom_up():
 	               ({'x':10, 'y':3}, 9),
 	               ({'x':1, 'y':-7}, 49),
 	               ({'x':1, 'y':8}, 1)])
-    
 
     # the optimal size of each program that solves the corresponding test case
     optimal_sizes = [3, 6, 10, 17]

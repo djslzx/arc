@@ -1,3 +1,8 @@
+import util
+
+IMG_WIDTH=8
+IMG_HEIGHT=8
+
 class Expr():
 
     def eval(self, environment):
@@ -37,7 +42,6 @@ class Zb(Expr):
     argument_types = ["int"]
     
     def __init__(self, i):
-        assert isinstance(i, int)
         self.i = i
 
     def __str__(self):
@@ -47,9 +51,11 @@ class Zb(Expr):
         return f"z_b[{self.i}]"
 
     def eval(self, env):
-        return env["z_b"][self.i]
+        i = self.i.eval(env)
+        assert isinstance(i, int)
+        return env["z_b"][i]
 
-class Number(Expr):
+class Num(Expr):
     return_type = "int"
     argument_types = []
     
@@ -57,7 +63,7 @@ class Number(Expr):
         self.n = n
 
     def __str__(self):
-        return f"Number({self.n})"
+        return f"Num({self.n})"
 
     def pretty_print(self):
         return str(self.n)
@@ -71,7 +77,6 @@ class Zn(Expr):
     argument_types = ["int"]
     
     def __init__(self, i):
-        assert isinstance(i, int)
         self.i = i
 
     def __str__(self):
@@ -81,7 +86,9 @@ class Zn(Expr):
         return f"z_n[{self.i}]"
 
     def eval(self, env):
-        return env["z_n"][self.i]
+        i = self.i.eval(env)
+        assert isinstance(i, int)
+        return env["z_n"][i]
 
 class Plus(Expr):
     return_type = "int"
@@ -159,7 +166,7 @@ class Div(Expr):
         assert isinstance(x, int) and isinstance(y, int)
         return x // y
 
-class LessThan(Expr):
+class Lt(Expr):
     return_type = "bool"
     argument_types = ["int","int"]
     
@@ -167,7 +174,7 @@ class LessThan(Expr):
         self.x, self.y = x, y
 
     def __str__(self):
-        return f"LessThan({self.x}, {self.y})"
+        return f"Lt({self.x}, {self.y})"
 
     def pretty_print(self):
         return f"(< {self.x.pretty_print()} {self.y.pretty_print()})"
@@ -272,5 +279,52 @@ class Rect(Expr):
     def eval(self, env):
         p1 = self.p1.eval(env)
         p2 = self.p2.eval(env)
-        assert isinstance(p1, int) and isinstance(p2, int)
+        # assert isinstance(p1, tuple(int)) and isinstance(p2, tuple(int))
         return (p1, p2)
+
+    def render(self, env):
+        """
+        Render an expression as a 'pixel image' (a boolean matrix)
+        """
+        (x1,y1), (x2,y2) = self.eval(env)
+        return [[x1 <= x <= x2 and y1 <= y <= y2
+                 for x in range(IMG_WIDTH)]
+                for y in range(IMG_HEIGHT)]
+
+def test_render():
+    # (0,0), (1,1)
+    expr = Rect(Point(Num(0),Num(0)), 
+                Point(Num(1),Num(1)))
+    out = expr.render({})
+    expected = util.img_to_bool_matrix(
+        ["##______",
+         "##______",
+         "________",
+         "________",
+         "________",
+         "________",
+         "________",
+         "________"])
+    assert expected == out, f"test_render failed:\n expected={expected},\n out={out}"
+
+    # (1,0), (3,3)
+    expr = Rect(Point(Zn(Num(0)), 
+                      Num(0)), 
+                Point(Plus(Num(2), Num(1)), 
+                      Num(3))) 
+    out = expr.render({'z_n': [1,2,3]})
+    expected = util.img_to_bool_matrix( 
+        ["_###____",
+         "_###____",
+         "_###____",
+         "_###____",
+         "________",
+         "________",
+         "________",
+         "________"])
+    assert expected == out, f"test_render failed:\n expected={expected},\n out={out}"
+    print("[+] passed test_render")
+
+if __name__ == '__main__':
+    test_render()
+    
