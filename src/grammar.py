@@ -291,6 +291,40 @@ class Rect(Expr):
                  for x in range(IMG_WIDTH)]
                 for y in range(IMG_HEIGHT)]
 
+def test_eval():
+    tests = [
+        (FALSE(),
+         lambda zb,zn: False),
+        (Not(FALSE()),
+         lambda zb, zn: True),
+        (Times(Zn(Num(0)), Zn(Num(1))),
+         lambda zb, zn: zn[0] * zn[1]),
+        (If(Lt(Zn(Num(0)), Zn(Num(1))),
+            Zn(Num(0)), 
+            Zn(Num(1))),
+         lambda zb, zn: min(zn[0], zn[1])),
+        (If(Not(Lt(Zn(Num(0)), 
+                   Zn(Num(1)))),
+            Times(Zn(Num(0)), Zn(Num(1))), 
+            Plus(Zn(Num(0)), Zn(Num(1)))), 
+         lambda zb, zn: zn[0] * zn[1] if not (zn[0] < zn[1]) else zn[0] + zn[1]),
+    ]
+    all_correct = True
+    for expr, correct_semantics in tests:
+        this_correct = True
+        for x in range(10):
+            for y in range(10):
+                if expr.eval({"z_b":[], "z_n":[x,y]}) != correct_semantics([], [x,y]):
+                    this_correct = False
+        if not this_correct:
+            print("problem with evaluation for expr:")
+            print(expr)
+            print("please debug `eval` methods")
+        all_correct = all_correct and this_correct
+
+    if all_correct:
+        print(" [+] eval passes checks")
+
 def test_render():
     # (0,0), (1,1)
     expr = Rect(Point(Num(0),Num(0)), 
@@ -323,8 +357,9 @@ def test_render():
          "________",
          "________"])
     assert expected == out, f"test_render failed:\n expected={expected},\n out={out}"
-    print("[+] passed test_render")
+    print(" [+] passed test_render")
 
 if __name__ == '__main__':
+    test_eval()
     test_render()
     

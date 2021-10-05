@@ -26,7 +26,7 @@ def test_img_to_bool_matrix():
     ]
     out = img_to_bool_matrix(s)
     assert out == expected, f"test_img_to_bool_matrix failed: expected={expected}, out={out}"
-    print("[+] passed test_img_to_bool_matrix")
+    print(" [+] passed test_img_to_bool_matrix")
 
 if __name__ == '__main__':
     test_img_to_bool_matrix()
