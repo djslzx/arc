@@ -3,7 +3,7 @@ import time
 import random
 from grammar import *
 
-VERBOSE = True
+VERBOSE = False
 
 def gen_zb():
     return [bool(random.randint(0,1)) for _ in range(Z_SIZE)]

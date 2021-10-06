@@ -1,7 +1,7 @@
 from grammar import *
 from bottom_up import *
 
-import math
+from math import log
 import time
 
 global_bound = 10               # FIXME
@@ -130,7 +130,7 @@ def learn_decision_tree(cover, terms, predicates, examples_we_care_about):
         # original paper has 1/|pts| term, but we can absorb this into normalizing constant
         z = sum(distribution) # normalizing constant
 
-        return -sum( p/z * math.log(p/z) for p in distribution if p > 0)
+        return -sum( p/z * log(p/z) for p in distribution if p > 0)
         
     predicate, predicate_outputs = min(predicates, key=information_gain)
 
@@ -155,13 +155,14 @@ def test_dcsolve():
     test_cases = [
         [({}, 1)],
         [({}, 10)],
-        [({}, Point(1,1))],
+        [({"z_n": [1]*Z_SIZE}, Point(1,1)),
+         ({"z_n": [2]*Z_SIZE}, Point(2,2))],
         [({}, Rect(Point(1,1), 
                    Point(5,6)))],
-        [({"z_n": list(range(Z_SIZE))}, Rect(Point(1,1), 
-                                             Point(5,6)))],
-        [({"z_n": [100+x for x in range(Z_SIZE)]}, 
-          Rect(Point(100,100), Point(105,106)))],
+        # [({"z_n": list(range(Z_SIZE))}, Rect(Point(1,1), 
+        #                                      Point(5,6)))],
+        # [({"z_n": [100+x for x in range(Z_SIZE)]}, 
+        #   Rect(Point(100,100), Point(105,106)))],
     ]
 
     for test_case in test_cases:
