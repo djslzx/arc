@@ -69,6 +69,89 @@ def test_bool_matrix_to_img():
     assert out == s, f"test_bool_matrix_to_img failed: expected={s}, out={out}"
     print(" [+] passed test_bool_matrix_to_img")
 
+class Bitmap:
+    """
+    A boolean matrix
+    """
+    @staticmethod
+    def from_img(s):
+        return Bitmap(img_to_bool_matrix(s))
+
+    def __init__(self, mat):
+        self.mat = mat
+        self.height = len(mat)
+        self.width = len(mat[0])
+    
+    def __str__(self):
+        return f"Bitmap({self.mat})"
+    
+    def __eq__(self, other):
+        return self.height == other.height and \
+            self.width == other.width and \
+            self.mat == other.mat
+
+    def pretty_print(self):
+        img = bool_matrix_to_img(self.mat)
+        return "\n".join(img)
+
+    def AND(self, other):
+        assert self.height == other.height and self.width == other.width, \
+            "Cannot 'and' bitmaps of different sizes "\
+            f"({self.width} x {self.height} and"\
+            f" {other.width} x {other.height})"
+        return Bitmap(
+            [[self.mat[y][x] and other.mat[y][x]
+              for x in range(self.width)]
+             for y in range(self.height)])
+
+    def OR(self, other):
+        assert self.height == other.height and self.width == other.width, \
+            "Cannot 'or' bitmaps of different sizes "\
+            f"({self.width} x {self.height} and"\
+            f" {other.width} x {other.height})"
+        return Bitmap(
+            [[self.mat[y][x] or other.mat[y][x]
+              for x in range(self.width)]
+             for y in range(self.height)])
+
+def test_bitmap_or():
+    tests = [
+        ([[False]], [[False]], [[False]]),
+        ([[True]], [[False]], [[True]]),
+        ([[False]], [[True]], [[True]]),
+        ([[True]], [[True]], [[True]]),
+        ([[False, False],
+          [True, True]], 
+         [[True, False],
+          [True, False]], 
+         [[True, False],
+          [True, True]]),
+    ]
+    for x, y, expected in tests:
+        actual = Bitmap(x).OR(Bitmap(y))
+        assert actual == Bitmap(expected), \
+            f"test failed: {x} OR {y} = {actual}, expected={expected}"
+
+def test_bitmap_and():
+    tests = [
+        ([[False]], [[False]], [[False]]),
+        ([[True]], [[False]], [[False]]),
+        ([[False]], [[True]], [[False]]),
+        ([[True]], [[True]], [[True]]),
+        ([[False, False],
+          [True, True]], 
+         [[True, False],
+          [True, False]], 
+         [[False, False],
+          [True, False]]),
+    ]
+    for x, y, expected in tests:
+        actual = Bitmap(x).AND(Bitmap(y))
+        assert actual == Bitmap(expected), \
+            f"test failed: {x} AND {y} = {actual}, expected={expected}"
+
 if __name__ == '__main__':
     test_img_to_bool_matrix()
     test_bool_matrix_to_img()
+    test_bitmap_or()
+    test_bitmap_and()
