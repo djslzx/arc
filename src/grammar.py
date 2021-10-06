@@ -153,25 +153,6 @@ class Times(Expr):
         assert isinstance(x, int) and isinstance(y, int)
         return x * y
 
-class Div(Expr):
-    return_type = "int"
-    argument_types = ["int","int"]
-    
-    def __init__(self, x, y):
-        self.x, self.y = x, y
-
-    def __str__(self):
-        return f"Div({self.x}, {self.y})"
-
-    def pretty_print(self):
-        return f"(/ {self.x.pretty_print()} {self.y.pretty_print()})"
-
-    def eval(self, env):
-        x = self.x.eval(env)
-        y = self.y.eval(env)
-        assert isinstance(x, int) and isinstance(y, int)
-        return x // y
-
 class Lt(Expr):
     return_type = "bool"
     argument_types = ["int","int"]

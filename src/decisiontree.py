@@ -148,8 +148,8 @@ def learn_decision_tree(cover, terms, predicates, examples_we_care_about):
     return If(predicate, lhs, rhs)
     
 def test_dcsolve():
-    operators = [Plus,Minus,Times,Div,Lt,And,Not,If,Point,Rect]
-    terminals = [FALSE()] + [Num(i) for i in range(Z_LO, Z_HI+1)]
+    operators = [Plus,Minus,Times,Point,Rect]
+    terminals = [Num(i) for i in range(Z_HI+1)]
 
     # collection of input-output specifications
     test_cases = [
@@ -157,8 +157,11 @@ def test_dcsolve():
         [({}, 10)],
         [({"z_n": [1]*Z_SIZE}, Point(1,1)),
          ({"z_n": [2]*Z_SIZE}, Point(2,2))],
+        [({}, Point(1,1)),
+         ({}, Point(2,2))],
         [({}, Rect(Point(1,1), 
                    Point(5,6)))],
+
         # [({"z_n": list(range(Z_SIZE))}, Rect(Point(1,1), 
         #                                      Point(5,6)))],
         # [({"z_n": [100+x for x in range(Z_SIZE)]}, 

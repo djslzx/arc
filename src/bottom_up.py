@@ -104,15 +104,16 @@ def integer_partitions(target_value, number_of_arguments):
              for x2s in integer_partitions(target_value - x1, number_of_arguments - 1) ]
 
 def test_bottom_up():
-    operators = [Plus,Minus,Times,Div,Lt,And,Not,If,Point,Rect]
+    operators = [Plus,Minus,Times,Lt,And,Not,If,Point,Rect]
     terminals = [FALSE()] + [Num(i) for i in range(Z_LO, Z_HI+1)]
 
     # collection of input-output specifications
     test_cases = [
         [({}, 1)],
-        [({}, (1,1))],
-        [({}, ((1,1),(5,6)))],
-        [({"z_n": list(range(Z_SIZE))}, ((1,1), (5,6)))],
+        [({}, Point(1,1))],
+        [({}, Rect(Point(1,1), Point(5,6)))],
+        [({"z_n": list(range(Z_SIZE))}, 
+          Rect(Point(1,1), Point(5,6)))],
         # [({"z_n": [100+x for x in range(Z_SIZE)]}, 
         #   ((100,100), (105,106)))],
     ]
