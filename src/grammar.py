@@ -1,4 +1,5 @@
 import util
+from util import Bitmap
 
 # input dimensions
 IMG_WIDTH=8
@@ -270,43 +271,39 @@ class Rect(Expr):
         # assert isinstance(p1, tuple(int)) and isinstance(p2, tuple(int))
         return Rect(p1, p2)
 
-    def contains(self, env, p):
-        """
-        Check whether `self` contains the point `p`
-        """
-        x, y = p.x, p.y
-        p1 = self.p1.eval(env)
-        p2 = self.p2.eval(env)
-        return p1.x <= x <= p2.x and p1.y <= y <= p2.y
-
     def render(self, env):
         """
-        Render an expression as a 'pixel image' (a boolean matrix)
+        Render an expression as a bitmap
         """
-        return [[self.contains(env, Point(x,y))
-                 for x in range(IMG_WIDTH)]
-                for y in range(IMG_HEIGHT)]
+        p1 = self.p1.eval(env)
+        p2 = self.p2.eval(env)
+        return Bitmap([[p1.x <= x <= p2.x and p1.y <= y <= p2.y
+                        for x in range(IMG_WIDTH)]
+                       for y in range(IMG_HEIGHT)])
 
 class Program(Expr):
-    return_type = "list"        # boolean matrix
-    argument_types = []
+    return_type = "Bitmap"        # boolean matrix
+    argument_types = ["Rect", "Program"]
     
-    def __init__(self, rects):
-        assert all(isinstance(r, Rect) for r in rects)
-        self.rects = rects
+    def __init__(self, rect, prog=None):
+        assert isinstance(rect, Rect)
+        assert prog is None or isinstance(prog, Program)
+        self.rect = rect
+        self.prog = prog
         
     def __str__(self):
-        return f"Program({[r for r in self.rects]})"
+        return f"Program({self.rect}, {self.prog})"
 
     def pretty_print(self):
-        return ";\n".join([r.pretty_print() 
-                           for r in self.rects])
+        return (f"{self.rect};"
+                f"{self.prog.pretty_print() if self.prog is not None else 'None'}")
 
     def eval(self, env):
         # TODO: enforce invariant that rects don't overlap
-        return [[any(r.contains(env, Point(x,y)) for r in self.rects)
-                 for x in range(IMG_WIDTH)]
-                for y in range(IMG_HEIGHT)]
+        m = self.rect.render(env)
+        return (m 
+                if self.prog is None
+                else m.OR(self.prog.eval(env)))
 
 def test_eval():
     tests = [
@@ -325,18 +322,34 @@ def test_eval():
             Times(Zn(Num(0)), Zn(Num(1))), 
             Plus(Zn(Num(0)), Zn(Num(1)))), 
          lambda zb, zn: zn[0] * zn[1] if not (zn[0] < zn[1]) else zn[0] + zn[1]),
-        (Program([Rect(Point(Num(0),Num(0)), Point(Num(1),Num(1))),
-                  Rect(Point(Num(3),Num(3)), Point(Num(4),Num(6)))]),
-         lambda zb, zn: util.img_to_bool_matrix(
-             ["##______",
-              "##______",
-              "________",
-              "___##___",
-              "___##___",
-              "___##___",
-              "___##___",
-              "________",]
-         ))
+        (Program(Rect(Point(Num(0),
+                            Num(0)), 
+                      Point(Num(1),
+                            Num(1)))),
+         lambda zb, zn: Bitmap.from_img(["##______",
+                                         "##______",
+                                         "________",
+                                         "________",
+                                         "________",
+                                         "________",
+                                         "________",
+                                         "________",])),
+        (Program(Rect(Point(Num(0),
+                            Num(0)), 
+                      Point(Num(1),
+                            Num(1))),
+                 Program(Rect(Point(Num(3),
+                                    Num(3)), 
+                              Point(Num(4),
+                                    Num(6))))),
+         lambda zb, zn: Bitmap.from_img(["##______",
+                                         "##______",
+                                         "________",
+                                         "___##___",
+                                         "___##___",
+                                         "___##___",
+                                         "___##___",
+                                         "________",]))
     ]
     for expr, correct_semantics in tests:
         for x in range(10):
@@ -344,8 +357,8 @@ def test_eval():
                 out = expr.eval({"z_b":[], "z_n":[x,y]})
                 expected = correct_semantics([], [x,y])
                 assert out == expected, f"failed eval test:\n"\
-                    f" expected={util.bool_matrix_to_img(expected)}\n"\
-                    f" out={util.bool_matrix_to_img(out)}"
+                    f" expected=\n{expected.pretty_print()}\n"\
+                    f" out=\n{out.pretty_print()}"
     print(" [+] eval passes checks")
 
 def test_render():
@@ -353,15 +366,14 @@ def test_render():
     expr = Rect(Point(Num(0),Num(0)), 
                 Point(Num(1),Num(1)))
     out = expr.render({})
-    expected = util.img_to_bool_matrix(
-        ["##______",
-         "##______",
-         "________",
-         "________",
-         "________",
-         "________",
-         "________",
-         "________"])
+    expected = Bitmap.from_img(["##______",
+                                "##______",
+                                "________",
+                                "________",
+                                "________",
+                                "________",
+                                "________",
+                                "________"])
     assert expected == out, f"test_render failed:\n expected={expected},\n out={out}"
 
     # (1,0), (3,3)
@@ -370,15 +382,14 @@ def test_render():
                 Point(Plus(Num(2), Num(1)), 
                       Num(3))) 
     out = expr.render({'z_n': [1,2,3]})
-    expected = util.img_to_bool_matrix( 
-        ["_###____",
-         "_###____",
-         "_###____",
-         "_###____",
-         "________",
-         "________",
-         "________",
-         "________"])
+    expected = Bitmap.from_img(["_###____",
+                                "_###____",
+                                "_###____",
+                                "_###____",
+                                "________",
+                                "________",
+                                "________",
+                                "________"])
     assert expected == out, f"test_render failed:\n expected={expected},\n out={out}"
     print(" [+] passed test_render")
 
