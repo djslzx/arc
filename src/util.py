@@ -83,17 +83,23 @@ class Bitmap:
         self.width = len(mat[0])
     
     def __str__(self):
-        return f"Bitmap({self.mat})"
+        return f"Bitmap({self.pts()})"
     
     def __hash__(self):
-        return hash(str(self))
-        # return hash(tuple(tuple(row) for row in self.mat))
+        # return hash(str(self))
+        return hash(tuple(tuple(row) for row in self.mat))
 
     def __eq__(self, other):
         return isinstance(other, Bitmap) and \
             self.height == other.height and \
             self.width == other.width and \
             self.mat == other.mat
+
+    def pts(self):
+        return [(x,y) 
+                for x in range(self.width)
+                for y in range(self.height)
+                if self.mat[y][x]]
 
     def pretty_print(self):
         img = bool_matrix_to_img(self.mat)

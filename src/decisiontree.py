@@ -4,8 +4,6 @@ from bottom_up import *
 from math import log
 import time
 
-global_bound = 10               # FIXME
-
 def covered(cover, n_pts):
     """
     Check whether, for each input-output example `pt`, there is a term covering `pt`
@@ -20,7 +18,7 @@ def dt_works(dt, pts):
     if dt is None: return False
     return all(dt.eval(x) == y for (x,y) in pts)
 
-def dcsolve(ops, consts, pts):
+def dcsolve(ops, consts, pts, bound):
     """
     ops: list of classes, such as [Times, Not, ...]. Note that `If` does not have to be here, because the decision tree learner inserts such exprs
     consts: list of possible leaves in syntax tree, such as [Number(1)]. Variables can also be leaves, but these are automatically inferred from `pts`
@@ -40,8 +38,8 @@ def dcsolve(ops, consts, pts):
     return_type = type(y).__name__
 
     # generators
-    pred_gen = distinct_pred_gen(global_bound, ops, consts, pts, preds)
-    term_gen = distinct_term_gen(global_bound, ops, consts, pts, terms, cover, return_type)
+    pred_gen = distinct_pred_gen(bound, ops, consts, pts, preds)
+    term_gen = distinct_term_gen(bound, ops, consts, pts, terms, cover, return_type)
 
     # Term solver
     while not covered(cover, n_pts):
@@ -59,17 +57,17 @@ def dcsolve(ops, consts, pts):
     # dt should work now
     return dt
 
-def distinct_pred_gen(global_bound, ops, consts, pts, preds):
+def distinct_pred_gen(bound, ops, consts, pts, preds):
     """Generates the next distinct predicate"""
-    gen = bottom_up_generator(global_bound, ops, consts, pts)
+    gen = bottom_up_generator(bound, ops, consts, pts)
     for t in gen:
         if t.return_type == "bool": # and outs not in seen:
             outs = tuple(t.eval(x) for (x,_) in pts)
             yield (t, outs)
 
-def distinct_term_gen(global_bound, ops, consts, pts, terms, cover, return_type):
+def distinct_term_gen(bound, ops, consts, pts, terms, cover, return_type):
     """Generates the next distinct term"""
-    gen = bottom_up_generator(global_bound, ops, consts, pts)
+    gen = bottom_up_generator(bound, ops, consts, pts)
     seen = set(cover[s] for s in terms)
     for t in gen:
         cover[t] = tuple(t.eval(x) == y for (x,y) in pts)
@@ -148,20 +146,22 @@ def learn_decision_tree(cover, terms, predicates, examples_we_care_about):
     return If(predicate, lhs, rhs)
     
 def test_dcsolve():
-    operators = [Plus,Minus,Times,Point,Rect]
-    terminals = [Num(i) for i in range(Z_HI+1)]
+    operators = [Point,Rect,Program]# ,Plus,Times,Minus,Not,Lt,And]
+    terminals = [FALSE()] + [Num(i) for i in range(Z_HI+1)]
 
     # collection of input-output specifications
     test_cases = [
-        [({}, 1)],
-        [({}, 10)],
-        [({"z_n": [1]*Z_SIZE}, Point(1,1)),
-         ({"z_n": [2]*Z_SIZE}, Point(2,2))],
-        [({}, Point(1,1)),
-         ({}, Point(2,2))],
-        [({}, Rect(Point(1,1), 
-                   Point(5,6)))],
-
+        [({}, Num(1))],
+        [({"z_n": [1]*Z_SIZE}, Point(Num(1), Num(1))),
+         ({"z_n": [2]*Z_SIZE}, Point(Num(2),Num(2)))],
+        # [({}, Point(Num(1), Num(1))),
+        #  ({}, Point(Num(2), Num(2)))],
+        [({}, Rect(Point(Num(1), Num(1)), 
+                   Point(Num(5), Num(6))))],
+        [({}, Program(Rect(Point(Num(0), Num(1)), 
+                           Point(Num(3), Num(4))),
+                      Rect(Point(Num(5), Num(6)), 
+                           Point(Num(7), Num(7)))))],
         # [({"z_n": list(range(Z_SIZE))}, Rect(Point(1,1), 
         #                                      Point(5,6)))],
         # [({"z_n": [100+x for x in range(Z_SIZE)]}, 
@@ -169,12 +169,14 @@ def test_dcsolve():
     ]
 
     for test_case in test_cases:
+        exs = [(x, p.eval(x)) for x, p in test_case]
         start_time = time.time()
         print(f"Testing case: {test_case}")
-        expr = dcsolve(operators, terminals, test_case)
+        expr = dcsolve(operators, terminals, exs, bound=15)
         print(f"synthesized program:\t {expr.pretty_print()} in {time.time() - start_time} seconds")
-        for xs, y in test_case:
-            assert expr.eval(xs) == y, f"synthesized program {expr.pretty_print()} does not satisfy the following test case: {xs} --> {y}"
+        for xs, y in exs:
+            assert expr.eval(xs) == y, \
+                f"synthesized program {expr.pretty_print()} does not satisfy the following test case: {xs} --> {y}"
             print(f"passes test case {xs} --> {y}")
         print()
     print(" [+] dcsolver passes tests")

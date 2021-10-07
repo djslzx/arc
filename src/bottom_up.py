@@ -5,7 +5,7 @@ import util
 from pprint import pp
 from grammar import *
 
-VERBOSE = False
+VERBOSE = True
 
 def gen_zb():
     return [bool(random.randint(0,1)) for _ in range(Z_SIZE)]
@@ -109,15 +109,14 @@ def integer_partitions(target_value, number_of_arguments):
 
 def test_bottom_up():
     operators = [Program, Rect, Point]
-    terminals = [# Num(i) for i in range(max(IMG_WIDTH, IMG_HEIGHT))
-                 ]
+    terminals = [Num(i) for i in range(max(IMG_WIDTH, IMG_HEIGHT))]
 
     # collection of input-output specifications
     test_cases = [
-        # [({}, 1)],
-        # [({}, Point(Num(1), Num(1)).eval({}))],
-        # [({}, Rect(Point(Num(1), Num(1)), 
-        #            Point(Num(5), Num(6))).eval({}))],
+        [({}, 1)],
+        [({}, Point(Num(1), Num(1)).eval({}))],
+        [({}, Rect(Point(Num(1), Num(1)), 
+                   Point(Num(5), Num(6))).eval({}))],
         [({"z_n": [3, 3, 5, 5, 0, 0]}, 
           Rect(Point(Num(3), Num(3)), 
                Point(Num(5), Num(5))).eval({}))],
@@ -142,8 +141,6 @@ def test_bottom_up():
                        Point(Num(2), Num(2))),
                   Rect(Point(Num(5), Num(5)), 
                        Point(Num(5), Num(5)))).eval({})),],
-        # [({"z_n": list(range(Z_SIZE))}, 
-        #   Rect(Point(1,1), Point(5,6)))],
         # [({"z_n": [100+x for x in range(Z_SIZE)]}, 
         #   ((100,100), (105,106)))],
     ]
