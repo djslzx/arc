@@ -85,8 +85,13 @@ class Bitmap:
     def __str__(self):
         return f"Bitmap({self.mat})"
     
+    def __hash__(self):
+        return hash(str(self))
+        # return hash(tuple(tuple(row) for row in self.mat))
+
     def __eq__(self, other):
-        return self.height == other.height and \
+        return isinstance(other, Bitmap) and \
+            self.height == other.height and \
             self.width == other.width and \
             self.mat == other.mat
 
@@ -94,25 +99,22 @@ class Bitmap:
         img = bool_matrix_to_img(self.mat)
         return "\n".join(img)
 
-    def AND(self, other):
+    def apply(self, other, op):
+        assert isinstance(other, Bitmap), f"other ({other}) is of type {type(other)}, not Bitmap"
         assert self.height == other.height and self.width == other.width, \
-            "Cannot 'and' bitmaps of different sizes "\
-            f"({self.width} x {self.height} and"\
-            f" {other.width} x {other.height})"
+            f"Cannot operate on bitmaps of different sizes " \
+            f"({self.width} x {self.height} and" \
+            f" {other.width} x {other.height})"        
         return Bitmap(
-            [[self.mat[y][x] and other.mat[y][x]
+            [[op(self.mat[y][x], other.mat[y][x])
               for x in range(self.width)]
              for y in range(self.height)])
 
+    def AND(self, other):
+        return self.apply(other, lambda x,y: x and y)
+
     def OR(self, other):
-        assert self.height == other.height and self.width == other.width, \
-            "Cannot 'or' bitmaps of different sizes "\
-            f"({self.width} x {self.height} and"\
-            f" {other.width} x {other.height})"
-        return Bitmap(
-            [[self.mat[y][x] or other.mat[y][x]
-              for x in range(self.width)]
-             for y in range(self.height)])
+        return self.apply(other, lambda x,y: x or y)
 
 def test_bitmap_or():
     tests = [

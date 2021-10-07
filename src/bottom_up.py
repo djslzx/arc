@@ -1,6 +1,8 @@
 import itertools
 import time
 import random
+import util
+from pprint import pp
 from grammar import *
 
 VERBOSE = False
@@ -83,10 +85,12 @@ def bottom_up_generator(global_bound, operators, constants, exs):
             assert n_inputs != 0, "operators shouldn't be terminals"
             for partition in integer_partitions(size - 1 - n_inputs, n_inputs):
                 for args in itertools.product(*(trees.get((t, s+1), []) 
-                                                for t, s in zip(in_types, partition))):
+                                              for t, s in zip(in_types, partition))):
                     tree = op(*args)
+                    # print(tree)
                     yield tree
                     add_tree((op.return_type, size), tree)
+        # print(f"keys: {keys}")
         if VERBOSE: print(f"|trees| = {sum(len(l) for l in trees.values())}")
 
 def integer_partitions(target_value, number_of_arguments):
@@ -104,24 +108,50 @@ def integer_partitions(target_value, number_of_arguments):
              for x2s in integer_partitions(target_value - x1, number_of_arguments - 1) ]
 
 def test_bottom_up():
-    operators = [Plus,Minus,Times,Lt,And,Not,If,Point,Rect]
-    terminals = [FALSE()] + [Num(i) for i in range(Z_LO, Z_HI+1)]
+    operators = [Program, Rect, Point]
+    terminals = [# Num(i) for i in range(max(IMG_WIDTH, IMG_HEIGHT))
+                 ]
 
     # collection of input-output specifications
     test_cases = [
-        [({}, 1)],
-        [({}, Point(1,1))],
-        [({}, Rect(Point(1,1), Point(5,6)))],
-        [({"z_n": list(range(Z_SIZE))}, 
-          Rect(Point(1,1), Point(5,6)))],
+        # [({}, 1)],
+        # [({}, Point(Num(1), Num(1)).eval({}))],
+        # [({}, Rect(Point(Num(1), Num(1)), 
+        #            Point(Num(5), Num(6))).eval({}))],
+        [({"z_n": [3, 3, 5, 5, 0, 0]}, 
+          Rect(Point(Num(3), Num(3)), 
+               Point(Num(5), Num(5))).eval({}))],
+        [({"z_n": [0, 1, 2, 3, 4, 5]}, 
+          Program(Rect(Point(Num(1), Num(1)), 
+                       Point(Num(2), Num(2))),
+                  Rect(Point(Num(4), Num(4)), 
+                       Point(Num(5), Num(5)))).eval({})),
+         # ({"z_n": [1, 2, 3, 4, 5, 6]}, 
+         #  Program(Rect(Point(Num(2), Num(2)), 
+         #               Point(Num(3), Num(3))),
+         #          Rect(Point(Num(5), Num(5)), 
+         #               Point(Num(6), Num(6)))).eval({}))
+         ],
+        [({"z_n": [0, 0, 1, 2, 4, 5]}, 
+          Program(Rect(Point(Num(1), Num(1)), 
+                       Point(Num(2), Num(2))),
+                  Rect(Point(Num(4), Num(4)), 
+                       Point(Num(5), Num(5)))).eval({})),
+         ({"z_n": [0, 0, 2, 2, 5, 5]}, 
+          Program(Rect(Point(Num(2), Num(2)), 
+                       Point(Num(2), Num(2))),
+                  Rect(Point(Num(5), Num(5)), 
+                       Point(Num(5), Num(5)))).eval({})),],
+        # [({"z_n": list(range(Z_SIZE))}, 
+        #   Rect(Point(1,1), Point(5,6)))],
         # [({"z_n": [100+x for x in range(Z_SIZE)]}, 
         #   ((100,100), (105,106)))],
     ]
-
-    bound = 10
+    bound = 17
     for test_case in test_cases:
-        out = bottom_up(bound, operators, terminals, test_case)
-        print(out)
+        start_time = time.time()
+        expr = bottom_up(bound, operators, terminals, test_case)
+        print(f"synthesized program:\t {expr.pretty_print() if expr is not None else 'None'} in {time.time() - start_time} seconds")
 
     # print(" [+] bottom-up synthesis passes tests")
 

@@ -8,7 +8,7 @@ IMG_HEIGHT=8
 # constants for z_n, z_b
 Z_LO = -8                       # min poss value in z_n
 Z_HI = 8                        # max poss value in z_n
-Z_SIZE = 16                     # length of z_n, z_b 
+Z_SIZE = 6                      # length of z_n, z_b 
 
 class Expr():
     def eval(self, environment):
@@ -29,8 +29,8 @@ class Expr():
     def __lt__(self, other): return str(self) < str(other)
 
 class FALSE(Expr):
-    return_type = "bool"
     argument_types = []
+    return_type = "bool"
     
     def __init__(self): pass
 
@@ -44,8 +44,8 @@ class FALSE(Expr):
         return False
     
 class Zb(Expr):
-    return_type = "bool"
     argument_types = ["int"]
+    return_type = "bool"
     
     def __init__(self, i):
         self.i = i
@@ -62,8 +62,8 @@ class Zb(Expr):
         return env["z_b"][i]
 
 class Num(Expr):
-    return_type = "int"
     argument_types = []
+    return_type = "int"
     
     def __init__(self, n):
         self.n = n
@@ -79,8 +79,8 @@ class Num(Expr):
 
 class Zn(Expr):
     """z_n"""
-    return_type = "int"
     argument_types = ["int"]
+    return_type = "int"
     
     def __init__(self, i):
         self.i = i
@@ -98,8 +98,8 @@ class Zn(Expr):
         return env["z_n"][i]
 
 class Plus(Expr):
-    return_type = "int"
     argument_types = ["int","int"]
+    return_type = "int"
     
     def __init__(self, x, y):
         self.x, self.y = x, y
@@ -117,8 +117,8 @@ class Plus(Expr):
         return x + y
 
 class Minus(Expr):
-    return_type = "int"
     argument_types = ["int","int"]
+    return_type = "int"
     
     def __init__(self, x, y):
         self.x, self.y = x, y
@@ -136,8 +136,8 @@ class Minus(Expr):
         return x - y
 
 class Times(Expr):
-    return_type = "int"
     argument_types = ["int","int"]
+    return_type = "int"
     
     def __init__(self, x, y):
         self.x, self.y = x, y
@@ -155,8 +155,8 @@ class Times(Expr):
         return x * y
 
 class Lt(Expr):
-    return_type = "bool"
     argument_types = ["int","int"]
+    return_type = "bool"
     
     def __init__(self, x, y):
         self.x, self.y = x, y
@@ -174,8 +174,8 @@ class Lt(Expr):
         return x < y
 
 class And(Expr):
-    return_type = "bool"
     argument_types = ["bool","bool"]
+    return_type = "bool"
     
     def __init__(self, x, y):
         self.x, self.y = x, y
@@ -193,8 +193,8 @@ class And(Expr):
         return x and y
 
 class Not(Expr):
-    return_type = "bool"
     argument_types = ["bool"]
+    return_type = "bool"
     
     def __init__(self, x):
         self.x = x
@@ -211,8 +211,8 @@ class Not(Expr):
         return not x
 
 class If(Expr):
-    return_type = "int"
     argument_types = ["bool","int","int"]
+    return_type = "int"
     
     def __init__(self, test, yes, no):
         self.test, self.yes, self.no = test, yes, no
@@ -231,8 +231,8 @@ class If(Expr):
         return yes if test else no
 
 class Point(Expr):
-    return_type = "Point"
     argument_types = ["int", "int"]
+    return_type = "Point"
 
     def __init__(self, x, y):
         self.x = x
@@ -251,8 +251,8 @@ class Point(Expr):
         return Point(x, y)
 
 class Rect(Expr):
-    return_type = "Rect"
     argument_types = ["Point", "Point"]
+    return_type = "Bitmap"
     
     def __init__(self, p1, p2):
         # assert isinstance(p1, Point) and isinstance(p2, Point)
@@ -268,42 +268,29 @@ class Rect(Expr):
     def eval(self, env):
         p1 = self.p1.eval(env)
         p2 = self.p2.eval(env)
-        # assert isinstance(p1, tuple(int)) and isinstance(p2, tuple(int))
-        return Rect(p1, p2)
-
-    def render(self, env):
-        """
-        Render an expression as a bitmap
-        """
-        p1 = self.p1.eval(env)
-        p2 = self.p2.eval(env)
         return Bitmap([[p1.x <= x <= p2.x and p1.y <= y <= p2.y
                         for x in range(IMG_WIDTH)]
                        for y in range(IMG_HEIGHT)])
 
 class Program(Expr):
-    return_type = "Bitmap"        # boolean matrix
-    argument_types = ["Rect", "Program"]
+    argument_types = ["Bitmap", "Bitmap"]
+    return_type = "Bitmap"
     
-    def __init__(self, rect, prog=None):
-        assert isinstance(rect, Rect)
-        assert prog is None or isinstance(prog, Program)
-        self.rect = rect
-        self.prog = prog
+    def __init__(self, left, right):
+        self.left = left
+        self.right = right
         
     def __str__(self):
-        return f"Program({self.rect}, {self.prog})"
+        return f"Program({self.left}, {self.right})"
 
     def pretty_print(self):
-        return (f"{self.rect};"
-                f"{self.prog.pretty_print() if self.prog is not None else 'None'}")
+        return (f"{self.left.pretty_print()}; {self.right.pretty_print()}")
 
     def eval(self, env):
         # TODO: enforce invariant that rects don't overlap
-        m = self.rect.render(env)
-        return (m 
-                if self.prog is None
-                else m.OR(self.prog.eval(env)))
+        left = self.left.eval(env)
+        right = self.right.eval(env)
+        return left.OR(right)
 
 def test_eval():
     tests = [
@@ -322,10 +309,10 @@ def test_eval():
             Times(Zn(Num(0)), Zn(Num(1))), 
             Plus(Zn(Num(0)), Zn(Num(1)))), 
          lambda zb, zn: zn[0] * zn[1] if not (zn[0] < zn[1]) else zn[0] + zn[1]),
-        (Program(Rect(Point(Num(0),
-                            Num(0)), 
-                      Point(Num(1),
-                            Num(1)))),
+        (Rect(Point(Num(0),
+                    Num(0)), 
+              Point(Num(1),
+                    Num(1))),
          lambda zb, zn: Bitmap.from_img(["##______",
                                          "##______",
                                          "________",
@@ -338,10 +325,10 @@ def test_eval():
                             Num(0)), 
                       Point(Num(1),
                             Num(1))),
-                 Program(Rect(Point(Num(3),
-                                    Num(3)), 
-                              Point(Num(4),
-                                    Num(6))))),
+                 Rect(Point(Num(3),
+                            Num(3)), 
+                      Point(Num(4),
+                            Num(6)))),
          lambda zb, zn: Bitmap.from_img(["##______",
                                          "##______",
                                          "________",
@@ -365,7 +352,7 @@ def test_render():
     # (0,0), (1,1)
     expr = Rect(Point(Num(0),Num(0)), 
                 Point(Num(1),Num(1)))
-    out = expr.render({})
+    out = expr.eval({})
     expected = Bitmap.from_img(["##______",
                                 "##______",
                                 "________",
@@ -381,7 +368,7 @@ def test_render():
                       Num(0)), 
                 Point(Plus(Num(2), Num(1)), 
                       Num(3))) 
-    out = expr.render({'z_n': [1,2,3]})
+    out = expr.eval({'z_n': [1,2,3]})
     expected = Bitmap.from_img(["_###____",
                                 "_###____",
                                 "_###____",
