@@ -1,14 +1,13 @@
-import util
-from util import Bitmap
+from bmap import Bitmap
 
-# input dimensions
-IMG_WIDTH=8
-IMG_HEIGHT=8
+# bitmap size constants
+BMP_WIDTH=4
+BMP_HEIGHT=4
 
 # constants for z_n, z_b
-Z_LO = -8                       # min poss value in z_n
-Z_HI = 8                        # max poss value in z_n
-Z_SIZE = 6                      # length of z_n, z_b 
+Z_SIZE = 16                     # length of z_n, z_b 
+Z_LO = 0                        # min poss value in z_n
+Z_HI = Z_SIZE                   # max poss value in z_n
 
 class Expr():
     def eval(self, environment):
@@ -211,8 +210,8 @@ class Not(Expr):
         return not x
 
 class If(Expr):
-    argument_types = ["bool","int","int"]
-    return_type = "int"
+    argument_types = ["bool","Bitmap","Bitmap"]
+    return_type = "Bitmap"
     
     def __init__(self, test, yes, no):
         self.test, self.yes, self.no = test, yes, no
@@ -247,10 +246,25 @@ class Point(Expr):
     def eval(self, env):
         x = self.x.eval(env)
         y = self.y.eval(env)
-        assert isinstance(x, int) and isinstance(y, int)
+        assert isinstance(x, int) and isinstance(y, int) and \
+            0 <= x <= BMP_WIDTH and 0 <= y <= BMP_HEIGHT
         return Point(x, y)
 
 class Rect(Expr):
+    """
+    A rectangle Rect(Point(a,b), Point(c,d)) generates a bitmap st points (x,y) are set to 1, 
+    where
+      a <= x < c, b <= y < d.
+
+    E.g. A 1x1 rectangle at the origin is Rect(Point(0,0), Point(1,1))
+
+    Invariants:
+    - Rectangles may not be empty
+    - Rectangles must stay in the bitmap (W x H)
+    - The first point should be the bottom left corner and the second point should be the top right corner.
+    - So, for Rect(a,b,c,d), 0 <= a < c <= W and 0 <= b < d <= H
+    """
+
     argument_types = ["Point", "Point"]
     return_type = "Bitmap"
     
@@ -268,9 +282,11 @@ class Rect(Expr):
     def eval(self, env):
         p1 = self.p1.eval(env)
         p2 = self.p2.eval(env)
-        return Bitmap([[p1.x <= x <= p2.x and p1.y <= y <= p2.y
-                        for x in range(IMG_WIDTH)]
-                       for y in range(IMG_HEIGHT)])
+        # check invariants
+        assert 0 <= p1.x < p2.x <= BMP_WIDTH and 0 <= p1.y < p2.y <= BMP_HEIGHT
+        return Bitmap([[p1.x <= x < p2.x and p1.y <= y < p2.y
+                        for x in range(BMP_WIDTH)]
+                       for y in range(BMP_HEIGHT)])
 
 class Program(Expr):
     argument_types = ["Bitmap", "Bitmap"]
@@ -287,7 +303,6 @@ class Program(Expr):
         return (f"{self.left.pretty_print()}; {self.right.pretty_print()}")
 
     def eval(self, env):
-        # TODO: enforce invariant that rects don't overlap
         left = self.left.eval(env)
         right = self.right.eval(env)
         return left.OR(right)
@@ -312,31 +327,23 @@ def test_eval():
         (Rect(Point(Num(0),
                     Num(0)), 
               Point(Num(1),
-                    Num(1))),
-         lambda zb, zn: Bitmap.from_img(["##______",
-                                         "##______",
-                                         "________",
-                                         "________",
-                                         "________",
-                                         "________",
-                                         "________",
-                                         "________",])),
+                    Num(2))),
+         lambda zb, zn: Bitmap.from_img(["#___",
+                                         "#___",
+                                         "____",
+                                         "____",])),
         (Program(Rect(Point(Num(0),
                             Num(0)), 
                       Point(Num(1),
                             Num(1))),
-                 Rect(Point(Num(3),
+                 Rect(Point(Num(2),
                             Num(3)), 
                       Point(Num(4),
-                            Num(6)))),
-         lambda zb, zn: Bitmap.from_img(["##______",
-                                         "##______",
-                                         "________",
-                                         "___##___",
-                                         "___##___",
-                                         "___##___",
-                                         "___##___",
-                                         "________",]))
+                            Num(4)))),
+         lambda zb, zn: Bitmap.from_img(["#___",
+                                         "____",
+                                         "____",
+                                         "__##"]))
     ]
     for expr, correct_semantics in tests:
         for x in range(10):
@@ -353,30 +360,20 @@ def test_render():
     expr = Rect(Point(Num(0),Num(0)), 
                 Point(Num(1),Num(1)))
     out = expr.eval({})
-    expected = Bitmap.from_img(["##______",
-                                "##______",
-                                "________",
-                                "________",
-                                "________",
-                                "________",
-                                "________",
-                                "________"])
+    expected = Bitmap.from_img(["#___",
+                                "____",
+                                "____",
+                                "____"])
     assert expected == out, f"test_render failed:\n expected={expected},\n out={out}"
 
     # (1,0), (3,3)
-    expr = Rect(Point(Zn(Num(0)), 
-                      Num(0)), 
-                Point(Plus(Num(2), Num(1)), 
-                      Num(3))) 
+    expr = Rect(Point(Zn(Num(0)), Num(0)), 
+                Point(Plus(Num(2), Num(1)), Num(3))) 
     out = expr.eval({'z_n': [1,2,3]})
-    expected = Bitmap.from_img(["_###____",
-                                "_###____",
-                                "_###____",
-                                "_###____",
-                                "________",
-                                "________",
-                                "________",
-                                "________"])
+    expected = Bitmap.from_img(["_##_",
+                                "_##_",
+                                "_##_",
+                                "____"])
     assert expected == out, f"test_render failed:\n expected={expected},\n out={out}"
     print(" [+] passed test_render")
 

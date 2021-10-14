@@ -1,5 +1,3 @@
-# Utility fns
-
 def img_to_bool_matrix(lines):
     """Converts an 'image' (a list of strings) into a row-major boolean matrix"""
     return [[c == "#" for c in line] 
@@ -8,6 +6,65 @@ def img_to_bool_matrix(lines):
 def bool_matrix_to_img(mat):
     return ["".join(["#" if cell else "_" for cell in row])
             for row in mat]
+
+class Bitmap:
+    """
+    A boolean 2D matrix
+    """
+    @staticmethod
+    def from_img(s):
+        return Bitmap(img_to_bool_matrix(s))
+
+    def __init__(self, mat):
+        self.mat = mat
+        self.height = len(mat)
+        self.width = len(mat[0])
+    
+    def __str__(self):
+        return f"Bitmap({self.as_pts()})"
+    
+    def __hash__(self):
+        # return hash(str(self))
+        return hash(tuple(tuple(row) for row in self.mat))
+
+    def __eq__(self, other):
+        return isinstance(other, Bitmap) and \
+            self.height == other.height and \
+            self.width == other.width and \
+            self.mat == other.mat
+
+    def as_pts(self):
+        return [(x,y) 
+                for x in range(self.width)
+                for y in range(self.height)
+                if self.mat[y][x]]
+
+    def pretty_print(self):
+        return "\n".join(bool_matrix_to_img(self.mat))
+
+    def apply(self, op, other):
+        assert isinstance(self, Bitmap) and isinstance(other, Bitmap)
+        assert self.height == other.height and self.width == other.width
+        return Bitmap(
+            [[op(self.mat[y][x], other.mat[y][x])
+              for x in range(self.width)]
+             for y in range(self.height)])
+
+    def AND(self, other):
+        return self.apply(lambda x,y: x and y, other)
+
+    def OR(self, other):
+        return self.apply(lambda x,y: x or y, other)
+    
+    def dist(self, other):
+        """
+        Distance between two Bitmaps 
+        sum of squared errors -> sum of errors (0/1-valued errors)
+        """
+        assert self.width == other.width and self.height == other.height
+        return sum(self.mat[y][x] != other.mat[y][x]
+                   for x in range(self.width) 
+                   for y in range(self.height))
 
 def test_img_to_bool_matrix():
     s = ["________",
@@ -68,59 +125,6 @@ def test_bool_matrix_to_img():
     out = bool_matrix_to_img(b)
     assert out == s, f"test_bool_matrix_to_img failed: expected={s}, out={out}"
     print(" [+] passed test_bool_matrix_to_img")
-
-class Bitmap:
-    """
-    A boolean matrix
-    """
-    @staticmethod
-    def from_img(s):
-        return Bitmap(img_to_bool_matrix(s))
-
-    def __init__(self, mat):
-        self.mat = mat
-        self.height = len(mat)
-        self.width = len(mat[0])
-    
-    def __str__(self):
-        return f"Bitmap({self.pts()})"
-    
-    def __hash__(self):
-        # return hash(str(self))
-        return hash(tuple(tuple(row) for row in self.mat))
-
-    def __eq__(self, other):
-        return isinstance(other, Bitmap) and \
-            self.height == other.height and \
-            self.width == other.width and \
-            self.mat == other.mat
-
-    def pts(self):
-        return [(x,y) 
-                for x in range(self.width)
-                for y in range(self.height)
-                if self.mat[y][x]]
-
-    def pretty_print(self):
-        img = bool_matrix_to_img(self.mat)
-        return "\n".join(img)
-
-    def apply(self, other, op):
-        assert isinstance(other, Bitmap), f"other ({other}) is of type {type(other)}, not Bitmap"
-        assert self.height == other.height and self.width == other.width, \
-            f"Cannot operate on bitmaps of different sizes " \
-            f"({self.width} x {self.height} and" \
-            f" {other.width} x {other.height})"        
-        return Bitmap(
-            [[op(self.mat[y][x], other.mat[y][x])
-              for x in range(self.width)]
-             for y in range(self.height)])
-
-    def AND(self, other):
-        return self.apply(other, lambda x,y: x and y)
-
-    def OR(self, other):
-        return self.apply(other, lambda x,y: x or y)
 
 def test_bitmap_or():
     tests = [
