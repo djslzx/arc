@@ -5,9 +5,9 @@ BMP_WIDTH=4
 BMP_HEIGHT=4
 
 # constants for z_n, z_b
-Z_SIZE = 16                     # length of z_n, z_b 
-Z_LO = 0                        # min poss value in z_n
-Z_HI = Z_SIZE                   # max poss value in z_n
+Z_SIZE = 6                        # length of z_n, z_b 
+Z_LO = 0                          # min poss value in z_n
+Z_HI = max(BMP_WIDTH, BMP_HEIGHT) # max poss value in z_n
 
 class Expr():
     def eval(self, environment):
@@ -53,7 +53,10 @@ class Zb(Expr):
         return f"Zb('{self.i}')"
 
     def pretty_print(self):
-        return f"z_b[{self.i}]"
+        try:
+            return f"z_b[{self.i.pretty_print()}]"
+        except AttributeError:
+            return f"z_b[{self.i}]"
 
     def eval(self, env):
         i = self.i.eval(env)
@@ -88,7 +91,10 @@ class Zn(Expr):
         return f"Zn('{self.i}')"
 
     def pretty_print(self):
-        return f"z_n[{self.i}]"
+        try:
+            return f"z_n[{self.i.pretty_print()}]"
+        except AttributeError:
+            return f"z_n[{self.i}]"
 
     def eval(self, env):
         i = self.i.eval(env)
@@ -226,7 +232,8 @@ class If(Expr):
         test = self.test.eval(env)
         yes = self.yes.eval(env)
         no = self.no.eval(env)
-        assert isinstance(test, bool) and isinstance(yes, int) and isinstance(no, int)
+        assert isinstance(test, bool) and isinstance(yes, Bitmap) and isinstance(no, Bitmap), \
+            f"If type mismatch: t(test)={type(test)}, t(yes)={type(yes)}, t(no)={type(no)}"
         return yes if test else no
 
 class Point(Expr):
@@ -241,13 +248,17 @@ class Point(Expr):
         return f"Point({self.x}, {self.y})"
 
     def pretty_print(self):
-        return f"({self.x.pretty_print()}, {self.y.pretty_print()})"
+        try:
+            return f"({self.x.pretty_print()}, {self.y.pretty_print()})"
+        except AttributeError:
+            return f"({self.x}, {self.y})"
 
     def eval(self, env):
         x = self.x.eval(env)
         y = self.y.eval(env)
-        assert isinstance(x, int) and isinstance(y, int) and \
-            0 <= x <= BMP_WIDTH and 0 <= y <= BMP_HEIGHT
+        # assert isinstance(x, int) and isinstance(y, int) and \
+        #     0 <= x <= BMP_WIDTH and 0 <= y <= BMP_HEIGHT, \
+        #     f"Point out of range: p=({x}, {y})"
         return Point(x, y)
 
 class Rect(Expr):
@@ -283,7 +294,8 @@ class Rect(Expr):
         p1 = self.p1.eval(env)
         p2 = self.p2.eval(env)
         # check invariants
-        assert 0 <= p1.x < p2.x <= BMP_WIDTH and 0 <= p1.y < p2.y <= BMP_HEIGHT
+        # if 0 <= p1.x < p2.x <= BMP_WIDTH and 0 <= p1.y < p2.y <= BMP_HEIGHT
+        #     f"Rect points out of range: p1={p1.pretty_print()}, p2={p2.pretty_print()}"
         return Bitmap([[p1.x <= x < p2.x and p1.y <= y < p2.y
                         for x in range(BMP_WIDTH)]
                        for y in range(BMP_HEIGHT)])
