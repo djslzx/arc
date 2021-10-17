@@ -50,7 +50,8 @@ def bottom_up_generator(global_bound, operators, constants, exs):
 
     # generate z_i = z_i_b, z_i_n for each x_i and add to env
     add_zs(exs)
-    print(f"envs: {[env for env, _ in exs]}")
+    # print("envs:")
+    # pp([env for env, _ in exs])
 
     # variables: use z_b[0] .. z_b[n-1] and z_n[0] .. z_n[n-1]
     zb = [Zb(Num(i)) for i in range(Z_SIZE)]
@@ -61,12 +62,16 @@ def bottom_up_generator(global_bound, operators, constants, exs):
     trees = dict() # mapping (type, size) => all values that can be computed of type using an expression of size
     seen = set() # Store seen outputs (observational equivalence filtering)
 
-    def w_type(x):
+    def pad(x):
         return (x, type(x))
 
     def add_tree(key, tree):
-        """Add a tree to trees[k] if not observationally equivalent to a pre-existing program"""
-        out = tuple(w_type(tree.eval(x)) for x, _ in exs)
+        """
+        Add a tree to trees[k] if not observationally equivalent to a pre-existing program.
+
+        Use `pad` to store (output, type) pairs to address an issue with how Python thinks True == 1
+        """
+        out = tuple(pad(tree.eval(x)) for x, _ in exs)
         if out not in seen:
             if key not in trees: 
                 trees[key] = [tree]
@@ -117,12 +122,22 @@ def integer_partitions(target_value, number_of_arguments):
 
 def test_bottom_up():
     operators = [Program, Rect, Point, Plus, Minus, Times, If, And, Not]
-    terminals = [FALSE()] # [Num(i) for i in range(max(BMP_WIDTH, BMP_HEIGHT))]
+    terminals = [] # [Num(i) for i in range(max(BMP_WIDTH, BMP_HEIGHT))]
 
     # collection of input-output specifications
     test_cases = [
-        # [({}, 1)],
+        [({}, 1)],
         [({}, Point(Num(1), Num(1)).eval({}))],
+        [
+            ({"z_n": [0, 0, 0, 0, 0, 1]}, Point(Num(1), Num(1)).eval({})),
+            ({"z_n": [0, 0, 0, 0, 0, 2]}, Point(Num(2), Num(2)).eval({})),
+            ({"z_n": [0, 0, 0, 0, 0, 3]}, Point(Num(3), Num(3)).eval({})),
+        ],
+        [
+            ({}, Point(Num(1), Num(1)).eval({})),
+            ({}, Point(Num(2), Num(2)).eval({})),
+            ({}, Point(Num(3), Num(3)).eval({})),
+        ],
         [({"z_n": [0, 0, 0, 0, 0, 1]}, Point(Num(1), Num(1)).eval({}))],
         [({}, Rect(Point(Num(1), Num(1)), 
                    Point(Num(3), Num(4))).eval({}))],
@@ -140,6 +155,7 @@ def test_bottom_up():
                   Rect(Point(Num(3), Num(3)), 
                        Point(Num(4), Num(4)))).eval({}))
          ],
+        # Rect(z_n[2], z_n[2], z_n[3], z_n[3]), Rect(z_n[4], z_n[4], z_n[5], z_n[5])
         [({"z_n": [0, 0, 1, 2, 3, 4]}, 
           Program(Rect(Point(Num(1), Num(1)), 
                        Point(Num(2), Num(2))),

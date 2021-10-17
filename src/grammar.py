@@ -27,6 +27,9 @@ class Expr():
 
     def __lt__(self, other): return str(self) < str(other)
 
+    def satisfies_invariants(self, env):
+        return True
+
 class FALSE(Expr):
     argument_types = []
     return_type = "bool"
@@ -253,12 +256,15 @@ class Point(Expr):
         except AttributeError:
             return f"({self.x}, {self.y})"
 
+    def satisfies_invariants(self, env):
+        x = self.x.eval(env)
+        y = self.y.eval(env)
+        return 0 <= x <= BMP_WIDTH and 0 <= y <= BMP_HEIGHT
+
     def eval(self, env):
         x = self.x.eval(env)
         y = self.y.eval(env)
-        # assert isinstance(x, int) and isinstance(y, int) and \
-        #     0 <= x <= BMP_WIDTH and 0 <= y <= BMP_HEIGHT, \
-        #     f"Point out of range: p=({x}, {y})"
+        assert isinstance(x, int) and isinstance(y, int)
         return Point(x, y)
 
 class Rect(Expr):
@@ -290,12 +296,14 @@ class Rect(Expr):
     def pretty_print(self):
         return f"({self.p1.pretty_print()}, {self.p2.pretty_print()})"
 
+    def satisfies_invariants(self, env):
+        p1 = self.p1.eval(env)
+        p2 = self.p2.eval(env)
+        return 0 <= p1.x < p2.x <= BMP_WIDTH and 0 <= p1.y < p2.y <= BMP_HEIGHT
+
     def eval(self, env):
         p1 = self.p1.eval(env)
         p2 = self.p2.eval(env)
-        # check invariants
-        # if 0 <= p1.x < p2.x <= BMP_WIDTH and 0 <= p1.y < p2.y <= BMP_HEIGHT
-        #     f"Rect points out of range: p1={p1.pretty_print()}, p2={p2.pretty_print()}"
         return Bitmap([[p1.x <= x < p2.x and p1.y <= y < p2.y
                         for x in range(BMP_WIDTH)]
                        for y in range(BMP_HEIGHT)])

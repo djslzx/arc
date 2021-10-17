@@ -1,6 +1,14 @@
 # arc
 
 ## Sanity check
+### TODO
+- [X] enforce invariants about rectangles 
+  - can't enforce with `assert`s in generation stage as this will halt the program, but this needs to be addressed before reaching the learning stage, or we'll end up with invalid candidate solutions
+  - enforced via `satisfies_invariants` fn
+- [ ] swap between optimizing `f` and optimizing `z`
+- [ ] think about witness functions
+- [ ] think about probabilistic programs
+
 ### Grammar
 Given `z = (z_b, z_n)`, a tuple of random vectors over booleans and integers;
 
@@ -60,3 +68,4 @@ False == 0
 ```
 
 This means that generated programs will conflate `False` and `0`. (We don't need to worry about `True` because we don't have a `True` literal.)
+
