@@ -21,14 +21,14 @@ def added_env(env, zn, zb):
     s["z_b"] = zb
     return s
 
-def learn(ops, consts, exs, rounds, bound, iters):
+def learn(ops, consts, exs, rounds, bound, samples):
     """
     Jointly optimize f and Z wrt multiple examples {(s_i,x_i)}_i,
     where each s_i is an environment and each x_i is a bitmap
 
     rounds: max number of `rounds` to run, where one round optimizes f, then z
     bound: max size of f (bottom-up enumeration bound)
-    iters: max number of iterations to run when optimizing z
+    samples: max number of samples to take when optimizing z
     """
     def update_envs(exs, zs):
         """
@@ -48,14 +48,14 @@ def learn(ops, consts, exs, rounds, bound, iters):
         print("\nOptimizing f...")
         f, d = opt_f(ops, consts, exs, bound)
         zs = [(env['z_n'], env['z_b']) for env,_ in exs]
-        print(f"d: {d}\nf: {f.pretty_print()}\nZ: {zs}")
+        print(f"\nd: {d}\nf: {f.pretty_print()}\nZ: {zs}")
         if d == 0:
             return f, zs
 
         # optimize z
         print("\nOptimizing z...")
-        zs, d = opt_zs(f, exs, iters)
-        print(f"d: {d}\nZ: {zs}")
+        zs, d = opt_zs(f, exs, samples)
+        print(f"\nd: {d}\nZ: {zs}")
         update_envs(exs, zs)
         if d == 0:
             return f, zs
@@ -95,17 +95,17 @@ v    exs: a list of examples (s_i, x_i) where s_i is an environment and x_i is a
                     best_d, best_f = d, f
     return best_f, best_d
 
-def opt_z(f, ex, iters, z0=None):
+def opt_z(f, ex, samples, z0=None):
     """
     Optimize z wrt a single example: find z* = min_z d(f(s, z), x)
 
     ex: an example (s,x) where s is an environment (including 'zn', 'zb') and x is a bitmap
-    iters: max iters to randomly generate z
+    samples: max samples to randomly generate z
     """
     env, ans = ex
     best_z = z0
     best_d = None if z0 is None else f.eval(added_env(env, *z0)).dist(ans)
-    for _ in range(iters):
+    for _ in range(samples):
         zn, zb = gen_zn(), gen_zb()
         s = added_env(env, zn, zb)
         if f.satisfies_invariants(s):
@@ -116,63 +116,93 @@ def opt_z(f, ex, iters, z0=None):
                 best_z, best_d = (zn, zb), d
     return best_z, best_d
 
-def opt_zs(f, exs, iters, zs0=None):
+def opt_z_exhaustive(f, ex, z0=None):
+    env, ans = ex
+    best_z = z0
+    best_d = None if z0 is None else f.eval(added_env(env, *z0)).dist(ans)
+    pass
+    # for zn in 
+
+    # for _ in range(samples):
+    #     zn, zb = gen_zn(), gen_zb()
+    #     s = added_env(env, zn, zb)
+    #     if f.satisfies_invariants(s):
+    #         d = f.eval(s).dist(ans)
+    #         if d == 0:
+    #             return (zn, zb), 0
+    #         elif best_z is None or d < best_d:
+    #             best_z, best_d = (zn, zb), d
+    # return best_z, best_d
+
+def opt_zs(f, exs, samples, zs0=None):
     """
     Optimize zs for multiple examples
     """
     zs_and_ds = \
-        [opt_z(f, ex, iters) for ex in exs] \
+        [opt_z(f, ex, samples) for ex in exs] \
         if zs0 is None \
-        else [opt_z(f, ex, iters, z0) for ex, z0 in zip(exs, zs0)]
-    print(f"zs and ds: {zs_and_ds}")
+        else [opt_z(f, ex, samples, z0) for ex, z0 in zip(exs, zs0)]
     zs = [z for z,_ in zs_and_ds]
     d = sum(d for _,d in zs_and_ds)
     return zs, d
             
 def test_learn():
-    ops = [Point, Rect, Program, Plus, Minus, Times, ] # If, Not, And, ]
+    ops = [Point, Rect, Program, Plus, ] # Minus, Times, ] # If, Not, And, ]
     consts = []
 
     test_cases = [
-        # [
-        #     ({}, Rect(Point(Num(0), Num(0)), Point(Num(1), Num(1)))),
-        # ],
+        [
+            ({}, Rect(Point(Num(0), Num(0)), Point(Num(1), Num(1)))),
+        ],
+        # R(z1, z1, z2, z2)
         [
             ({}, Rect(Point(Num(0), Num(0)), Point(Num(1), Num(1)))),
             ({}, Rect(Point(Num(1), Num(1)), Point(Num(2), Num(2)))),
         ],
-        # [
-        #     ({}, Rect(Point(Num(0), Num(0)), Point(Num(1), Num(1)))),
-        #     ({}, Rect(Point(Num(1), Num(1)), Point(Num(2), Num(2)))),
-        #     ({}, Rect(Point(Num(3), Num(3)), Point(Num(4), Num(4)))),
-        # ],
-        # [({}, Rect(Point(Num(1), Num(1)), 
-        #            Point(Num(1), Num(1))))],
-        # [
-        #     ({}, Rect(Point(Num(1), Num(1)), 
-        #               Point(Num(4), Num(4)))),
-        #     ({}, Rect(Point(Num(2), Num(2)), 
-        #               Point(Num(3), Num(4)))),
-        #  ],
-        # [
-        #     ({}, Program(Rect(Point(Num(0), Num(0)), 
-        #                       Point(Num(1), Num(1))),
-        #                  Rect(Point(Num(1), Num(1)), 
-        #                       Point(Num(2), Num(2))))),
-        #     ({}, Program(Rect(Point(Num(1), Num(2)), 
-        #                       Point(Num(2), Num(3))),
-        #                  Rect(Point(Num(1), Num(1)), 
-        #                       Point(Num(2), Num(2))))),
-        #     ({}, Program(Rect(Point(Num(3), Num(1)), 
-        #                       Point(Num(4), Num(2))),
-        #                  Rect(Point(Num(1), Num(1)), 
-        #                       Point(Num(2), Num(2))))),
-        # ],
+        # R(z1, z1, z2, z3)
+        [
+            ({}, Rect(Point(Num(0), Num(0)), Point(Num(1), Num(1)))),
+            ({}, Rect(Point(Num(1), Num(1)), Point(Num(2), Num(2)))),
+            ({}, Rect(Point(Num(3), Num(3)), Point(Num(4), Num(4)))),
+        ],
+        # R(z1, z1, z2, z3)
+        [
+            ({}, Rect(Point(Num(1), Num(1)), 
+                      Point(Num(4), Num(4)))),
+            ({}, Rect(Point(Num(2), Num(2)), 
+                      Point(Num(3), Num(4)))),
+         ],
+        # R(x1, x2, x1+1, x2+1), R(1, 1, 2, 2)
+        [
+            ({}, Program(Rect(Point(Num(0), Num(0)), 
+                              Point(Num(1), Num(1))),
+                         Rect(Point(Num(1), Num(1)), 
+                              Point(Num(2), Num(2))))),
+            ({}, Program(Rect(Point(Num(1), Num(2)), 
+                              Point(Num(2), Num(3))),
+                         Rect(Point(Num(1), Num(1)), 
+                              Point(Num(2), Num(2))))),
+            ({}, Program(Rect(Point(Num(3), Num(1)), 
+                              Point(Num(4), Num(2))),
+                         Rect(Point(Num(1), Num(1)), 
+                              Point(Num(2), Num(2))))),
+        ],
         # [
         #     ({}, Program(Rect(Point(Num(0), Num(1)), 
         #                       Point(Num(2), Num(3))),
         #                  Rect(Point(Num(3), Num(2)), 
         #                       Point(Num(4), Num(4)))))
+        # ],
+        ## R(z0, z1, z2, z3), R(z3, z2, z4, z4)
+        # [
+        #     ({}, Program(Rect(Point(Num(0), Num(1)), 
+        #                       Point(Num(2), Num(3))),
+        #                  Rect(Point(Num(3), Num(2)), 
+        #                       Point(Num(4), Num(4))))),
+        #     ({}, Program(Rect(Point(Num(1), Num(2)), 
+        #                       Point(Num(3), Num(3))),
+        #                  Rect(Point(Num(3), Num(3)), 
+        #                       Point(Num(4), Num(4))))),
         # ],
     ]
 
@@ -180,7 +210,7 @@ def test_learn():
         start_time = time.time()
         print(f"\nTesting {[(env, p.pretty_print()) for env, p in test_case]}...")
         exs = [(env, p.eval(env)) for env, p in test_case]
-        f, zs = learn(ops, consts, exs, rounds=10, bound=10, iters=50)
+        f, zs = learn(ops, consts, exs, rounds=100, bound=20, samples=1000)
         print(f"\nSynthesized program:\t {f.pretty_print() if f is not None else 'None'}, \nZ: {zs} in {time.time() - start_time} seconds")
 
 if __name__ == '__main__':

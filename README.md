@@ -6,8 +6,11 @@
   - can't enforce with `assert`s in generation stage as this will halt the program, but this needs to be addressed before reaching the learning stage, or we'll end up with invalid candidate solutions
   - enforced via `satisfies_invariants` fn
 - [X] swap between optimizing `f` and optimizing `z`
-- [ ] think about witness functions
-- [ ] think about probabilistic programs
+- [ ] think about..
+  - [ ] witness functions
+  - [ ] probabilistic programs
+- [ ] better error fns
+- [ ] instance complexity
 
 ### Grammar
 Given `z = (z_b, z_n)`, a tuple of random vectors over booleans and integers;
@@ -56,6 +59,45 @@ Use inductive synthesis (bottom-up enumeration with decision trees) to find `f'`
 Once an `f'` is found that approximates each `x_i` (minimizing wrt L2 norm (sum of squared diffs)), fix `f'` and perturb random inputs `z_i` giving `z_i'` so that `f'(z')` better approximates `x_i`.
 
 ### Notes
+#### Measuring instance complexity / bounding search depth for f
+We need some principled way of trading off between optimizing f and optimizing z, instead of treating f optimization rounds as a hyperparameter.
+
+One way of doing this might be to somehow measure the complexity in a bitmap and using this to bound the search depth.
+
+Alternatively, we can think of a way of iteratively increasing depth while optimizing z -- maybe optimize z at each depth level? Is there some way we can use dynamic programming to avoid redundancy here?
+
+
+#### Better error functions
+Currently, the distance metric treats Rect(0,0,1,1) and Rect(3,3,4,4) as the same distance from Rect(1,1,2,2), although the first expression is a better approximation of the target. As another example, consider the following:
+
+Target
+```
+#___
+#___
+____
+____
+```
+
+A
+```
+##__
+##__
+____
+____
+```
+
+B
+```
+____
+____
+____
+___#
+```
+
+If we only count pixel differences, B is closer to Target than A even though in the grammar, A is only one edit away from Target.
+
+It seems that using some notion of edit distance on the grammar would work better here, but this would require having access to a ground truth expression, which we don't have.
+
 #### Keeping local optima across iterations
 It seems that carrying through optimal solutions as candidates in the next phase of the search (using prior Z values as candidates for future Z's, or prior f's for future f's) hampers the search from considering other solutions.
 
@@ -69,7 +111,6 @@ It looks like using a larger grammar (i.e. w/ arithmetic expressions) leads the 
 ```
 The search space still includes the optimal solutions, because we're augmenting the grammar. So it seems that there's something about the way we conduct the search that prevents these optimal, shorter solutions from being considered over longer and less optimal solutions.  Maybe longer solutions perform better within each round, so we never hold onto a shorter solution long enough to optimize Z to fit it.
 
-#### Increasing samples of Z
 Increasing the number of random samples in the `opt_z` step seems to help, but we still get overcomplicated expressions to which we fit Z:
 ```
 Synthesized program:	 ((z_n[3], z_n[3]), (z_n[5], (- z_n[0] z_n[4]))), 
