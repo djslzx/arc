@@ -5,7 +5,7 @@
 - [X] enforce invariants about rectangles 
   - can't enforce with `assert`s in generation stage as this will halt the program, but this needs to be addressed before reaching the learning stage, or we'll end up with invalid candidate solutions
   - enforced via `satisfies_invariants` fn
-- [ ] swap between optimizing `f` and optimizing `z`
+- [X] swap between optimizing `f` and optimizing `z`
 - [ ] think about witness functions
 - [ ] think about probabilistic programs
 
@@ -56,6 +56,26 @@ Use inductive synthesis (bottom-up enumeration with decision trees) to find `f'`
 Once an `f'` is found that approximates each `x_i` (minimizing wrt L2 norm (sum of squared diffs)), fix `f'` and perturb random inputs `z_i` giving `z_i'` so that `f'(z')` better approximates `x_i`.
 
 ### Notes
+#### Keeping local optima across iterations
+It seems that carrying through optimal solutions as candidates in the next phase of the search (using prior Z values as candidates for future Z's, or prior f's for future f's) hampers the search from considering other solutions.
+
+#### Grammar size
+It looks like using a larger grammar (i.e. w/ arithmetic expressions) leads the search away from the optimal solution for simple expressions that don't require arithmetic expressions, e.g. 
+```
+[
+  ({}, Rect(Point(Num(0), Num(0)), Point(Num(1), Num(1)))),
+  ({}, Rect(Point(Num(1), Num(1)), Point(Num(2), Num(2)))),
+],
+```
+The search space still includes the optimal solutions, because we're augmenting the grammar. So it seems that there's something about the way we conduct the search that prevents these optimal, shorter solutions from being considered over longer and less optimal solutions.  Maybe longer solutions perform better within each round, so we never hold onto a shorter solution long enough to optimize Z to fit it.
+
+#### Increasing samples of Z
+Increasing the number of random samples in the `opt_z` step seems to help, but we still get overcomplicated expressions to which we fit Z:
+```
+Synthesized program:	 ((z_n[3], z_n[3]), (z_n[5], (- z_n[0] z_n[4]))), 
+Z: [([3, 1, 2, 0, 2, 1], [True, True, True, True, True, True]), ([3, 3, 3, 1, 1, 2], [True, True, False, False, False, True])] in 1.370865821838379 seconds
+```
+
 #### Storing/managing `z`
 - associate one `z_i` with each `x_i` and learn a pattern for manipulating `z_i` to get `x_i`
 - generate each `z_i` as part of the problem input?
