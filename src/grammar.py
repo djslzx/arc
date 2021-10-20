@@ -9,7 +9,12 @@ Z_SIZE = 6                        # length of z_n, z_b
 Z_LO = 0                          # min poss value in z_n
 Z_HI = max(BMP_WIDTH, BMP_HEIGHT) # max poss value in z_n
 
-class Expr():
+class Grammar:
+    def __init__(self, ops, consts):
+        self.ops = ops
+        self.consts = consts
+    
+class Expr:
     def eval(self, environment):
         assert False, f"not implemented for {self}"
 

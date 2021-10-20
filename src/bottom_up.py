@@ -22,43 +22,27 @@ def add_zs(exs):
         if 'z_b' not in env:
             env['z_b'] = gen_zb()
 
-def bottom_up(global_bound, operators, constants, exs):
+def bottom_up(global_bound, grammar, exs):
     """
     global_bound: int. an upper bound on the size of expression
-    operators: list of classes, such as [Times, If, ...]
-    constants: list of possible leaves in syntax tree, such as [Number(1)]. Variables can also be leaves, but these are automatically inferred from `exs`
     exs: list of tuples of environment (the input) and desired output, such as [({'x': 5}, 6), ({'x': 1}, 2)]
     returns: either None if no program can be found that satisfies the input outputs, or the smallest such program. If a program `p` is returned, it should satisfy `all( p.eval(input) == output for input, output in exs )`
     """
     target_outputs = tuple(y for _, y in exs)
 
-    for expr in bottom_up_generator(global_bound, operators, constants, exs):
+    for expr in bottom_up_generator(global_bound, grammar, exs):
         outputs = tuple(expr.eval(input) for input, _ in exs)
         if outputs == target_outputs:
             return expr
 
     return None
 
-def bottom_up_generator(global_bound, operators, constants, exs):
+def bottom_up_generator(global_bound, grammar, exs):
     """
     global_bound: int. an upper bound on the size of expression
-    operators: list of classes, such as [Times, If, ...]
-    constants: list of possible leaves in syntax tree, such as [Number(1)]. Variables can also be leaves, but these are automatically inferred from `exs`
     exs: list of tuples of environment (the input) and desired output, such as [({'x': 5}, 6), ({'x': 1}, 2)]
     yields: sequence of programs, ordered by expression size, which are semantically distinct on the input examples
     """
-
-    # generate z_i = z_i_b, z_i_n for each x_i and add to env
-    add_zs(exs)
-    # print("envs:")
-    # pp([env for env, _ in exs])
-
-    # variables: use z_b[0] .. z_b[n-1] and z_n[0] .. z_n[n-1]
-    zb = [Zb(Num(i)) for i in range(Z_SIZE)]
-    zn = [Zn(Num(i)) for i in range(Z_SIZE)]
-
-    vars_and_consts = constants + zb + zn
-
     trees = dict() # mapping (type, size) => all values that can be computed of type using an expression of size
     seen = set() # Store seen outputs (observational equivalence filtering)
 
@@ -80,7 +64,7 @@ def bottom_up_generator(global_bound, operators, constants, exs):
             seen.add(out)
 
     # Add all terminals to `trees` as trees of size 1
-    for x in vars_and_consts:
+    for x in grammar.consts:
         yield x
         add_tree((x.return_type, 1), x)
 
@@ -90,7 +74,7 @@ def bottom_up_generator(global_bound, operators, constants, exs):
     for size in range(1, global_bound+1):
         if VERBOSE: print(f"Generating trees of size {size}... ", end='')
         # For each operator, determine how many args it needs and fill in using integer_partitions
-        for op in operators:
+        for op in grammar.ops:
             in_types = op.argument_types
             n_inputs = len(in_types)
             for partition in integer_partitions(size - 1 - n_inputs, n_inputs):
@@ -121,29 +105,31 @@ def integer_partitions(target_value, number_of_arguments):
              for x2s in integer_partitions(target_value - x1, number_of_arguments - 1) ]
 
 def test_bottom_up():
-    operators = [Program, Rect, Point, Plus, Minus, Times, If, And, Not]
-    terminals = [] # [Num(i) for i in range(max(BMP_WIDTH, BMP_HEIGHT))]
+    grammar = Grammar(
+        ops=[Program, Rect, Point, Plus, Minus, Times, If, And, Not],
+        consts=[],
+    )
 
     # collection of input-output specifications
     test_cases = [
-        [({}, 1)],
-        [({}, Point(Num(1), Num(1)).eval({}))],
-        [
-            ({"z_n": [0, 0, 0, 0, 0, 1]}, Point(Num(1), Num(1)).eval({})),
-            ({"z_n": [0, 0, 0, 0, 0, 2]}, Point(Num(2), Num(2)).eval({})),
-            ({"z_n": [0, 0, 0, 0, 0, 3]}, Point(Num(3), Num(3)).eval({})),
-        ],
-        [
-            ({}, Point(Num(1), Num(1)).eval({})),
-            ({}, Point(Num(2), Num(2)).eval({})),
-            ({}, Point(Num(3), Num(3)).eval({})),
-        ],
-        [({"z_n": [0, 0, 0, 0, 0, 1]}, Point(Num(1), Num(1)).eval({}))],
-        [({}, Rect(Point(Num(1), Num(1)), 
-                   Point(Num(3), Num(4))).eval({}))],
-        [({"z_n": [3, 3, 4, 4, 0, 0]}, 
-          Rect(Point(Num(3), Num(3)), 
-               Point(Num(4), Num(4))).eval({}))],
+        # [({}, 1)],
+        # [({}, Point(Num(1), Num(1)).eval({}))],
+        # [
+        #     ({"z_n": [0, 0, 0, 0, 0, 1]}, Point(Num(1), Num(1)).eval({})),
+        #     ({"z_n": [0, 0, 0, 0, 0, 2]}, Point(Num(2), Num(2)).eval({})),
+        #     ({"z_n": [0, 0, 0, 0, 0, 3]}, Point(Num(3), Num(3)).eval({})),
+        # ],
+        # [
+        #     ({}, Point(Num(1), Num(1)).eval({})),
+        #     ({}, Point(Num(2), Num(2)).eval({})),
+        #     ({}, Point(Num(3), Num(3)).eval({})),
+        # ],
+        # [({"z_n": [0, 0, 0, 0, 0, 1]}, Point(Num(1), Num(1)).eval({}))],
+        # [({}, Rect(Point(Num(1), Num(1)), 
+        #            Point(Num(3), Num(4))).eval({}))],
+        # [({"z_n": [3, 3, 4, 4, 0, 0]}, 
+        #   Rect(Point(Num(3), Num(3)), 
+        #        Point(Num(4), Num(4))).eval({}))],
         [({"z_n": [0, 1, 2, 3, 4, 4]}, 
           Program(Rect(Point(Num(1), Num(1)), 
                        Point(Num(2), Num(2))),
@@ -156,16 +142,16 @@ def test_bottom_up():
                        Point(Num(4), Num(4)))).eval({}))
          ],
         # Rect(z_n[2], z_n[2], z_n[3], z_n[3]), Rect(z_n[4], z_n[4], z_n[5], z_n[5])
-        [({"z_n": [0, 0, 1, 2, 3, 4]}, 
-          Program(Rect(Point(Num(1), Num(1)), 
-                       Point(Num(2), Num(2))),
-                  Rect(Point(Num(3), Num(3)), 
-                       Point(Num(4), Num(4)))).eval({})),
-         ({"z_n": [0, 0, 2, 3, 3, 4]}, 
-          Program(Rect(Point(Num(2), Num(2)), 
-                       Point(Num(3), Num(3))),
-                  Rect(Point(Num(3), Num(3)), 
-                       Point(Num(4), Num(4)))).eval({})),],
+        # [({"z_n": [0, 0, 1, 2, 3, 4]}, 
+        #   Program(Rect(Point(Num(1), Num(1)), 
+        #                Point(Num(2), Num(2))),
+        #           Rect(Point(Num(3), Num(3)), 
+        #                Point(Num(4), Num(4)))).eval({})),
+        #  ({"z_n": [0, 0, 2, 3, 3, 4]}, 
+        #   Program(Rect(Point(Num(2), Num(2)), 
+        #                Point(Num(3), Num(3))),
+        #           Rect(Point(Num(3), Num(3)), 
+        #                Point(Num(4), Num(4)))).eval({})),],
         # [({"z_n": [100+x for x in range(Z_SIZE)]}, 
         #   ((100,100), (105,106)))],
     ]
