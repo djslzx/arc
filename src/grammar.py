@@ -224,7 +224,7 @@ class Not(Expr):
         return not x
 
 class If(Expr):
-    argument_types = ["bool","Bitmap","Bitmap"]
+    argument_types = ["bool","int","int"]
     return_type = "Bitmap"
     
     def __init__(self, test, yes, no):
@@ -240,37 +240,11 @@ class If(Expr):
         test = self.test.eval(env)
         yes = self.yes.eval(env)
         no = self.no.eval(env)
-        assert isinstance(test, bool) and isinstance(yes, Bitmap) and isinstance(no, Bitmap), \
-            f"If type mismatch: t(test)={type(test)}, t(yes)={type(yes)}, t(no)={type(no)}"
+        assert isinstance(test, bool) and \
+            isinstance(yes, int) and \
+            isinstance(no, int), \
+            f"[If] type mismatch: t(test)={type(test)}, t(yes)={type(yes)}, t(no)={type(no)}"
         return yes if test else no
-
-class Point(Expr):
-    argument_types = ["int", "int"]
-    return_type = "Point"
-
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
-        
-    def __str__(self):
-        return f"Point({self.x}, {self.y})"
-
-    def pretty_print(self):
-        try:
-            return f"({self.x.pretty_print()}, {self.y.pretty_print()})"
-        except AttributeError:
-            return f"({self.x}, {self.y})"
-
-    def satisfies_invariants(self, env):
-        x = self.x.eval(env)
-        y = self.y.eval(env)
-        return 0 <= x <= BMP_WIDTH and 0 <= y <= BMP_HEIGHT
-
-    def eval(self, env):
-        x = self.x.eval(env)
-        y = self.y.eval(env)
-        assert isinstance(x, int) and isinstance(y, int)
-        return Point(x, y)
 
 class Rect(Expr):
     """
@@ -287,29 +261,35 @@ class Rect(Expr):
     - So, for Rect(a,b,c,d), 0 <= a < c <= W and 0 <= b < d <= H
     """
 
-    argument_types = ["Point", "Point"]
+    argument_types = ["int", "int", "int", "int"]
     return_type = "Bitmap"
     
-    def __init__(self, p1, p2):
+    def __init__(self, x1, y1, x2, y2):
         # assert isinstance(p1, Point) and isinstance(p2, Point)
-        self.p1 = p1
-        self.p2 = p2
+        self.x1 = x1
+        self.y1 = y1
+        self.x2 = x2
+        self.y2 = y2
         
     def __str__(self):
-        return f"Rect({self.p1}, {self.p2})"
+        return f"Rect({self.x1}, {self.y1}, {self.x2}, {self.y2})"
 
     def pretty_print(self):
-        return f"({self.p1.pretty_print()}, {self.p2.pretty_print()})"
+        return f"R({self.x1.pretty_print()}, {self.y1.pretty_print()}, {self.x2.pretty_print()}, {self.y2.pretty_print()})"
 
     def satisfies_invariants(self, env):
-        p1 = self.p1.eval(env)
-        p2 = self.p2.eval(env)
-        return 0 <= p1.x < p2.x <= BMP_WIDTH and 0 <= p1.y < p2.y <= BMP_HEIGHT
+        x1 = self.x1.eval(env)
+        y1 = self.y1.eval(env)
+        x2 = self.x2.eval(env)
+        y2 = self.y2.eval(env)
+        return 0 <= x1 < x2 <= BMP_WIDTH and 0 <= y1 < y2 <= BMP_HEIGHT
 
     def eval(self, env):
-        p1 = self.p1.eval(env)
-        p2 = self.p2.eval(env)
-        return Bitmap([[p1.x <= x < p2.x and p1.y <= y < p2.y
+        x1 = self.x1.eval(env)
+        y1 = self.y1.eval(env)
+        x2 = self.x2.eval(env)
+        y2 = self.y2.eval(env)
+        return Bitmap([[x1 <= x < x2 and y1 <= y < y2
                         for x in range(BMP_WIDTH)]
                        for y in range(BMP_HEIGHT)])
 
@@ -349,22 +329,22 @@ def test_eval():
             Times(Zn(Num(0)), Zn(Num(1))), 
             Plus(Zn(Num(0)), Zn(Num(1)))), 
          lambda zb, zn: zn[0] * zn[1] if not (zn[0] < zn[1]) else zn[0] + zn[1]),
-        (Rect(Point(Num(0),
-                    Num(0)), 
-              Point(Num(1),
-                    Num(2))),
+        (Rect(Num(0),
+              Num(0), 
+              Num(1),
+              Num(2)),
          lambda zb, zn: Bitmap.from_img(["#___",
                                          "#___",
                                          "____",
                                          "____",])),
-        (Program(Rect(Point(Num(0),
-                            Num(0)), 
-                      Point(Num(1),
-                            Num(1))),
-                 Rect(Point(Num(2),
-                            Num(3)), 
-                      Point(Num(4),
-                            Num(4)))),
+        (Program(Rect(Num(0),
+                      Num(0), 
+                      Num(1),
+                      Num(1)),
+                 Rect(Num(2),
+                      Num(3), 
+                      Num(4),
+                      Num(4))),
          lambda zb, zn: Bitmap.from_img(["#___",
                                          "____",
                                          "____",
@@ -382,8 +362,8 @@ def test_eval():
 
 def test_render():
     # (0,0), (1,1)
-    expr = Rect(Point(Num(0),Num(0)), 
-                Point(Num(1),Num(1)))
+    expr = Rect(Num(0),Num(0), 
+                Num(1),Num(1))
     out = expr.eval({})
     expected = Bitmap.from_img(["#___",
                                 "____",
@@ -392,8 +372,10 @@ def test_render():
     assert expected == out, f"test_render failed:\n expected={expected},\n out={out}"
 
     # (1,0), (3,3)
-    expr = Rect(Point(Zn(Num(0)), Num(0)), 
-                Point(Plus(Num(2), Num(1)), Num(3))) 
+    expr = Rect(Zn(Num(0)), 
+                Num(0), 
+                Plus(Num(2), Num(1)), 
+                Num(3)) 
     out = expr.eval({'z_n': [1,2,3]})
     expected = Bitmap.from_img(["_##_",
                                 "_##_",

@@ -137,62 +137,65 @@ def opt_zns(f, exs, samples):
 
 def test_learn():
     g = Grammar(
-        ops=[Point, Rect, Program, Plus, ], # Minus, Times, ] # If, Not, And, ]
+        ops=[Rect, Program, Plus, ], # Minus, Times, ] # If, Not, And, ]
         consts=[Num(0), Num(1), Num(2)])
 
     test_cases = [
+        # [
+        #     ({}, Rect(Num(0), Num(0), 
+        #               Num(1), Num(1))),
+        # ],
+        # R(z1, z1, z1+1, z1+1)
+        # [
+        #     ({}, Rect(Num(0), Num(0), 
+        #               Num(1), Num(1))),
+        #     ({}, Rect(Num(1), Num(1), 
+        #               Num(2), Num(2))),
+        # ],
+        # R(z1, z1, z1+1, z1+1)
+        # [
+        #     ({}, Rect(Num(0), Num(0), Num(1), Num(1))),
+        #     ({}, Rect(Num(1), Num(1), Num(2), Num(2))),
+        #     ({}, Rect(Num(3), Num(3), Num(4), Num(4))),
+        # ],
+        # R(z1, z1, z2, z3)
+        # [
+        #     ({}, Rect(Num(1), Num(1), 
+        #               Num(4), Num(4))),
+        #     ({}, Rect(Num(2), Num(2), 
+        #               Num(3), Num(4))),
+        # ],
+        # R(x1, x2, x1+1, x2+1), R(1, 1, 2, 2) size: 
         [
-            ({}, Rect(Point(Num(0), Num(0)), Point(Num(1), Num(1)))),
+            ({}, Program(Rect(Num(0), Num(0), 
+                              Num(1), Num(1)),
+                         Rect(Num(1), Num(1), 
+                              Num(2), Num(2)))),
+            ({}, Program(Rect(Num(1), Num(2), 
+                              Num(2), Num(3)),
+                         Rect(Num(1), Num(1), 
+                              Num(2), Num(2)))),
+            ({}, Program(Rect(Num(3), Num(1), 
+                              Num(4), Num(2)),
+                         Rect(Num(1), Num(1), 
+                              Num(2), Num(2)))),
         ],
-        # R(z1, z1, z2, z2)
         # [
-        #     ({}, Rect(Point(Num(0), Num(0)), Point(Num(1), Num(1)))),
-        #     ({}, Rect(Point(Num(1), Num(1)), Point(Num(2), Num(2)))),
-        # ],
-        # R(z1, z1, z2, z3)
-        # [
-        #     ({}, Rect(Point(Num(0), Num(0)), Point(Num(1), Num(1)))),
-        #     ({}, Rect(Point(Num(1), Num(1)), Point(Num(2), Num(2)))),
-        #     ({}, Rect(Point(Num(3), Num(3)), Point(Num(4), Num(4)))),
-        # ],
-        # R(z1, z1, z2, z3)
-        # [
-        #     ({}, Rect(Point(Num(1), Num(1)), 
-        #               Point(Num(4), Num(4)))),
-        #     ({}, Rect(Point(Num(2), Num(2)), 
-        #               Point(Num(3), Num(4)))),
-        # ],
-        # R(x1, x2, x1+1, x2+1), R(1, 1, 2, 2)
-        # [
-        #     ({}, Program(Rect(Point(Num(0), Num(0)), 
-        #                       Point(Num(1), Num(1))),
-        #                  Rect(Point(Num(1), Num(1)), 
-        #                       Point(Num(2), Num(2))))),
-        #     ({}, Program(Rect(Point(Num(1), Num(2)), 
-        #                       Point(Num(2), Num(3))),
-        #                  Rect(Point(Num(1), Num(1)), 
-        #                       Point(Num(2), Num(2))))),
-        #     ({}, Program(Rect(Point(Num(3), Num(1)), 
-        #                       Point(Num(4), Num(2))),
-        #                  Rect(Point(Num(1), Num(1)), 
-        #                       Point(Num(2), Num(2))))),
-        # ],
-        # [
-        #     ({}, Program(Rect(Point(Num(0), Num(1)), 
-        #                       Point(Num(2), Num(3))),
-        #                  Rect(Point(Num(3), Num(2)), 
-        #                       Point(Num(4), Num(4)))))
+        #     ({}, Program(Rect(Num(0), Num(1), 
+        #                       Num(2), Num(3)),
+        #                  Rect(Num(3), Num(2), 
+        #                       Num(4), Num(4))))
         # ],
         ## R(z0, z1, z2, z3), R(z3, z2, z4, z4)
         # [
-        #     ({}, Program(Rect(Point(Num(0), Num(1)), 
-        #                       Point(Num(2), Num(3))),
-        #                  Rect(Point(Num(3), Num(2)), 
-        #                       Point(Num(4), Num(4))))),
-        #     ({}, Program(Rect(Point(Num(1), Num(2)), 
-        #                       Point(Num(3), Num(3))),
-        #                  Rect(Point(Num(3), Num(3)), 
-        #                       Point(Num(4), Num(4))))),
+        #     ({}, Program(Rect(Num(0), Num(1), 
+        #                       Num(2), Num(3)),
+        #                  Rect(Num(3), Num(2), 
+        #                       Num(4), Num(4)))),
+        #     ({}, Program(Rect(Num(1), Num(2), 
+        #                       Num(3), Num(3)),
+        #                  Rect(Num(3), Num(3), 
+        #                       Num(4), Num(4)))),
         # ],
     ]
 

@@ -6,22 +6,6 @@ from grammar import *
 
 VERBOSE = True
 
-def gen_zb():
-    return [bool(random.randint(0,1)) for _ in range(Z_SIZE)]
-
-def gen_zn():
-    return [random.randint(Z_LO, Z_HI) for _ in range(Z_SIZE)]
-
-def add_zs(exs):
-    """
-    Generate z_i = z_i_b, z_i_n for each x_i and add to env
-    """
-    for env, _ in exs:
-        if 'z_n' not in env:
-            env['z_n'] = gen_zn()
-        if 'z_b' not in env:
-            env['z_b'] = gen_zb()
-
 def bottom_up(global_bound, grammar, exs):
     """
     global_bound: int. an upper bound on the size of expression
@@ -105,61 +89,59 @@ def integer_partitions(target_value, number_of_arguments):
              for x2s in integer_partitions(target_value - x1, number_of_arguments - 1) ]
 
 def test_bottom_up():
-    grammar = Grammar(
-        ops=[Program, Rect, Point, Plus, Minus, Times, If, And, Not],
-        consts=[],
+    g = Grammar(
+        ops=[Program, Rect, Plus, Minus, Times, If, And, Not],
+        consts=[Num(i) for i in range(5)] + [Zb(Num(i)) for i in range(Z_SIZE)] + [Zn(Num(i)) for i in range(Z_SIZE)],
     )
 
     # collection of input-output specifications
     test_cases = [
-        # [({}, 1)],
-        # [({}, Point(Num(1), Num(1)).eval({}))],
-        # [
-        #     ({"z_n": [0, 0, 0, 0, 0, 1]}, Point(Num(1), Num(1)).eval({})),
-        #     ({"z_n": [0, 0, 0, 0, 0, 2]}, Point(Num(2), Num(2)).eval({})),
-        #     ({"z_n": [0, 0, 0, 0, 0, 3]}, Point(Num(3), Num(3)).eval({})),
-        # ],
-        # [
-        #     ({}, Point(Num(1), Num(1)).eval({})),
-        #     ({}, Point(Num(2), Num(2)).eval({})),
-        #     ({}, Point(Num(3), Num(3)).eval({})),
-        # ],
-        # [({"z_n": [0, 0, 0, 0, 0, 1]}, Point(Num(1), Num(1)).eval({}))],
-        # [({}, Rect(Point(Num(1), Num(1)), 
-        #            Point(Num(3), Num(4))).eval({}))],
-        # [({"z_n": [3, 3, 4, 4, 0, 0]}, 
-        #   Rect(Point(Num(3), Num(3)), 
-        #        Point(Num(4), Num(4))).eval({}))],
+        [({}, 1)],
+        [
+            ({"z_n": [0, 0, 0, 0, 0, 1]}, Num(1).eval({})),
+            ({"z_n": [0, 0, 0, 0, 0, 2]}, Num(2).eval({})),
+            ({"z_n": [0, 0, 0, 0, 0, 3]}, Num(3).eval({})),
+        ],
+        [({"z_n": [0, 0, 0, 0, 0, 1]}, Num(1).eval({}))],
+        [({"z_n": [0, 1, 2, 3, 4, 5]}, 
+          Rect(Num(1), Num(1), 
+               Num(3), Num(4)).eval({}))],
+        [({"z_n": [3, 3, 4, 4, 0, 0]}, 
+          Rect(Num(3), Num(3), 
+               Num(4), Num(4)).eval({}))],
         [({"z_n": [0, 1, 2, 3, 4, 4]}, 
-          Program(Rect(Point(Num(1), Num(1)), 
-                       Point(Num(2), Num(2))),
-                  Rect(Point(Num(2), Num(2)), 
-                       Point(Num(3), Num(3)))).eval({})),
+          Program(Rect(Num(1), Num(1), 
+                       Num(2), Num(2)),
+                  Rect(Num(2), Num(2), 
+                       Num(3), Num(3))).eval({})),
          ({"z_n": [1, 2, 3, 4, 4, 4]}, 
-          Program(Rect(Point(Num(2), Num(2)), 
-                       Point(Num(3), Num(3))),
-                  Rect(Point(Num(3), Num(3)), 
-                       Point(Num(4), Num(4)))).eval({}))
+          Program(Rect(Num(2), Num(2), 
+                       Num(3), Num(3)),
+                  Rect(Num(3), Num(3), 
+                       Num(4), Num(4))).eval({}))
          ],
-        # Rect(z_n[2], z_n[2], z_n[3], z_n[3]), Rect(z_n[4], z_n[4], z_n[5], z_n[5])
-        # [({"z_n": [0, 0, 1, 2, 3, 4]}, 
-        #   Program(Rect(Point(Num(1), Num(1)), 
-        #                Point(Num(2), Num(2))),
-        #           Rect(Point(Num(3), Num(3)), 
-        #                Point(Num(4), Num(4)))).eval({})),
-        #  ({"z_n": [0, 0, 2, 3, 3, 4]}, 
-        #   Program(Rect(Point(Num(2), Num(2)), 
-        #                Point(Num(3), Num(3))),
-        #           Rect(Point(Num(3), Num(3)), 
-        #                Point(Num(4), Num(4)))).eval({})),],
-        # [({"z_n": [100+x for x in range(Z_SIZE)]}, 
-        #   ((100,100), (105,106)))],
+        [({"z_n": [0, 0, 1, 2, 3, 4]}, 
+          Program(Rect(Num(1), Num(1), 
+                       Num(2), Num(2)),
+                  Rect(Num(3), Num(3), 
+                       Num(4), Num(4))).eval({})),
+         ({"z_n": [0, 0, 2, 3, 3, 4]},
+          Program(Rect(Num(2), Num(2), 
+                       Num(3), Num(3)),
+                  Rect(Num(3), Num(3), 
+                       Num(4), Num(4))).eval({})),],
     ]
     bound = 25
     for test_case in test_cases:
+        envs = [env for env,_ in test_case]
+        for env in envs:
+            if 'z_n' not in env:
+                env['z_n'] = list(range(Z_SIZE))
+            if 'z_b' not in env:
+                env['z_b'] = [i % 2 == 0 for i in range(Z_SIZE)]
         start_time = time.time()
-        print(f"Testing {test_case}...")
-        expr = bottom_up(bound, operators, terminals, test_case)
+        print(f"\nTesting {test_case}...")
+        expr = bottom_up(bound, g, test_case)
         print(f"\nSynthesized program:\t {expr.pretty_print() if expr is not None else 'None'} in {time.time() - start_time} seconds")
 
     # print(" [+] bottom-up synthesis passes tests")
