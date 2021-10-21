@@ -14,7 +14,6 @@ import itertools
 from grammar import *
 from bottom_up import *
 
-
 def gen_zb():
     return [bool(random.randint(0,1)) for _ in range(Z_SIZE)]
 
@@ -40,8 +39,8 @@ def learn(g, exs, max_size, samples):
 
     # Add Zs to grammar
     g_zns = [Zn(Num(i)) for i in range(Z_SIZE)]
-    g_zbs = [Zb(Num(i)) for i in range(Z_SIZE)]
-    g = Grammar(g.ops, g.consts + g_zns + g_zbs)
+    # g_zbs = [Zb(Num(i)) for i in range(Z_SIZE)]
+    g = Grammar(g.ops, g.consts + g_zns) # + g_zbs)
 
     # Randomly generate initial Zs
     zns = [gen_zn() for _ in range(len(exs))]
@@ -55,23 +54,22 @@ def learn(g, exs, max_size, samples):
         print("\nOptimizing f...")
         f, d, size = opt_f(g, exs, size, max_size)
         assert f is not None, f"Couldn't find an f with size <= {max_size}"
-
-        zs = [(env['z_n'], env['z_b']) for env,_ in exs]
-        print(f"\nd: {d}\nf: {f.pretty_print()}\nZ: {zs}")
+        zns = [env['z_n'] for env,_ in exs]
+        print(f"\nd: {d}\nf: {f.pretty_print()}\nZn: {zns}")
         if d == 0:
             print(f"\n\nCompleted search at size {size}.\n\n")
-            return f, zs
+            return f, zns
 
         # optimize z
-        print("\nOptimizing z...")
+        print("\nOptimizing Zn...")
         zns, d = opt_zns(f, exs, samples)
-        print(f"\nd: {d}\nZ: {zs}")
+        print(f"\nd: {d}\nZn: {zns}")
         update_envs(exs, zns, zbs)
         if d == 0:
             print(f"\n\nCompleted search at size {size}.\n\n")
-            return f, zs
+            return f, zns
 
-    print(f"\n\nCompleted search at size {size}.\n\n")
+    print(f"\nCompleted search at size {size}.\n")
     return f, zs
 
 def opt_f(g, exs, bound, max_bound):
@@ -138,16 +136,76 @@ def test_learn():
 
     test_cases = [
         # [
+        #     ({}, Bitmap.from_img(['#___',
+        #                           '#___',
+        #                           '____',
+        #                           '____',])),
+        #     ({}, Bitmap.from_img(['##__',
+        #                           '##__',
+        #                           '____',
+        #                           '____',])),
+        #     ({}, Bitmap.from_img(['###_',
+        #                           '###_',
+        #                           '____',
+        #                           '____',])),
+        # ],
+        # [
+        #     ({}, Bitmap.from_img(['#___',
+        #                           '____',
+        #                           '____',
+        #                           '____',])),
+        #     ({}, Bitmap.from_img(['##__',
+        #                           '##__',
+        #                           '____',
+        #                           '____',])),
+        #     ({}, Bitmap.from_img(['###_',
+        #                           '###_',
+        #                           '###_',
+        #                           '____',])),
+        #     ({}, Bitmap.from_img(['####',
+        #                           '####',
+        #                           '####',
+        #                           '####',])),
+        # ],
+        # [
+        #     ({}, Bitmap.from_img(['#___',
+        #                           '____',
+        #                           '____',
+        #                           '____',])),
+        #     ({}, Bitmap.from_img(['#___',
+        #                           '#___',
+        #                           '____',
+        #                           '____',])),
+        #     ({}, Bitmap.from_img(['#___',
+        #                           '#___',
+        #                           '#___',
+        #                           '____',])),
+        # ],
+        [
+            ({}, Bitmap.from_img(['#___',
+                                  '____',
+                                  '____',
+                                  '___#',])),
+            ({}, Bitmap.from_img(['#___',
+                                  '#___',
+                                  '___#',
+                                  '___#',])),
+            ({}, Bitmap.from_img(['#___',
+                                  '#__#',
+                                  '#__#',
+                                  '___#',])),
+        ],
+        # [
         #     ({}, Rect(Num(0), Num(0), 
-        #               Num(1), Num(1))),
+        #               Num(1), Num(1)).eval()),
         # ],
         # R(z1, z1, z1+1, z1+1)
-        [
-            ({}, Rect(Num(0), Num(0), 
-                      Num(1), Num(1))),
-            ({}, Rect(Num(1), Num(1), 
-                      Num(2), Num(2))),
-        ],
+        # [
+        #     ({}, Rect(Num(0), Num(0), 
+        #               Num(1), Num(1)).eval()),
+        #     ({}, Rect(Num(1), Num(1), 
+        #               Num(2), Num(2)).eval()),
+        # ],
         # R(z1, z1, z1+1, z1+1)
         # [
         #     ({}, Rect(Num(0), Num(0), Num(1), Num(1))),
@@ -157,50 +215,52 @@ def test_learn():
         # R(z1, z1, z2, z3)
         # [
         #     ({}, Rect(Num(1), Num(1), 
-        #               Num(4), Num(4))),
+        #               Num(4), Num(4)).eval()),
         #     ({}, Rect(Num(2), Num(2), 
-        #               Num(3), Num(4))),
+        #               Num(3), Num(4)).eval()),
         # ],
-        # R(x1, x2, x1+1, x2+1), R(1, 1, 2, 2) size: 
+        # R(x1, x2, x1+1, x2+1), R(1, 1, 2, 2)
         # [
         #     ({}, Program(Rect(Num(0), Num(0), 
         #                       Num(1), Num(1)),
         #                  Rect(Num(1), Num(1), 
-        #                       Num(2), Num(2)))),
+        #                       Num(2), Num(2)))).eval(),
         #     ({}, Program(Rect(Num(1), Num(2), 
         #                       Num(2), Num(3)),
         #                  Rect(Num(1), Num(1), 
-        #                       Num(2), Num(2)))),
+        #                       Num(2), Num(2)))).eval(),
         #     ({}, Program(Rect(Num(3), Num(1), 
         #                       Num(4), Num(2)),
         #                  Rect(Num(1), Num(1), 
-        #                       Num(2), Num(2)))),
+        #                       Num(2), Num(2)))).eval(),
         # ],
         # [
         #     ({}, Program(Rect(Num(0), Num(1), 
         #                       Num(2), Num(3)),
         #                  Rect(Num(3), Num(2), 
-        #                       Num(4), Num(4))))
+        #                       Num(4), Num(4))).eval())
         # ],
         ## R(z0, z1, z2, z3), R(z3, z2, z4, z4)
         # [
         #     ({}, Program(Rect(Num(0), Num(1), 
         #                       Num(2), Num(3)),
         #                  Rect(Num(3), Num(2), 
-        #                       Num(4), Num(4)))),
+        #                       Num(4), Num(4))).eval()),
         #     ({}, Program(Rect(Num(1), Num(2), 
         #                       Num(3), Num(3)),
         #                  Rect(Num(3), Num(3), 
-        #                       Num(4), Num(4)))),
+        #                       Num(4), Num(4))).eval()),
         # ],
     ]
 
     for test_case in test_cases:
         start_time = time.time()
         print(f"\nTesting {[(env, p.pretty_print()) for env, p in test_case]}...")
-        exs = [(env, p.eval(env)) for env, p in test_case]
-        f, zs = learn(g, exs, max_size=20, samples=1000)
-        print(f"\nSynthesized program:\t {f.pretty_print() if f is not None else 'None'}, \nZ: {zs} in {time.time() - start_time} seconds")
+        # exs = [(env, p.eval(env)) for env, p in test_case]
+        f, zs = learn(g, test_case, max_size=20, samples=1000)
+        end_time = time.time()
+        fstr, used_zs = (f.pretty_print(), f.zs()) if f is not None else 'None', []
+        print(f"\nSynthesized program:\t {fstr} \nused zs: {used_zs} \nZ: {zs} in {end_time - start_time}s")
 
 if __name__ == '__main__':
     test_learn()

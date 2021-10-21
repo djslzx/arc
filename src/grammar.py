@@ -35,6 +35,9 @@ class Expr:
     def satisfies_invariants(self, env):
         return True
 
+    def zs(self):
+        return set()
+
 class FALSE(Expr):
     argument_types = []
     return_type = "bool"
@@ -49,6 +52,22 @@ class FALSE(Expr):
 
     def eval(self, env):
         return False
+
+class Num(Expr):
+    argument_types = []
+    return_type = "int"
+    
+    def __init__(self, n):
+        self.n = n
+
+    def __str__(self):
+        return f"Num({self.n})"
+
+    def pretty_print(self):
+        return str(self.n)
+
+    def eval(self, env):
+        return self.n
     
 class Zb(Expr):
     argument_types = ["int"]
@@ -71,21 +90,8 @@ class Zb(Expr):
         assert isinstance(i, int)
         return env["z_b"][i]
 
-class Num(Expr):
-    argument_types = []
-    return_type = "int"
-    
-    def __init__(self, n):
-        self.n = n
-
-    def __str__(self):
-        return f"Num({self.n})"
-
-    def pretty_print(self):
-        return str(self.n)
-
-    def eval(self, env):
-        return self.n
+    def zs(self):
+        return {self.i.eval({})}
 
 class Zn(Expr):
     """z_n"""
@@ -110,6 +116,9 @@ class Zn(Expr):
         assert isinstance(i, int)
         return env["z_n"][i]
 
+    def zs(self):
+        return {self.i.eval({})}
+
 class Plus(Expr):
     argument_types = ["int","int"]
     return_type = "int"
@@ -128,6 +137,9 @@ class Plus(Expr):
         y = self.y.eval(env)
         assert isinstance(x, int) and isinstance(y, int)
         return x + y
+
+    def zs(self):
+        return set.union(self.x.zs(), self.y.zs())
 
 class Minus(Expr):
     argument_types = ["int","int"]
@@ -148,6 +160,9 @@ class Minus(Expr):
         assert isinstance(x, int) and isinstance(y, int)
         return x - y
 
+    def zs(self):
+        return set.union(self.x.zs(), self.y.zs())
+
 class Times(Expr):
     argument_types = ["int","int"]
     return_type = "int"
@@ -166,6 +181,9 @@ class Times(Expr):
         y = self.y.eval(env)
         assert isinstance(x, int) and isinstance(y, int)
         return x * y
+
+    def zs(self):
+        return set.union(self.x.zs(), self.y.zs())
 
 class Lt(Expr):
     argument_types = ["int","int"]
@@ -186,6 +204,9 @@ class Lt(Expr):
         assert isinstance(x, int) and isinstance(y, int)
         return x < y
 
+    def zs(self):
+        return set.union(self.x.zs(), self.y.zs())
+
 class And(Expr):
     argument_types = ["bool","bool"]
     return_type = "bool"
@@ -205,6 +226,9 @@ class And(Expr):
         assert isinstance(x, bool) and isinstance(y, bool)
         return x and y
 
+    def zs(self):
+        return set.union(self.x.zs(), self.y.zs())
+
 class Not(Expr):
     argument_types = ["bool"]
     return_type = "bool"
@@ -222,6 +246,9 @@ class Not(Expr):
         x = self.x.eval(env)
         assert isinstance(x, bool)
         return not x
+
+    def zs(self):
+        return self.x.zs()
 
 class If(Expr):
     argument_types = ["bool","int","int"]
@@ -245,6 +272,11 @@ class If(Expr):
             isinstance(no, int), \
             f"[If] type mismatch: t(test)={type(test)}, t(yes)={type(yes)}, t(no)={type(no)}"
         return yes if test else no
+
+    def zs(self):
+        return set.union(self.test.zs(),
+                         self.yes.zs(),
+                         self.no.zs())
 
 class Rect(Expr):
     """
@@ -293,24 +325,33 @@ class Rect(Expr):
                         for x in range(BMP_WIDTH)]
                        for y in range(BMP_HEIGHT)])
 
+    def zs(self):
+        return set.union(self.x1.zs(),
+                         self.y1.zs(),
+                         self.x2.zs(),
+                         self.y2.zs())
+
 class Program(Expr):
     argument_types = ["Bitmap", "Bitmap"]
     return_type = "Bitmap"
     
-    def __init__(self, left, right):
-        self.left = left
-        self.right = right
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
         
     def __str__(self):
-        return f"Program({self.left}, {self.right})"
+        return f"Program({self.x}, {self.y})"
 
     def pretty_print(self):
-        return (f"{self.left.pretty_print()}; {self.right.pretty_print()}")
+        return (f"{self.x.pretty_print()}; {self.y.pretty_print()}")
 
     def eval(self, env):
-        left = self.left.eval(env)
-        right = self.right.eval(env)
-        return left.OR(right)
+        x = self.x.eval(env)
+        y = self.y.eval(env)
+        return x.OR(y)
+
+    def zs(self):
+        return set.union(self.x.zs(), self.y.zs())
 
 def test_eval():
     tests = [
@@ -384,7 +425,24 @@ def test_render():
     assert expected == out, f"test_render failed:\n expected={expected},\n out={out}"
     print(" [+] passed test_render")
 
+def test_zs():
+    test_cases = [
+        (Rect(Num(0), Num(1), Num(4), Num(4)), 
+         set()),
+        (Rect(Zn(Num(0)), Zn(Num(1)), Num(4), Num(4)), 
+         {0, 1}),
+        (Rect(Zn(Num(0)), Zn(Num(1)), Zn(Num(2)), Zn(Num(3))),
+         {0, 1, 2, 3}),
+        (Rect(Zn(Num(0)), Zn(Num(1)), Zn(Num(0)), Zn(Num(1))),
+         {0, 1}),
+    ]
+    for expr, ans in test_cases:
+        out = expr.zs()
+        assert out == ans, f"test_zs failed: expected={ans}, actual={out}"
+
+    print(" [+] passed test_zs")
+
 if __name__ == '__main__':
     test_eval()
     test_render()
-    
+    test_zs()
