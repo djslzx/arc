@@ -49,14 +49,13 @@ def learn(g, exs, max_size, samples):
     update_envs(exs, zns, zbs)
 
     f = None
-    for size in range(1, max_size):
-
+    size = 1
+    while size <= max_size:
         # optimize f up to `size`
         print("\nOptimizing f...")
-        f, d = opt_f(g, exs, size)
-        if f is None: 
-            print("Could not find a valid f; increasing size...")
-            continue
+        f, d, size = opt_f(g, exs, size, max_size)
+        assert f is not None, f"Couldn't find an f with size <= {max_size}"
+
         zs = [(env['z_n'], env['z_b']) for env,_ in exs]
         print(f"\nd: {d}\nf: {f.pretty_print()}\nZ: {zs}")
         if d == 0:
@@ -75,13 +74,9 @@ def learn(g, exs, max_size, samples):
     print(f"\n\nCompleted search at size {size}.\n\n")
     return f, zs
 
-def opt_f(g, exs, bound):
+def opt_f(g, exs, bound, max_bound):
     """
     Optimize f wrt multiple examples: find f* = min_f sum_i d(f(s_i, z_i), x_i)
-
-    ops: a list of nodes in AST, e.g. [Times, If, ...]
-    consts: a list of leaves in AST
-    exs: a list of examples (s_i, x_i) where s_i is an environment and x_i is a bitmap
     """
 
     def score(dists):
@@ -90,21 +85,22 @@ def opt_f(g, exs, bound):
         """
         return sum(dists)
 
-    gen = bottom_up_generator(bound, g, exs)
     envs = [env for env,_ in exs]
     bmps = [bmp for _,bmp in exs]
     best_f = None
     best_d = None 
-    for f in gen:
+    for f, size in bottom_up_generator(max_bound, g, exs):
+        if size > bound and best_f is not None:
+            break
         if all(f.satisfies_invariants(env) for env in envs):
             outs = tuple(f.eval(env) for env in envs)
             if isinstance(outs[0], Bitmap):
                 d = score(out.dist(bmp) for out, bmp in zip(outs, bmps))
                 if d == 0:
-                    return f, 0
+                    return f, 0, size
                 elif best_d is None or d < best_d:
                     best_f, best_d = f, d
-    return best_f, best_d
+    return best_f, best_d, size
 
 def opt_zns(f, exs, samples):
     """
@@ -146,12 +142,12 @@ def test_learn():
         #               Num(1), Num(1))),
         # ],
         # R(z1, z1, z1+1, z1+1)
-        # [
-        #     ({}, Rect(Num(0), Num(0), 
-        #               Num(1), Num(1))),
-        #     ({}, Rect(Num(1), Num(1), 
-        #               Num(2), Num(2))),
-        # ],
+        [
+            ({}, Rect(Num(0), Num(0), 
+                      Num(1), Num(1))),
+            ({}, Rect(Num(1), Num(1), 
+                      Num(2), Num(2))),
+        ],
         # R(z1, z1, z1+1, z1+1)
         # [
         #     ({}, Rect(Num(0), Num(0), Num(1), Num(1))),
@@ -166,20 +162,20 @@ def test_learn():
         #               Num(3), Num(4))),
         # ],
         # R(x1, x2, x1+1, x2+1), R(1, 1, 2, 2) size: 
-        [
-            ({}, Program(Rect(Num(0), Num(0), 
-                              Num(1), Num(1)),
-                         Rect(Num(1), Num(1), 
-                              Num(2), Num(2)))),
-            ({}, Program(Rect(Num(1), Num(2), 
-                              Num(2), Num(3)),
-                         Rect(Num(1), Num(1), 
-                              Num(2), Num(2)))),
-            ({}, Program(Rect(Num(3), Num(1), 
-                              Num(4), Num(2)),
-                         Rect(Num(1), Num(1), 
-                              Num(2), Num(2)))),
-        ],
+        # [
+        #     ({}, Program(Rect(Num(0), Num(0), 
+        #                       Num(1), Num(1)),
+        #                  Rect(Num(1), Num(1), 
+        #                       Num(2), Num(2)))),
+        #     ({}, Program(Rect(Num(1), Num(2), 
+        #                       Num(2), Num(3)),
+        #                  Rect(Num(1), Num(1), 
+        #                       Num(2), Num(2)))),
+        #     ({}, Program(Rect(Num(3), Num(1), 
+        #                       Num(4), Num(2)),
+        #                  Rect(Num(1), Num(1), 
+        #                       Num(2), Num(2)))),
+        # ],
         # [
         #     ({}, Program(Rect(Num(0), Num(1), 
         #                       Num(2), Num(3)),
@@ -203,7 +199,7 @@ def test_learn():
         start_time = time.time()
         print(f"\nTesting {[(env, p.pretty_print()) for env, p in test_case]}...")
         exs = [(env, p.eval(env)) for env, p in test_case]
-        f, zs = learn(g, exs, max_size=20, samples=100)
+        f, zs = learn(g, exs, max_size=20, samples=1000)
         print(f"\nSynthesized program:\t {f.pretty_print() if f is not None else 'None'}, \nZ: {zs} in {time.time() - start_time} seconds")
 
 if __name__ == '__main__':

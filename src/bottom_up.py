@@ -14,7 +14,7 @@ def bottom_up(global_bound, grammar, exs):
     """
     target_outputs = tuple(y for _, y in exs)
 
-    for expr in bottom_up_generator(global_bound, grammar, exs):
+    for expr, _ in bottom_up_generator(global_bound, grammar, exs):
         outputs = tuple(expr.eval(input) for input, _ in exs)
         if outputs == target_outputs:
             return expr
@@ -49,7 +49,7 @@ def bottom_up_generator(global_bound, grammar, exs):
 
     # Add all terminals to `trees` as trees of size 1
     for x in grammar.consts:
-        yield x
+        yield x, 1
         add_tree((x.return_type, 1), x)
 
     # Yield a generator for each size?
@@ -65,7 +65,7 @@ def bottom_up_generator(global_bound, grammar, exs):
                 for args in itertools.product(*(trees.get((typ, size+1), []) 
                                                 for typ, size in zip(in_types, partition))):
                     tree = op(*args)
-                    yield tree
+                    yield tree, size
                     add_tree((op.return_type, size), tree)
         
         # print(f"size {size} keys:")
