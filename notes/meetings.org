@@ -1,0 +1,91 @@
+* 10/14/21
+- [X] check observational equivalence
+- choose a DSL and work with it; the important piece is inference (finding rep from bitmap)
+- use smaller problem sizes and focus on seeing how search times scale with problem size
+  - the important property is scaling, not absolute runtime
+- given a grammar, might be more efficient to use refactoring approach
+  - also not super simple, at least for more complex examples (e.g. overlapping rects)
+    - f + g + delta
+- main project insight: inferring a generative model that 'understands' the problems in ARC
+- also interesting: inferring probabilistic programs (parsimony-vs-fidelity curve)
+- [-] todo:
+  - [X] request G2 cluster access for remote work
+  - [ ] read probmods book to learn more about probabilistic programs, generative models
+
+* 10/19/21
+** Constants and penalizing the use of random vector components
+- Using unneeded randomness is bad, and can cause overfitting
+- Penalizing the use of random components by incorporating a 'random component' cost into the loss fn can help reduce overfitting
+- Think of constants as a way to capture regularity across examples. Random components, on the other hand, explain differences across examples
+** TODO Hill climbing to optimize z
+- Optimize z component-wise: instead of randomly picking entire z's, choose the best value for each component
+  - Q: What if the components are not independent?
+- Hill climbing:
+  - objective fn: optimization goal? (minimize loss)
+  - neighbor fn: e.g. vectors with 1 different elt are neighbors
+- Can also use an SMT solver to quickly (~0.1s) solve for the best value of z for given f,x
+  - e.g. using Z3
+  - this might take about a week to implement
+** TODO Ladder search for jointly optimizing f and z
+- The first-pass approach proceeds by optimizing f up to a depth bound D and then optimizing z by randomly sampling z's I times and choosing the best z wrt f for each example
+  - This requires hyperparameters D, I
+  - Hyperparameter D needs to be set wrt the complexity of the input problem, which is something we shouldn't have to tell the learner
+- The ladder approach proceeds by level:
+  - Choose a random Z
+  - Find f_1, the best f over all f's of size 1 wrt Z
+  - Find Z_1, the best Z wrt f_1
+  - Find f_1', the best f of size 1 wrt Z_1
+  - Find f_2, then Z_2, then f_2'
+  - Repeat until we find an f_n or f_n' that finds a solution of sufficiently good fit to data
+- Keep in mind the work that's been done in the bottom-up enumeration of f; try not to redo too much work
+*** Ladded -> Pyramid
+- Bottom up enumeration uses observational equivalence to prune, which is defined wrt to choice of constants
+- Bottom up depends on choice of Z, b/c Zs are treated as constants
+- New choice of Z means starting over
+** Regular language learning
+** Problem areas
+- Random sub-bitmaps:
+  - an nxm bitmap has 2^(nm) possible configurations
+  - too large of a space to enumerate
+- high-entropy sources of randomness
+- tasks involving copies (e.g., of sub-bitmaps)
+** Data extractor primitives in DSL
+- Extract bitmap EB: N^4 -> Bitmap
+- We want to prevent the learner from cheating by simply memorizing bitmaps and spitting them back out as E(0, 0, w, h)
+- To counter this, incorporate a *penalty* for any use of EB:
+  - EB(x1, y1, x2, y2) has penalty -log((# colors) ^ (x2 - x1)(y2 - y1))
+  - EB: A -> Bmp
+    - cost(A) + cost(EB(A)) = c
+      for x in 1..w,
+        for y in 1..h,
+          c - log x y = cost(A)
+- Penalties should be proportional to the bits of entropy in the sub-domain
+- Q: should we actually penalize large EB's?
+** Associating a cost with each grammar component
+- measure cost as description length (- log probability)
+- quantize (round) logs
+- use log_b where b is the number of components in the grammar
+- use this cost as part of the loss
+*** TODO Use two different scoring functions
+- one for search, and one for judging solution fit to data
+- this is similar to sampling with proposal distributions
+** Distance metrics for perceptual inputs --> perceptual loss
+- simple things to check:
+  - center and scale two bitmaps before comparing them to one another
+- instead of spending time thinking about rectangles, think about more general techniques for translating input (bitmap) similarity to grammar edit distance
+*** TODO perceptual loss
+- NN: bitmap x bitmap --> <{0, 1}, Reals>
+  - NN(f(z), f(z + eps)) = <1, |eps|>
+  - NN(f(z), g(z)) = <0, _>
+- try sketching out in pytorch
+** TODO
+- [X] add constants to grammar
+- [X] ladder search
+- [ ] use two different scoring functions: one for search, one for judging solution fit
+  - [ ] penalize solns that use more random components
+  - [ ] incorporate cost (description length, -log Pr) into enumeration
+    - quantize logs
+- [ ] intelligently pick out useful constants?
+- [ ] hill-climbing to optimize z
+- [ ] perceptual loss
+
