@@ -58,7 +58,7 @@ def learn(g, exs, max_size, samples):
         zns = [env['z_n'] for env,_ in exs]
         print(f"\nd: {d}\nf: {f.pretty_print()}\nZn: {zns}")
         if d == 0:
-            print(f"\n\nCompleted search at size {size}.\n\n")
+            print(f"\nCompleted search at size {size}.\n")
             return f, zns
 
         # optimize z
@@ -66,8 +66,8 @@ def learn(g, exs, max_size, samples):
         zns, score = opt_zns(f, zns, exs, samples)
         print(f"\nZn: {zns}, score: {score}")
         update_envs(exs, zns, zbs)
-        if d == 0:
-            print(f"\n\nCompleted search at size {size}.\n\n")
+        if score == 0:
+            print(f"\nCompleted search at size {size}.\n")
             return f, zns
 
     print(f"\nCompleted search at size {size}.\n")
@@ -117,7 +117,8 @@ def opt_zns(f, zs, exs, iters):
         # print(f"env={env}, ans={ans}, f={f}, dist={f.eval(env).dist(ans)}, sat={f.satisfies_invariants(env)}")
         return f.eval(env).dist(ans) if f.satisfies_invariants(env) else math.inf
 
-    def best_neighbor(f, z, ex):
+    def best_neighbor(f, z, ex, mask, deltas=[-1, 1]):
+
         def make_and_score_neighbor(z, i, d):
             n = z[:i] + [z[i] + d] + z[i+1:]
             # print(f"z={z}, cost(z)={cost(f, z, ex)}, n={n}, cost(n)={cost(f, n, ex)}")
@@ -125,15 +126,15 @@ def opt_zns(f, zs, exs, iters):
             return n, cost(f, n, ex)
 
         return min((make_and_score_neighbor(z, i, d)
-                    for i in range(len(z)) 
-                    for d in [-1, 1]), 
+                    for i in mask
+                    for d in deltas), 
                    key=(lambda t: t[1]))
 
-    def climb_hill(f, z, ex, max_iters):
+    def climb_hill(f, z, ex, mask, max_iters):
         current = z
         current_cost = cost(f, z, ex)
         for _ in range(max_iters):
-            n, n_cost = best_neighbor(f, current, ex)
+            n, n_cost = best_neighbor(f, current, ex, mask)
             # print(f"c={current}, cost(c)={current_cost}, n={n}, cost(n)={n_cost}")
             if n_cost >= current_cost:
                 # reached peak
@@ -141,7 +142,14 @@ def opt_zns(f, zs, exs, iters):
             current = n
             current_cost = n_cost
 
-    zs_w_costs = [climb_hill(f, z, ex, iters) for (z, ex) in zip(zs, exs)]
+    mask = f.zs()
+    if not mask:
+        # no zs used in f 
+        zs = [gen_zn() for _ in range(len(zs))]
+        return zs, sum(cost(f, z, ex) for z, ex in zip(zs, exs))
+
+    zs_w_costs = [climb_hill(f, z, ex, mask, iters) 
+                  for (z, ex) in zip(zs, exs)]
     zs = [z for z,_ in zs_w_costs]
     cost = sum(c for _,c in zs_w_costs)
     return zs, cost
@@ -288,8 +296,8 @@ def test_learn():
         # exs = [(env, p.eval(env)) for env, p in test_case]
         f, zs = learn(g, test_case, max_size=20, samples=1000)
         end_time = time.time()
-        fstr, used_zs = (f.pretty_print(), f.zs()) if f is not None else 'None', []
-        print(f"\nSynthesized program:\t {fstr} \nused zs: {used_zs} \nZ: {zs} in {end_time - start_time}s")
+        fstr, used_zs = (f.pretty_print(), f.zs()) if f is not None else ('None', [])
+        print(f"Synthesized program:\t {fstr} used zs: {used_zs} \nZ: {zs} in {end_time - start_time}s")
 
 if __name__ == '__main__':
     # test_opt_zns()
