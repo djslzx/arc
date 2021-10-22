@@ -39,6 +39,12 @@ class Bitmap:
                 for y in range(self.height)
                 if self.mat[y][x]]
 
+    def num_on(self):
+        """Number of pixels toggled 'on'"""
+        return sum(self.mat[y][x]
+                   for x in range(self.width)
+                   for y in range(self.height))
+
     def pretty_print(self):
         return "\n".join(bool_matrix_to_img(self.mat))
 
@@ -50,21 +56,22 @@ class Bitmap:
               for x in range(self.width)]
              for y in range(self.height)])
 
-    def AND(self, other):
+    def intersect(self, other):
         return self.apply(lambda x,y: x and y, other)
 
-    def OR(self, other):
+    def union(self, other):
         return self.apply(lambda x,y: x or y, other)
     
-    def dist(self, other):
-        """
-        Distance between two Bitmaps 
-        sum of squared errors -> sum of errors (0/1-valued errors)
-        """
+    def px_dist(self, other):
         assert self.width == other.width and self.height == other.height
-        return sum(self.mat[y][x] != other.mat[y][x]
-                   for x in range(self.width) 
-                   for y in range(self.height))
+        return Bitmap.intersect(self, other).num_on()
+
+    def iou_dist(self, other):
+        assert self.width == other.width and self.height == other.height
+        return Bitmap.intersect(self, other).num_on()/Bitmap.union(self, other).num_on()
+
+    def dist(self, other):
+        return self.iou_dist(other)
 
 def test_img_to_bool_matrix():
     s = ["________",
