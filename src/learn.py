@@ -11,6 +11,7 @@ Strategy: jointly optimize `z` and `f`
 
 import random
 import itertools
+import math
 from grammar import *
 from bottom_up import *
 
@@ -62,8 +63,8 @@ def learn(g, exs, max_size, samples):
 
         # optimize z
         print("\nOptimizing Zn...")
-        zns, d = opt_zns(f, exs, samples)
-        print(f"\nd: {d}\nZn: {zns}")
+        zns, score = opt_zns(f, zns, exs, samples)
+        print(f"\nZn: {zns}, score: {score}")
         update_envs(exs, zns, zbs)
         if d == 0:
             print(f"\n\nCompleted search at size {size}.\n\n")
@@ -100,7 +101,7 @@ def opt_f(g, exs, bound, max_bound):
                     best_f, best_d = f, d
     return best_f, best_d, size
 
-def opt_zns(f, exs, samples):
+def opt_zns(f, zs, exs, iters):
     """
     Optimize Z wrt multiple examples: find Z* = (z1, z2, ..., zn) where
 
@@ -109,25 +110,53 @@ def opt_zns(f, exs, samples):
     ex: a list of examples (s_i, x_i) where s_i is an environment (including 'zn', 'zb') and x_i is a bitmap
     samples: max samples to randomly generate each z_i
     """
-    def opt_zn(f, ex, samples):
+    def cost(f, z, ex):
         env, ans = ex
-        best_zn = None
-        best_d = None
-        for _ in range(samples):
-            zn = gen_zn()
-            env['z_n'] = zn
-            if f.satisfies_invariants(env):
-                d = f.eval(env).dist(ans)
-                if d == 0:
-                    return zn, 0
-                elif best_zn is None or d < best_d:
-                    best_zn, best_d = zn, d
-        return best_zn, best_d
+        # print(f"old_env={env}", end=", ")
+        env['z_n'] = z
+        # print(f"env={env}, ans={ans}, f={f}, dist={f.eval(env).dist(ans)}, sat={f.satisfies_invariants(env)}")
+        return f.eval(env).dist(ans) if f.satisfies_invariants(env) else math.inf
 
-    zns_ds = [opt_zn(f, ex, samples) for ex in exs]
-    zns = [zn for zn,_ in zns_ds]
-    d = sum(d for _,d in zns_ds)
-    return zns, d
+    def best_neighbor(f, z, ex):
+        def make_and_score_neighbor(z, i, d):
+            n = z[:i] + [z[i] + d] + z[i+1:]
+            # print(f"z={z}, cost(z)={cost(f, z, ex)}, n={n}, cost(n)={cost(f, n, ex)}")
+            # print(f"z={z}, n={n}")
+            return n, cost(f, n, ex)
+
+        return min((make_and_score_neighbor(z, i, d)
+                    for i in range(len(z)) 
+                    for d in [-1, 1]), 
+                   key=(lambda t: t[1]))
+
+    def climb_hill(f, z, ex, max_iters):
+        current = z
+        current_cost = cost(f, z, ex)
+        for _ in range(max_iters):
+            n, n_cost = best_neighbor(f, current, ex)
+            # print(f"c={current}, cost(c)={current_cost}, n={n}, cost(n)={n_cost}")
+            if n_cost >= current_cost:
+                # reached peak
+                return current, current_cost
+            current = n
+            current_cost = n_cost
+
+    zs_w_costs = [climb_hill(f, z, ex, iters) for (z, ex) in zip(zs, exs)]
+    zs = [z for z,_ in zs_w_costs]
+    cost = sum(c for _,c in zs_w_costs)
+    return zs, cost
+
+def test_opt_zns():
+    f = Rect(Zn(Num(0)), Zn(Num(0)), 
+             Zn(Num(1)), Zn(Num(2)))
+    zs = [[0,1,0,0,0,0],]
+    exs = [({}, # {'z_b': [False] * 6}, 
+            Bitmap.from_img(['#___',
+                             '#___',
+                             '#___',
+                             '#___',]))]
+    out = opt_zns(f, zs, exs, iters=100)
+    print(f"out={out}")
 
 def test_learn():
     g = Grammar(
@@ -135,20 +164,20 @@ def test_learn():
         consts=[Num(0), Num(1), Num(2)])
 
     test_cases = [
-        # [
-        #     ({}, Bitmap.from_img(['#___',
-        #                           '#___',
-        #                           '____',
-        #                           '____',])),
-        #     ({}, Bitmap.from_img(['##__',
-        #                           '##__',
-        #                           '____',
-        #                           '____',])),
-        #     ({}, Bitmap.from_img(['###_',
-        #                           '###_',
-        #                           '____',
-        #                           '____',])),
-        # ],
+        [
+            ({}, Bitmap.from_img(['#___',
+                                  '#___',
+                                  '____',
+                                  '____',])),
+            ({}, Bitmap.from_img(['##__',
+                                  '##__',
+                                  '____',
+                                  '____',])),
+            ({}, Bitmap.from_img(['###_',
+                                  '###_',
+                                  '____',
+                                  '____',])),
+        ],
         # [
         #     ({}, Bitmap.from_img(['#___',
         #                           '____',
@@ -181,20 +210,20 @@ def test_learn():
         #                           '#___',
         #                           '____',])),
         # ],
-        [
-            ({}, Bitmap.from_img(['#___',
-                                  '____',
-                                  '____',
-                                  '___#',])),
-            ({}, Bitmap.from_img(['#___',
-                                  '#___',
-                                  '___#',
-                                  '___#',])),
-            ({}, Bitmap.from_img(['#___',
-                                  '#__#',
-                                  '#__#',
-                                  '___#',])),
-        ],
+        # [
+        #     ({}, Bitmap.from_img(['#___',
+        #                           '____',
+        #                           '____',
+        #                           '___#',])),
+        #     ({}, Bitmap.from_img(['#___',
+        #                           '#___',
+        #                           '___#',
+        #                           '___#',])),
+        #     ({}, Bitmap.from_img(['#___',
+        #                           '#__#',
+        #                           '#__#',
+        #                           '___#',])),
+        # ],
         # [
         #     ({}, Rect(Num(0), Num(0), 
         #               Num(1), Num(1)).eval()),
@@ -263,4 +292,5 @@ def test_learn():
         print(f"\nSynthesized program:\t {fstr} \nused zs: {used_zs} \nZ: {zs} in {end_time - start_time}s")
 
 if __name__ == '__main__':
+    # test_opt_zns()
     test_learn()
