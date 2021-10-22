@@ -110,45 +110,42 @@ def opt_zns(f, zs, exs, iters):
     ex: a list of examples (s_i, x_i) where s_i is an environment (including 'zn', 'zb') and x_i is a bitmap
     samples: max samples to randomly generate each z_i
     """
-    def cost(f, z, ex):
+    def cost(z, ex):
         env, ans = ex
-        # print(f"old_env={env}", end=", ")
         env['z_n'] = z
-        # print(f"env={env}, ans={ans}, f={f}, dist={f.eval(env).dist(ans)}, sat={f.satisfies_invariants(env)}")
         return f.eval(env).dist(ans) if f.satisfies_invariants(env) else math.inf
 
-    def best_neighbor(f, z, ex, mask, deltas=[-1, 1]):
+    def best_neighbor(z, ex, mask, deltas):
 
         def make_and_score_neighbor(z, i, d):
             n = z[:i] + [z[i] + d] + z[i+1:]
-            # print(f"z={z}, cost(z)={cost(f, z, ex)}, n={n}, cost(n)={cost(f, n, ex)}")
-            # print(f"z={z}, n={n}")
-            return n, cost(f, n, ex)
+            return n, cost(n, ex)
 
         return min((make_and_score_neighbor(z, i, d)
                     for i in mask
                     for d in deltas), 
                    key=(lambda t: t[1]))
 
-    def climb_hill(f, z, ex, mask, max_iters):
+    def climb_hill(z, ex, mask):
         current = z
-        current_cost = cost(f, z, ex)
-        for _ in range(max_iters):
-            n, n_cost = best_neighbor(f, current, ex, mask)
-            # print(f"c={current}, cost(c)={current_cost}, n={n}, cost(n)={n_cost}")
-            if n_cost >= current_cost:
-                # reached peak
+        current_cost = cost(z, ex)
+        for _ in range(iters):
+            n, n_cost = best_neighbor(current, ex, mask, deltas=[-1,1])
+            if n_cost >= current_cost: # reached peak
                 return current, current_cost
             current = n
             current_cost = n_cost
+
+    def random_choice(z, ex):
+        pass
 
     mask = f.zs()
     if not mask:
         # no zs used in f 
         zs = [gen_zn() for _ in range(len(zs))]
-        return zs, sum(cost(f, z, ex) for z, ex in zip(zs, exs))
+        return zs, sum(cost(z, ex) for z, ex in zip(zs, exs))
 
-    zs_w_costs = [climb_hill(f, z, ex, mask, iters) 
+    zs_w_costs = [climb_hill(z, ex, mask) 
                   for (z, ex) in zip(zs, exs)]
     zs = [z for z,_ in zs_w_costs]
     cost = sum(c for _,c in zs_w_costs)
