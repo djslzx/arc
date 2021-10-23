@@ -39,11 +39,9 @@ class Bitmap:
                 for y in range(self.height)
                 if self.mat[y][x]]
 
-    def num_on(self):
+    def n_pts(self):
         """Number of pixels toggled 'on'"""
-        return sum(self.mat[y][x]
-                   for x in range(self.width)
-                   for y in range(self.height))
+        return sum(sum(row) for row in self.mat)
 
     def pretty_print(self):
         return "\n".join(bool_matrix_to_img(self.mat))
@@ -61,17 +59,23 @@ class Bitmap:
 
     def union(self, other):
         return self.apply(lambda x,y: x or y, other)
-    
-    def px_dist(self, other):
-        assert self.width == other.width and self.height == other.height
-        return Bitmap.intersect(self, other).num_on()
 
-    def iou_dist(self, other):
+    def xor(self, other):
+        return self.apply(lambda x,y: x ^ y, other)
+    
+    def px_diff(self, other):
         assert self.width == other.width and self.height == other.height
-        return Bitmap.intersect(self, other).num_on()/Bitmap.union(self, other).num_on()
+        return Bitmap.xor(self, other).n_pts()
+
+    def iou_similarity(self, other):
+        """Intersection over Union (flip b/c dist (cost), not score)"""
+        assert self.width == other.width and self.height == other.height
+        i = Bitmap.intersect(self, other).n_pts()
+        u = Bitmap.union(self, other).n_pts()
+        return i/u if u > 0 else 0
 
     def dist(self, other):
-        return self.iou_dist(other)
+        return self.px_diff(other)
 
 def test_img_to_bool_matrix():
     s = ["________",
@@ -147,9 +151,9 @@ def test_bitmap_or():
           [True, True]]),
     ]
     for x, y, expected in tests:
-        actual = Bitmap(x).OR(Bitmap(y))
+        actual = Bitmap(x).union(Bitmap(y))
         assert actual == Bitmap(expected), \
-            f"test failed: {x} OR {y} = {actual}, expected={expected}"
+            f"test failed: {x} union {y} = {actual}, expected={expected}"
 
 def test_bitmap_and():
     tests = [
@@ -165,9 +169,9 @@ def test_bitmap_and():
           [True, False]]),
     ]
     for x, y, expected in tests:
-        actual = Bitmap(x).AND(Bitmap(y))
+        actual = Bitmap(x).intersect(Bitmap(y))
         assert actual == Bitmap(expected), \
-            f"test failed: {x} AND {y} = {actual}, expected={expected}"
+            f"test failed: {x} intersect {y} = {actual}, expected={expected}"
 
 if __name__ == '__main__':
     test_img_to_bool_matrix()
