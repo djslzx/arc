@@ -49,10 +49,10 @@ class Bitmap:
     def apply(self, op, other):
         assert isinstance(self, Bitmap) and isinstance(other, Bitmap)
         assert self.height == other.height and self.width == other.width
-        return Bitmap(
-            [[op(self.mat[y][x], other.mat[y][x])
-              for x in range(self.width)]
-             for y in range(self.height)])
+        return Bitmap([
+            [op(self.mat[y][x], other.mat[y][x])
+             for x in range(self.width)]
+            for y in range(self.height)])
 
     def intersect(self, other):
         return self.apply(lambda x,y: x and y, other)
@@ -64,12 +64,10 @@ class Bitmap:
         return self.apply(lambda x,y: x ^ y, other)
     
     def px_diff(self, other):
-        assert self.width == other.width and self.height == other.height
         return Bitmap.xor(self, other).n_pts()
 
     def iou_similarity(self, other):
-        """Intersection over Union (flip b/c dist (cost), not score)"""
-        assert self.width == other.width and self.height == other.height
+        """Intersection over Union"""
         i = Bitmap.intersect(self, other).n_pts()
         u = Bitmap.union(self, other).n_pts()
         return i/u if u > 0 else 0
