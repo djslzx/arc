@@ -348,7 +348,10 @@ class Program(Expr):
     def eval(self, env):
         x = self.x.eval(env)
         y = self.y.eval(env)
-        return x.OR(y)
+        return Bitmap.union(x, y)
+
+    def satisfies_invariants(self, env):
+        return self.x.satisfies_invariants(env) and self.y.satisfies_invariants(env) 
 
     def zs(self):
         return set.union(self.x.zs(), self.y.zs())
