@@ -88,18 +88,19 @@ def opt_f(g, exs, bound, max_bound):
     for f, size in bottom_up_generator(max_bound, g, exs):
         if size > bound and best_f is not None:
             break
-        if all(f.satisfies_invariants(env) for env in envs):
+        # TODO: eval once and use this for satisfies_invariants instead of evaluating twice
+        if f.return_type == "Bitmap" and \
+           all(f.satisfies_invariants(env) for env in envs):
             outs = tuple(f.eval(env) for env in envs)
-            if isinstance(outs[0], Bitmap):
-                d = sum_sq(out.dist(bmp) for out, bmp in zip(outs, bmps))
-                if d == 0:
-                    return f, 0, size
-                elif best_d is None or d < best_d:
-                    best_f, best_d = f, d
+            d = sum_sq(out.dist(bmp) for out, bmp in zip(outs, bmps))
+            if d == 0:
+                return f, 0, size
+            elif best_d is None or d < best_d:
+                best_f, best_d = f, d
     return best_f, best_d, size
 
 def cost(f, z, ex):
-    """Hill climbing cost function wrt a choice of z"""
+    """Hill climbing cost function for f, z wrt an example"""
     env, ans = ex
     env['z_n'] = z
     return f.eval(env).dist(ans) if f.satisfies_invariants(env) else math.inf
@@ -212,35 +213,63 @@ def test_learn():
         consts=[Num(0), Num(1), Num(2)])
 
     test_cases = [
+        [
+            ({}, Bitmap.from_img(['#___',
+                                  '#___',
+                                  '____',
+                                  '____',])),
+            ({}, Bitmap.from_img(['##__',
+                                  '##__',
+                                  '____',
+                                  '____',])),
+            ({}, Bitmap.from_img(['###_',
+                                  '###_',
+                                  '____',
+                                  '____',])),
+        ],
+        [
+            ({}, Bitmap.from_img(['#___',
+                                  '____',
+                                  '____',
+                                  '____',])),
+            ({}, Bitmap.from_img(['##__',
+                                  '##__',
+                                  '____',
+                                  '____',])),
+            ({}, Bitmap.from_img(['###_',
+                                  '###_',
+                                  '###_',
+                                  '____',])),
+            ({}, Bitmap.from_img(['####',
+                                  '####',
+                                  '####',
+                                  '####',])),
+        ],
         # [
+        #     ({}, Bitmap.from_img(['#___',
+        #                           '____',
+        #                           '____',
+        #                           '____',])),
         #     ({}, Bitmap.from_img(['#___',
         #                           '#___',
         #                           '____',
         #                           '____',])),
-        #     ({}, Bitmap.from_img(['##__',
-        #                           '##__',
-        #                           '____',
-        #                           '____',])),
-        #     ({}, Bitmap.from_img(['###_',
-        #                           '###_',
-        #                           '____',
+        #     ({}, Bitmap.from_img(['#___',
+        #                           '#___',
+        #                           '#___',
         #                           '____',])),
         # ],
         # [
-        #     ({}, Bitmap.from_img(['#___',
-        #                           '____',
-        #                           '____',
-        #                           '____',])),
         #     ({}, Bitmap.from_img(['##__',
         #                           '##__',
-        #                           '____',
-        #                           '____',])),
-        #     ({}, Bitmap.from_img(['###_',
-        #                           '###_',
-        #                           '###_',
-        #                           '____',])),
-        #     ({}, Bitmap.from_img(['####',
         #                           '####',
+        #                           '####',])),
+        #     ({}, Bitmap.from_img(['_##_',
+        #                           '_##_',
+        #                           '####',
+        #                           '####',])),
+        #     ({}, Bitmap.from_img(['__##',
+        #                           '__##',
         #                           '####',
         #                           '####',])),
         # ],
@@ -249,33 +278,37 @@ def test_learn():
         #                           '____',
         #                           '____',
         #                           '____',])),
-        #     ({}, Bitmap.from_img(['#___',
-        #                           '#___',
+        #     ({}, Bitmap.from_img(['___#',
+        #                           '____',
         #                           '____',
         #                           '____',])),
-        #     ({}, Bitmap.from_img(['#___',
-        #                           '#___',
-        #                           '#___',
-        #                           '____',])),
+        #     ({}, Bitmap.from_img(['____',
+        #                           '____',
+        #                           '____',
+        #                           '#___',])),
+        #     ({}, Bitmap.from_img(['____',
+        #                           '____',
+        #                           '____',
+        #                           '___#',])),
         # ],
-        [
-            ({}, Bitmap.from_img(['##__',
-                                  '##__',
-                                  '____',
-                                  '____',])),
-            ({}, Bitmap.from_img(['__##',
-                                  '__##',
-                                  '____',
-                                  '____',])),
-            ({}, Bitmap.from_img(['____',
-                                  '____',
-                                  '##__',
-                                  '##__',])),
-            ({}, Bitmap.from_img(['____',
-                                  '____',
-                                  '__##',
-                                  '__##',])),
-        ],
+        # [
+        #     ({}, Bitmap.from_img(['##__',
+        #                           '##__',
+        #                           '____',
+        #                           '____',])),
+        #     ({}, Bitmap.from_img(['__##',
+        #                           '__##',
+        #                           '____',
+        #                           '____',])),
+        #     ({}, Bitmap.from_img(['____',
+        #                           '____',
+        #                           '##__',
+        #                           '##__',])),
+        #     ({}, Bitmap.from_img(['____',
+        #                           '____',
+        #                           '__##',
+        #                           '__##',])),
+        # ],
         # |P[R(0,0,1,a), R(3,4-a,4,4)]| = 13
         # [
         #     ({}, Bitmap.from_img(['#___',
@@ -292,21 +325,34 @@ def test_learn():
         #                           '___#',])),
         # ],
         # [
-        #     ({}, Rect(Num(0), Num(0), 
-        #               Num(1), Num(1)).eval()),
+        #     ({}, Bitmap.from_img(['#___',
+        #                           '____',
+        #                           '____',
+        #                           '____',])),
         # ],
-        # R(z1, z1, z1+1, z1+1)
         # [
-        #     ({}, Rect(Num(0), Num(0), 
-        #               Num(1), Num(1)).eval()),
-        #     ({}, Rect(Num(1), Num(1), 
-        #               Num(2), Num(2)).eval()),
+        #     ({}, Bitmap.from_img(['#___',
+        #                           '____',
+        #                           '____',
+        #                           '____',])),
+        #     ({}, Bitmap.from_img(['____',
+        #                           '_#__',
+        #                           '____',
+        #                           '____',])),
         # ],
-        # R(z1, z1, z1+1, z1+1)
         # [
-        #     ({}, Rect(Num(0), Num(0), Num(1), Num(1))),
-        #     ({}, Rect(Num(1), Num(1), Num(2), Num(2))),
-        #     ({}, Rect(Num(3), Num(3), Num(4), Num(4))),
+        #     ({}, Bitmap.from_img(['#___',
+        #                           '____',
+        #                           '____',
+        #                           '____',])),
+        #     ({}, Bitmap.from_img(['____',
+        #                           '_#__',
+        #                           '____',
+        #                           '____',])),
+        #     ({}, Bitmap.from_img(['____',
+        #                           '____',
+        #                           '__#_',
+        #                           '____',])),
         # ],
         # R(z1, z1, z2, z3)
         # [
@@ -329,12 +375,6 @@ def test_learn():
         #                       Num(4), Num(2)),
         #                  Rect(Num(1), Num(1), 
         #                       Num(2), Num(2)))).eval(),
-        # ],
-        # [
-        #     ({}, Program(Rect(Num(0), Num(1), 
-        #                       Num(2), Num(3)),
-        #                  Rect(Num(3), Num(2), 
-        #                       Num(4), Num(4))).eval())
         # ],
         ## R(z0, z1, z2, z3), R(z3, z2, z4, z4)
         # [
