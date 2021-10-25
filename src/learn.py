@@ -22,6 +22,14 @@ def gen_zb():
 def gen_zn():
     return [random.randint(Z_LO, Z_HI) for _ in range(Z_SIZE)]
 
+def render(f, envs, cost):
+    zns = [env['z_n'] for env in envs]
+    print(f"\nf={f.pretty_print()}, Z={zns}, cost={cost}")
+    print("exs:")
+    for env in envs:
+        print(f"in={env['z_n']}, out=")
+        print(f.eval(env).pretty_print())
+
 def learn(g, exs, max_size, samples):
     """
     Jointly optimize f and Z wrt multiple examples {(s_i,x_i)}_i,
@@ -54,17 +62,16 @@ def learn(g, exs, max_size, samples):
     while size <= max_size:
         # optimize f up to `size`
         print("\nOptimizing f...")
-        f, d, size = opt_f(g, exs, size, max_size)
+        f, cost, size = opt_f(g, exs, size, max_size)
         assert f is not None, f"Couldn't find an f with size <= {max_size}"
-        zns = [env['z_n'] for env,_ in exs]
-        print(f"\nd: {d}\nf: {f.pretty_print()}\nZn: {zns}")
-        if d == 0: break
+        render(f, [env for env,_ in exs], cost)
+        if cost == 0: break
 
         # optimize z
         print("\nOptimizing Zn...")
         zns, cost = opt_zns(f, zns, exs, samples)
-        print(f"\nZn: {zns}, cost: {cost}")
         update_envs(exs, zns, zbs)
+        render(f, [env for env,_ in exs], cost)
         if cost == 0: break
 
     print(f"\nCompleted search at size {size}.\n")
@@ -84,7 +91,7 @@ def opt_f(g, exs, bound, max_bound):
         if all(f.satisfies_invariants(env) for env in envs):
             outs = tuple(f.eval(env) for env in envs)
             if isinstance(outs[0], Bitmap):
-                d = sum(out.dist(bmp) for out, bmp in zip(outs, bmps))
+                d = sum_sq(out.dist(bmp) for out, bmp in zip(outs, bmps))
                 if d == 0:
                     return f, 0, size
                 elif best_d is None or d < best_d:
@@ -152,12 +159,12 @@ def opt_zns(f, zs, exs, iters):
     mask = f.zs()
     if not mask: # If f uses no components of z, just randomly generate a new z
         zs = [gen_zn() for _ in range(len(zs))]
-        c = avg(cost(f, z, ex) for z, ex in zip(zs, exs))
+        c = sum_sq(cost(f, z, ex) for z, ex in zip(zs, exs))
         return zs, c
 
     zs_w_costs = [opt_zn(f, z, ex, mask, iters) for (z, ex) in zip(zs, exs)]
     zs = [z for z,_ in zs_w_costs]
-    c = avg(c for _,c in zs_w_costs)
+    c = sum_sq(c for _,c in zs_w_costs)
     return zs, c
 
 def test_opt_zns():
@@ -205,67 +212,85 @@ def test_learn():
         consts=[Num(0), Num(1), Num(2)])
 
     test_cases = [
+        # [
+        #     ({}, Bitmap.from_img(['#___',
+        #                           '#___',
+        #                           '____',
+        #                           '____',])),
+        #     ({}, Bitmap.from_img(['##__',
+        #                           '##__',
+        #                           '____',
+        #                           '____',])),
+        #     ({}, Bitmap.from_img(['###_',
+        #                           '###_',
+        #                           '____',
+        #                           '____',])),
+        # ],
+        # [
+        #     ({}, Bitmap.from_img(['#___',
+        #                           '____',
+        #                           '____',
+        #                           '____',])),
+        #     ({}, Bitmap.from_img(['##__',
+        #                           '##__',
+        #                           '____',
+        #                           '____',])),
+        #     ({}, Bitmap.from_img(['###_',
+        #                           '###_',
+        #                           '###_',
+        #                           '____',])),
+        #     ({}, Bitmap.from_img(['####',
+        #                           '####',
+        #                           '####',
+        #                           '####',])),
+        # ],
+        # [
+        #     ({}, Bitmap.from_img(['#___',
+        #                           '____',
+        #                           '____',
+        #                           '____',])),
+        #     ({}, Bitmap.from_img(['#___',
+        #                           '#___',
+        #                           '____',
+        #                           '____',])),
+        #     ({}, Bitmap.from_img(['#___',
+        #                           '#___',
+        #                           '#___',
+        #                           '____',])),
+        # ],
         [
-            ({}, Bitmap.from_img(['#___',
-                                  '#___',
-                                  '____',
-                                  '____',])),
             ({}, Bitmap.from_img(['##__',
                                   '##__',
                                   '____',
                                   '____',])),
-            ({}, Bitmap.from_img(['###_',
-                                  '###_',
+            ({}, Bitmap.from_img(['__##',
+                                  '__##',
                                   '____',
                                   '____',])),
-        ],
-        [
-            ({}, Bitmap.from_img(['#___',
+            ({}, Bitmap.from_img(['____',
                                   '____',
-                                  '____',
-                                  '____',])),
-            ({}, Bitmap.from_img(['##__',
                                   '##__',
+                                  '##__',])),
+            ({}, Bitmap.from_img(['____',
                                   '____',
-                                  '____',])),
-            ({}, Bitmap.from_img(['###_',
-                                  '###_',
-                                  '###_',
-                                  '____',])),
-            ({}, Bitmap.from_img(['####',
-                                  '####',
-                                  '####',
-                                  '####',])),
-        ],
-        [
-            ({}, Bitmap.from_img(['#___',
-                                  '____',
-                                  '____',
-                                  '____',])),
-            ({}, Bitmap.from_img(['#___',
-                                  '#___',
-                                  '____',
-                                  '____',])),
-            ({}, Bitmap.from_img(['#___',
-                                  '#___',
-                                  '#___',
-                                  '____',])),
+                                  '__##',
+                                  '__##',])),
         ],
         # |P[R(0,0,1,a), R(3,4-a,4,4)]| = 13
-        [
-            ({}, Bitmap.from_img(['#___',
-                                  '____',
-                                  '____',
-                                  '___#',])),
-            ({}, Bitmap.from_img(['#___',
-                                  '#___',
-                                  '___#',
-                                  '___#',])),
-            ({}, Bitmap.from_img(['#___',
-                                  '#__#',
-                                  '#__#',
-                                  '___#',])),
-        ],
+        # [
+        #     ({}, Bitmap.from_img(['#___',
+        #                           '____',
+        #                           '____',
+        #                           '___#',])),
+        #     ({}, Bitmap.from_img(['#___',
+        #                           '#___',
+        #                           '___#',
+        #                           '___#',])),
+        #     ({}, Bitmap.from_img(['#___',
+        #                           '#__#',
+        #                           '#__#',
+        #                           '___#',])),
+        # ],
         # [
         #     ({}, Rect(Num(0), Num(0), 
         #               Num(1), Num(1)).eval()),
@@ -326,7 +351,10 @@ def test_learn():
 
     for test_case in test_cases:
         start_time = time.time()
-        print(f"\nTesting {[(env, p.pretty_print()) for env, p in test_case]}...")
+        print("\nTesting ")
+        for i, (env, p) in enumerate(test_case):
+            print(f"Example {i}: env={env}, img=")
+            print(p.pretty_print())
         # exs = [(env, p.eval(env)) for env, p in test_case]
         f, zs = learn(g, test_case, max_size=20, samples=1000)
         end_time = time.time()
