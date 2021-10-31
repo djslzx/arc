@@ -103,7 +103,11 @@ def cost(f, z, ex):
     """Hill climbing cost function for f, z wrt an example"""
     env, ans = ex
     env['z_n'] = z
-    return f.eval(env).dist(ans) if f.satisfies_invariants(env) else math.inf
+
+    # TODO: penalize use of lots of components of z
+    n_zs = max(len(f.zs()), 1)
+    return n_zs * f.eval(env).dist(ans) \
+        if f.satisfies_invariants(env) else math.inf
 
 def opt_zn(f, z, ex, mask, iters):
 
@@ -296,14 +300,17 @@ def test_learn():
         #                           '##__',
         #                           '____',
         #                           '____',])),
+
         #     ({}, Bitmap.from_img(['__##',
         #                           '__##',
         #                           '____',
         #                           '____',])),
+
         #     ({}, Bitmap.from_img(['____',
         #                           '____',
         #                           '##__',
         #                           '##__',])),
+
         #     ({}, Bitmap.from_img(['____',
         #                           '____',
         #                           '__##',
