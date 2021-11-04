@@ -1,13 +1,13 @@
 from bmap import Bitmap
 
 # bitmap size constants
-BMP_WIDTH=4
-BMP_HEIGHT=4
+B_W=8
+B_H=8
 
 # constants for z_n, z_b
 Z_SIZE = 6                        # length of z_n, z_b 
 Z_LO = 0                          # min poss value in z_n
-Z_HI = max(BMP_WIDTH, BMP_HEIGHT) # max poss value in z_n
+Z_HI = max(B_W, B_H) # max poss value in z_n
 
 class Grammar:
     def __init__(self, ops, consts):
@@ -34,6 +34,11 @@ class Expr:
 
     def satisfies_invariants(self, env):
         return True
+
+    def dist(self, other):
+        # TODO
+        # Levenshtein distance? but should also account for differences between scalars
+        assert False, "unimplemented"
 
     def zs(self):
         return set()
@@ -314,7 +319,7 @@ class Rect(Expr):
         y1 = self.y1.eval(env)
         x2 = self.x2.eval(env)
         y2 = self.y2.eval(env)
-        return 0 <= x1 < x2 <= BMP_WIDTH and 0 <= y1 < y2 <= BMP_HEIGHT
+        return 0 <= x1 < x2 <= B_W and 0 <= y1 < y2 <= B_H
 
     def eval(self, env):
         x1 = self.x1.eval(env)
@@ -322,8 +327,8 @@ class Rect(Expr):
         x2 = self.x2.eval(env)
         y2 = self.y2.eval(env)
         return Bitmap([[x1 <= x < x2 and y1 <= y < y2
-                        for x in range(BMP_WIDTH)]
-                       for y in range(BMP_HEIGHT)])
+                        for x in range(B_W)]
+                       for y in range(B_H)])
 
     def zs(self):
         return set.union(self.x1.zs(),
