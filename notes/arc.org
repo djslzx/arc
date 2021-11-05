@@ -1,9 +1,0 @@
-* ARC
-** Priors
-- Objectness
-  - cohesion
-  - persistence
-  - influence via contact
-- Goal-directedness
-- Numbers/counting
-- Geometry/topology

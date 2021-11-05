@@ -6,73 +6,70 @@ from grammar import *
 
 VERBOSE = True
 
+def eval(expr, xs):
+    def handle(x):
+        y = None
+        try: y = expr.eval(x)
+        except AssertionError: pass
+        return y
+
+    return tuple(handle(x) for x in xs)
+
 def bottom_up(global_bound, grammar, exs):
     """
     global_bound: int. an upper bound on the size of expression
     exs: list of tuples of environment (the input) and desired output, such as [({'x': 5}, 6), ({'x': 1}, 2)]
     returns: either None if no program can be found that satisfies the input outputs, or the smallest such program. If a program `p` is returned, it should satisfy `all( p.eval(input) == output for input, output in exs )`
     """
-    target_outputs = tuple(y for _, y in exs)
+    xs = [x for x, _ in exs]
+    ys = tuple(y for _, y in exs)
 
-    for expr, _ in bottom_up_generator(global_bound, grammar, exs):
-        outputs = tuple(expr.eval(input) for input, _ in exs)
-        if outputs == target_outputs:
+    for expr, _ in bottom_up_generator(global_bound, grammar, xs):
+        zs = eval(expr, xs)
+        if ys == zs:
             return expr
 
     return None
 
-def bottom_up_generator(global_bound, grammar, exs):
+def bottom_up_generator(global_bound, grammar, xs):
     """
     global_bound: int. an upper bound on the size of expression
-    exs: list of tuples of environment (the input) and desired output, such as [({'x': 5}, 6), ({'x': 1}, 2)]
     yields: sequence of programs, ordered by expression size, which are semantically distinct on the input examples
     """
-    trees = dict() # mapping (type, size) => all values that can be computed of type using an expression of size
-    seen = set() # Store seen outputs (observational equivalence filtering)
+    exprs = dict() # (type, size) => values
+    seen = set()
 
-    def pad(x):
-        return (x, type(x))
-
-    def add_tree(key, tree):
+    def add_expr(key, expr):
         """
-        Add a tree to trees[k] if not observationally equivalent to a pre-existing program.
+        Add a expr to exprs[k] if not observationally equivalent to a pre-existing program.
 
-        Use `pad` to store (output, type) pairs to address an issue with how Python thinks True == 1
+        Use (output, type) pairs to address an issue with how Python thinks True == 1
         """
-        out = tuple(pad(tree.eval(x)) for x, _ in exs)
-        if out not in seen:
-            if key not in trees: 
-                trees[key] = [tree]
-            else: 
-                trees[key].append(tree)    
-            seen.add(out)
+        ys = tuple((y, type(y)) for y in eval(expr, xs))
+        if any(ys) and ys not in seen: # don't include `ys` if all entries are None
+            seen.add(ys)
+            if key not in exprs: exprs[key] = [expr]
+            else: exprs[key].append(expr)    
 
-    # Add all terminals to `trees` as trees of size 1
+    # Add all terminals to `exprs` as exprs of size 1
     for x in grammar.consts:
         yield x, 1
-        add_tree((x.return_type, 1), x)
+        add_expr((x.return_type, 1), x)
 
-    # Yield a generator for each size?
-
-    # Generate all trees of size `size` and add to `trees`
+    # Generate all exprs of size `size` and add to `exprs`
     for size in range(1, global_bound+1):
-        if VERBOSE: print(f"Generating trees of size {size}... ", end='')
+        if VERBOSE: print(f"Generating exprs of size {size}... ", end='')
         # For each operator, determine how many args it needs and fill in using integer_partitions
         for op in grammar.ops:
             in_types = op.argument_types
             n_inputs = len(in_types)
             for partition in integer_partitions(size - 1 - n_inputs, n_inputs):
-                for args in itertools.product(*(trees.get((typ, size+1), []) 
-                                                for typ, size in zip(in_types, partition))):
-                    tree = op(*args)
-                    yield tree, size
-                    add_tree((op.return_type, size), tree)
-        
-        # print(f"size {size} keys:")
-        # for k in trees.keys():
-        #     print(k)
-
-        if VERBOSE: print(f"|trees| = {sum(len(l) for l in trees.values())}")
+                for args in itertools.product(*[exprs.get((typ, size+1), []) 
+                                                for typ, size in zip(in_types, partition)]):
+                    expr = op(*args)
+                    yield expr, size
+                    add_expr((op.return_type, size), expr)
+        if VERBOSE: print(f"|exprs| = {sum(len(l) for l in exprs.values())}")
 
 def integer_partitions(target_value, number_of_arguments):
     """

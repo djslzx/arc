@@ -1,8 +1,8 @@
 from bmap import Bitmap
 
 # bitmap size constants
-B_W=8
-B_H=8
+B_W=4
+B_H=4
 
 # constants for z_n, z_b
 Z_SIZE = 6                        # length of z_n, z_b 
@@ -31,9 +31,6 @@ class Expr:
     def __gt__(self, other): return str(self) > str(other)
 
     def __lt__(self, other): return str(self) < str(other)
-
-    def satisfies_invariants(self, env):
-        return True
 
     def dist(self, other):
         # TODO
@@ -314,18 +311,12 @@ class Rect(Expr):
     def pretty_print(self):
         return f"R({self.x1.pretty_print()}, {self.y1.pretty_print()}, {self.x2.pretty_print()}, {self.y2.pretty_print()})"
 
-    def satisfies_invariants(self, env):
-        x1 = self.x1.eval(env)
-        y1 = self.y1.eval(env)
-        x2 = self.x2.eval(env)
-        y2 = self.y2.eval(env)
-        return 0 <= x1 < x2 <= B_W and 0 <= y1 < y2 <= B_H
-
     def eval(self, env):
         x1 = self.x1.eval(env)
         y1 = self.y1.eval(env)
         x2 = self.x2.eval(env)
         y2 = self.y2.eval(env)
+        assert 0 <= x1 < x2 <= B_W and 0 <= y1 < y2 <= B_H
         return Bitmap([[x1 <= x < x2 and y1 <= y < y2
                         for x in range(B_W)]
                        for y in range(B_H)])
@@ -354,9 +345,6 @@ class Program(Expr):
         x = self.x.eval(env)
         y = self.y.eval(env)
         return Bitmap.union(x, y)
-
-    def satisfies_invariants(self, env):
-        return self.x.satisfies_invariants(env) and self.y.satisfies_invariants(env) 
 
     def zs(self):
         return set.union(self.x.zs(), self.y.zs())

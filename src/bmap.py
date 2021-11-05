@@ -1,3 +1,5 @@
+import math
+
 def img_to_bool_matrix(lines):
     """Converts an 'image' (a list of strings) into a row-major boolean matrix"""
     return [[c == "#" for c in line] 
@@ -32,6 +34,10 @@ class Bitmap:
             self.height == other.height and \
             self.width == other.width and \
             self.mat == other.mat
+
+    @property
+    def dim(self):
+        return (self.width, self.height)
 
     def as_pts(self):
         return [(x,y) 
@@ -73,6 +79,7 @@ class Bitmap:
         return i/u if u > 0 else 0
 
     def dist(self, other):
+        if other is None: return math.inf
         return self.px_diff(other)
 
 def test_img_to_bool_matrix():

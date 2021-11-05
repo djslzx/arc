@@ -10,8 +10,7 @@ Strategy: jointly optimize `z` and `f`
 """
 
 import random
-import itertools
-import math
+import torch as T
 from util import *
 from grammar import *
 from bottom_up import *
@@ -85,18 +84,20 @@ def opt_f(g, exs, bound, max_bound):
     bmps = [bmp for _,bmp in exs]
     best_f = None
     best_d = None 
-    for f, size in bottom_up_generator(max_bound, g, exs):
+    for f, size in bottom_up_generator(max_bound, g, envs):
         if size > bound and best_f is not None:
             break
         # TODO: eval once and use this for satisfies_invariants instead of evaluating twice
-        if f.return_type == "Bitmap" and \
-           all(f.satisfies_invariants(env) for env in envs):
-            outs = tuple(f.eval(env) for env in envs)
-            d = sum_sq(out.dist(bmp) for out, bmp in zip(outs, bmps))
-            if d == 0:
-                return f, 0, size
-            elif best_d is None or d < best_d:
-                best_f, best_d = f, d
+        if f.return_type == "Bitmap":
+            ys = eval(f, envs)
+            # print("ys", [y.dim for y in ys if y is not None], "bmps", [bmp.dim for bmp in bmps])
+            if any(ys):
+                d = sum_sq(bmp.dist(y) for y, bmp in zip(ys, bmps))
+                if d == 0:
+                    return f, 0, size
+                elif best_d is None or d < best_d:
+                    best_f, best_d = f, d
+
     return best_f, best_d, size
 
 def cost(f, z, ex):
@@ -106,8 +107,10 @@ def cost(f, z, ex):
 
     # TODO: penalize use of lots of components of z
     n_zs = max(len(f.zs()), 1)
-    return n_zs * f.eval(env).dist(ans) \
-        if f.satisfies_invariants(env) else math.inf
+    try:
+        return n_zs * f.eval(env).dist(ans)
+    except AssertionError:
+        return T.inf
 
 def opt_zn(f, z, ex, mask, iters):
 
@@ -121,9 +124,15 @@ def opt_zn(f, z, ex, mask, iters):
         where the neighborhood of z is defined as
           N(z) = {v | len(v) = len(z), v differs from x at exactly one component}
         """
-        neighbors = (z[:i] + [z[i] + d] + z[i+1:]
-                     for i in mask
-                     for d in deltas)
+        # Regenerate any z's that aren't currently used
+        for i, b in enumerate(mask):
+            if not b:
+                z[i] = random.randint(Z_LO, Z_HI)
+            
+        neighbors = [z[:i] + [z[i] + d] + z[i+1:]
+                     for i, b in enumerate(mask) if b
+                     for d in deltas]
+
         return min(((n, zn_cost(n)) for n in neighbors), 
                    key=(lambda t: t[1]))
 
@@ -161,12 +170,12 @@ def opt_zns(f, zs, exs, iters):
     ex: a list of examples (s_i, x_i) where s_i is an environment (including 'zn', 'zb') and x_i is a bitmap
     samples: max samples to randomly generate each z_i
     """
-    mask = f.zs()
-    if not mask: # If f uses no components of z, just randomly generate a new z
+    mask = [i in f.zs() for i in range(Z_SIZE)]
+    if not any(mask): # If f uses no components of z, just randomly generate a new z
+        print("Empty mask, randomizing...")
         zs = [gen_zn() for _ in range(len(zs))]
         c = sum_sq(cost(f, z, ex) for z, ex in zip(zs, exs))
         return zs, c
-
     zs_w_costs = [opt_zn(f, z, ex, mask, iters) for (z, ex) in zip(zs, exs)]
     zs = [z for z,_ in zs_w_costs]
     c = sum_sq(c for _,c in zs_w_costs)
@@ -249,20 +258,20 @@ def test_learn():
                                   '####',
                                   '####',])),
         ],
-        # [
-        #     ({}, Bitmap.from_img(['#___',
-        #                           '____',
-        #                           '____',
-        #                           '____',])),
-        #     ({}, Bitmap.from_img(['#___',
-        #                           '#___',
-        #                           '____',
-        #                           '____',])),
-        #     ({}, Bitmap.from_img(['#___',
-        #                           '#___',
-        #                           '#___',
-        #                           '____',])),
-        # ],
+        [
+            ({}, Bitmap.from_img(['#___',
+                                  '____',
+                                  '____',
+                                  '____',])),
+            ({}, Bitmap.from_img(['#___',
+                                  '#___',
+                                  '____',
+                                  '____',])),
+            ({}, Bitmap.from_img(['#___',
+                                  '#___',
+                                  '#___',
+                                  '____',])),
+        ],
         # [
         #     ({}, Bitmap.from_img(['##__',
         #                           '##__',
@@ -277,24 +286,24 @@ def test_learn():
         #                           '####',
         #                           '####',])),
         # ],
-        # [
-        #     ({}, Bitmap.from_img(['#___',
-        #                           '____',
-        #                           '____',
-        #                           '____',])),
-        #     ({}, Bitmap.from_img(['___#',
-        #                           '____',
-        #                           '____',
-        #                           '____',])),
-        #     ({}, Bitmap.from_img(['____',
-        #                           '____',
-        #                           '____',
-        #                           '#___',])),
-        #     ({}, Bitmap.from_img(['____',
-        #                           '____',
-        #                           '____',
-        #                           '___#',])),
-        # ],
+        [
+            ({}, Bitmap.from_img(['#___',
+                                  '____',
+                                  '____',
+                                  '____',])),
+            ({}, Bitmap.from_img(['___#',
+                                  '____',
+                                  '____',
+                                  '____',])),
+            ({}, Bitmap.from_img(['____',
+                                  '____',
+                                  '____',
+                                  '#___',])),
+            ({}, Bitmap.from_img(['____',
+                                  '____',
+                                  '____',
+                                  '___#',])),
+        ],
         # [
         #     ({}, Bitmap.from_img(['##__',
         #                           '##__',
