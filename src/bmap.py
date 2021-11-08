@@ -1,4 +1,5 @@
 import math
+import torch as T
 
 def img_to_bool_matrix(lines):
     """Converts an 'image' (a list of strings) into a row-major boolean matrix"""
@@ -16,6 +17,10 @@ class Bitmap:
     @staticmethod
     def from_img(s):
         return Bitmap(img_to_bool_matrix(s))
+
+    @staticmethod
+    def EMPTY(w, h):
+        return Bitmap([[False] * w] * h)
 
     def __init__(self, mat):
         self.mat = mat
@@ -35,6 +40,9 @@ class Bitmap:
             self.width == other.width and \
             self.mat == other.mat
 
+    def empty(self):
+        return not any(any(row) for row in self.mat)
+
     @property
     def dim(self):
         return (self.width, self.height)
@@ -44,6 +52,9 @@ class Bitmap:
                 for x in range(self.width)
                 for y in range(self.height)
                 if self.mat[y][x]]
+
+    def as_tensor(self):
+        return T.tensor([[int(x) for x in row] for row in self.mat])
 
     def n_pts(self):
         """Number of pixels toggled 'on'"""
@@ -178,8 +189,22 @@ def test_bitmap_and():
         assert actual == Bitmap(expected), \
             f"test failed: {x} intersect {y} = {actual}, expected={expected}"
 
+def test_empty():
+    tests = [
+        ([[False]], True),
+        ([[False, False], [False, False]], True),
+        ([[False, False], [True, False]], False),
+        ([[True, True], [True, True]], False),
+    ]
+    for x, expected in tests:
+        actual = Bitmap(x).empty()
+        assert actual == expected, \
+            f"test failed: (empty {x})={actual}, expected={expected}"
+
 if __name__ == '__main__':
     test_img_to_bool_matrix()
     test_bool_matrix_to_img()
     test_bitmap_or()
     test_bitmap_and()
+    test_empty()
+    print(" [+] passed all tests")
