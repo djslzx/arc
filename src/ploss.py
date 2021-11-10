@@ -43,7 +43,7 @@ def make_exs(exprs, zs, n_fs, k_f, n_xs):
     """
     def eval(f, z):
         try:
-            return f.eval({'z_n':z}).as_tensor()
+            return f.eval({'z_n':z}).as_tensor().float()
         except AssertionError:
             return T.zeros(B_W, B_H)
 
@@ -68,7 +68,7 @@ def make_exs(exprs, zs, n_fs, k_f, n_xs):
         # Add matching examples using xs generated with f
         for pair in itertools.combinations(f_sets, 2):
             ins.append(T.cat(pair))
-            outs.append(1)
+            outs.append(1.0)
 
         # Add non-matching examples by pairing f with g
         for _ in range(k_f):
@@ -76,7 +76,7 @@ def make_exs(exprs, zs, n_fs, k_f, n_xs):
                 g, g_sets = random.choice(exs)
                 if g != f: break
             ins.append(T.cat((g_sets[0], f_sets[0])))
-            outs.append(0)
+            outs.append(0.0)
 
     return ins, outs
 
@@ -86,8 +86,11 @@ class Net(nn.Module):
         """
         n: number of elts in each example set
         """
-        super(NeuralNetwork, self).__init__()
+        super(Net, self).__init__()
         self.n = n
+        self.c = c
+        self.w = w
+        self.h = h
         self.conv_stack = nn.Sequential(
             nn.Conv2d(1, c, 3, padding='same'),
             nn.ReLU(),
@@ -113,38 +116,45 @@ class Net(nn.Module):
         """
         x: a tensor w/ shape (2N x 1 x Bw x Bh)
         """
+        x = x.squeeze(dim=0)
         x = self.conv_stack(x)
 
         # Split, max pool, flatten, and concat
-        a, b = T.split(x, self.n)
+        a, b = x.split(self.n)
         a = T.max(a, dim=0).values
         b = T.max(b, dim=0).values
         x = T.cat((a, b))
 
-        x = T.flatten(x)
+        x = x.flatten()
         x = self.linear_stack(x)
+        # x = x.unsqueeze(0)
         return x
 
-    def train(self, xs, ys):
-        for epoch in range(2):  # loop over the dataset multiple times
-            running_loss = 0.0
-            for i, data in enumerate(trainloader, 0):
-                inputs, labels = data
-                optimizer.zero_grad()
+    def train(self, xs, ys, epochs):
+        criterion = nn.BCEWithLogitsLoss()
+        optimizer = T.optim.Adam(net.parameters(), lr=0.001)
 
-                # forward + backward + optimize
-                outputs = net(inputs)
-                loss = criterion(outputs, labels)
+        dataset = T.utils.data.TensorDataset(xs, ys)
+        dataloader = T.utils.data.DataLoader(dataset, shuffle=True)
+
+        for epoch in range(1, epochs+1):
+            running_loss = 0.0
+            for i, (x,y) in enumerate(dataloader, 1):
+                # print(x[0][0])
+
+                optimizer.zero_grad()
+                loss = criterion(self(x), y.squeeze(0))
                 loss.backward()
                 optimizer.step()
 
                 # print statistics
                 running_loss += loss.item()
-                if i % 2000 == 1999:    # print every 2000 mini-batches
+                if i % 300 == 0:
                     print('[%d, %5d] loss: %.3f' %
-                          (epoch + 1, i + 1, running_loss / 2000))
+                          (epoch, i, running_loss / 300))
                     running_loss = 0.0
-                
+
+        T.save(self.state_dict(), './model.pt')
         print('Finished Training')
 
 if __name__ == '__main__':
@@ -158,36 +168,59 @@ if __name__ == '__main__':
 
     # print('Making and writing Z...')
     # zs = [gen_zn() for _ in range(n_zs)]
-    # with open('zs.dat', 'wb') as f:
+    # with open('../data/zs.dat', 'wb') as f:
     #     pickle.dump(zs, f)
 
     # print('Making and writing exprs...')
     # exprs = gen_exprs(g, zs, 'Bitmap', 5)
-    # with open('exprs.dat', 'wb') as f:
+    # with open('../data/exprs.dat', 'wb') as f:
     #     pickle.dump(exprs, f)
 
-    print('Loading Z, exprs...')
-    exprs = []
-    zs = []
-    with open('exprs.dat', 'rb') as f:
-        exprs = pickle.load(f)
-    with open('zs.dat', 'rb') as f:
-        zs = pickle.load(f)
+    # print('Making and saving examples...')
+    # exprs = []
+    # zs = []
+    # with open('../data/exprs.dat', 'rb') as f:
+    #     exprs = pickle.load(f)
+    # with open('../data/zs.dat', 'rb') as f:
+    #     zs = pickle.load(f)
+    # exs = make_exs(exprs, zs, n_fs, k_f, n_xs)
+    # with open('../data/exs.dat', 'wb') as f:
+    #     pickle.dump(exs, f)
 
-    print('Making and saving examples...')
-    exs = make_exs(exprs, zs, n_fs, k_f, n_xs)
-    with open('exs.dat', 'wb') as f:
-        pickle.dump(exs, f)
+    print('Loading exs from file...', end=' ')
+    exs = None
+    with open('../data/exs.dat', 'rb') as f:
+        exs  = pickle.load(f)
+        print('done.')
 
-    # print('Loading exs from file...', end=' ')
-    # with open('exs.dat', 'rb') as f:
-    #     ins, outs = pickle.load(f)
-    #     print('done.')
+    # Format examples
+    xs, ys = exs
+    n_exs = len(xs)
+    xs = T.stack([T.reshape(x, (n_xs * 2, 1, B_W, B_H)) for x in xs])
+    ys = T.reshape(T.tensor(ys), (n_exs, 1)) # reshape ys into a column vector
+    print(xs.shape, ys.shape)
+    threshold = 0.5
 
-    ins, outs = exs
-    print('len exs:', len(ins))
-    print('ins[0]:', ins[0], '\n\nlen:', len(ins[0]), '\n\nouts[0]:', outs[0])
-    print('outs', outs)
+    # Build and train NN
+    net = Net(n=n_xs)
+    net.train(xs, ys, epochs=1)
+
+    # Test NN
+    n_correct = 0
+    fps, fns, tps, tns = 0, 0, 0, 0
+    for i, (x, y) in enumerate(zip(xs, ys)):
+        y = bool(y.item())
+        prediction = net(x).item() > threshold
+
+        tps += y and prediction
+        tns += not y and not prediction
+        fps += not y and prediction
+        fns += y and not prediction
+
+        n_correct += y == prediction
+
+    print("|correct|:", n_correct, "|exs|:", n_exs, "correct %:", n_correct/n_exs * 100)
+    print("fps:", fps, "fns:", fns)
 
     # for f, xs in exs:
     #     print('f:', f.pretty_print())
