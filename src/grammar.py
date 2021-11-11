@@ -1,4 +1,5 @@
 from bmap import Bitmap
+import torch as T
 
 # bitmap size constants
 B_W=4
@@ -114,9 +115,10 @@ class Zn(Expr):
 
     def eval(self, env):
         i = self.i.eval(env)
-        # print(f"eval {self.pretty_print()}, i={i}, len={len(env['z_n'])}")
         assert isinstance(i, int)
-        return env["z_n"][i]
+        out = env["z_n"][i]
+        if isinstance(out, T.LongTensor):
+            return out.item()
 
     def zs(self):
         return {self.i.eval({})}

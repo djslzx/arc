@@ -21,6 +21,8 @@ from grammar import *
 from bottom_up import *
 from learn import *
 
+# Use a GPU
+device = T.device("cuda:0" if T.cuda.is_available() else "cpu")
 
 class Net(nn.Module):
 
@@ -83,9 +85,12 @@ class Net(nn.Module):
 
         for epoch in range(1, epochs+1):
             for i, (x,y) in enumerate(dataloader, 1):
+                # send x,y to GPU
+                x.to(device)
+                y.to(device)
+
                 optimizer.zero_grad()
                 out = self(x)
-                print("out:", out, "y:", y)
                 loss = criterion(out, y.squeeze(0))
                 loss.backward()
                 optimizer.step()
@@ -96,13 +101,19 @@ class Net(nn.Module):
         T.save(self.state_dict(), './model.pt')
         print('Finished Training')
 
+def gen_zs(n):
+    zs = (T.rand(n, Z_SIZE) * (Z_HI - Z_LO) - Z_LO).long()
+    return zs
+
 def gen_exprs(grammar, zs, return_type, max_size):
-    envs = [{'z_n':z} for z in zs]
+    envs = [{'z_n': z} for z in zs]
+    # for env in envs: print(" ", env)
     return list(p for p, _ in bottom_up_generator(max_size, grammar, envs)
                 if p.return_type == return_type)
 
+def empty(t): return t.sum() == 0
+
 def percent_empty(xs):
-    def empty(t): return t.sum() == 0
     return sum(empty(x) for x in xs)/len(xs)
 
 def test_percent_empty():
@@ -126,24 +137,38 @@ def make_exs(exprs, zs, n_fs, k_f, n_xs, empty_thresh=0.3):
     k_f: number of times to repeat each f
     n_xs: number of xs to generate for each example
     """
+    assert n_xs <= len(zs), "not enough zs to sample xs from"
+
     def eval(f, z):
         try:
             return f.eval({'z_n': z}).as_tensor()
         except AssertionError:
             return T.zeros(B_W, B_H)
 
+    # print(type(zs), type(zs[0]), type(zs[0][0]))
+    zs = set(zs)
+    exprs = set(exprs)
     pools = {}
-    for _ in range(n_fs):
-        # Choose an f from fs that has at least half of its outputs nonempty on n_xs * k_f examples
-        while True:
-            f = random.choice(exprs)
-            pool = [eval(f, z) for z in random.sample(zs, n_xs * k_f)]
-            if percent_empty(pool) < empty_thresh: break
-        pools[f] = pool
+    seen = {}
+    while len(pools) < n_fs:
+        f = random.choice(exprs - pools.keys() - seen)
+        seen.append(f)
+        pool = []
+        for z in zs:
+            cand = eval(f, z)
+            if not empty(cand):
+                pool.append(cand)
+                if len(pool) >= n_xs: 
+                    pools[f] = pool
+                    break
 
     ins, outs = [], []
     for f, f_pool in pools.items():
-        for _ in range(k_f):
+        for i in range(k_f):
+            pool = f_pool[i * n_xs: (i+1) * n_xs]
+            
+
+
             # Add matching examples using xs generated with f
             ins.append(T.stack(random.sample(f_pool, n_xs) + 
                                random.sample(f_pool, n_xs)))
@@ -164,6 +189,64 @@ def make_exs(exprs, zs, n_fs, k_f, n_xs, empty_thresh=0.3):
 
     return ins, outs
 
+def make_zs_and_exprs():
+    print('Making and writing Z...')
+    # zs = [gen_zn() for _ in range(n_zs)]
+    zs = gen_zs(n_zs)
+    with open('../data/zs.dat', 'wb') as f:
+        pickle.dump(zs, f)
+
+    print('Making and writing exprs...')
+    exprs = gen_exprs(g, zs, 'Bitmap', depth)
+    with open('../data/exprs.dat', 'wb') as f:
+        pickle.dump(exprs, f)
+    return zs, exprs
+
+def load_zs_and_exprs():
+    print('Loading Z, F...')
+    with open('../data/exprs.dat', 'rb') as f: 
+        exprs = pickle.load(f)
+    with open('../data/zs.dat', 'rb') as f: 
+        zs = pickle.load(f)
+    return zs, exprs
+    
+def make_and_store_exs(zs, exprs):
+    print('Making examples...')
+    xs, ys = make_exs(exprs, zs, n_fs, k_f, n_xs)
+
+    print('Saving examples...')
+    with open('../data/exs.dat', 'wb') as f:
+        pickle.dump((xs, ys), f)
+    return xs, ys
+
+def load_exs():
+    print('Loading exs from file...', end=' ')
+    xs, ys = None, None
+    with open('../data/exs.dat', 'rb') as f:
+        xs, ys = pickle.load(f)
+    return xs, ys
+
+def train_nn(n_xs, xs, ys, epochs):
+    print('Training NN...')
+    net = Net(n=n_xs)
+    net.to(device)
+    net.train(xs, ys, epochs)
+    return net
+
+def test_nn(net, xs, ys):
+    print('Testing NN...')
+    n_correct = 0
+    fps, fns, tps, tns = 0, 0, 0, 0
+    for i, (x, y) in enumerate(zip(xs, ys)):
+        y = bool(y.item())
+        prediction = net(x).item() > threshold
+        fps += not y and prediction
+        fns += y and not prediction
+        n_correct += y == prediction
+
+    print("|correct|:", n_correct, "|exs|:", n_exs, "correct %:", n_correct/n_exs * 100)
+    print("fps:", fps, "fns:", fns)
+
 if __name__ == '__main__':
     # test_percent_empty()
 
@@ -175,72 +258,26 @@ if __name__ == '__main__':
     n_zs = 1000
     epochs = 10000
     depth = 5
+    threshold = 0.5
     print(f"Params: depth={depth}, n_fs={n_fs}, k_f={k_f}, n_xs={n_xs}, n_zs={n_zs}")
 
-    # print('Making and writing Z...')
-    # zs = [gen_zn() for _ in range(n_zs)]
-    # with open('../data/zs.dat', 'wb') as f:
-    #     pickle.dump(zs, f)
+    # zn = [gen_zn() for _ in range(n_zs)]
+    # zs = gen_zs(n_zs)
+    # print(len(zn), len(zn[0]), random.sample(zn, 10))
+    # print(zs.shape, zs[400:410])
 
-    # print('Making and writing exprs...')
-    # exprs = gen_exprs(g, zs, 'Bitmap', depth)
-    # with open('../data/exprs.dat', 'wb') as f:
-    #     pickle.dump(exprs, f)
+    zs, exprs = make_zs_and_exprs()
+    print(len(zs), len(exprs))
+    # # zs, exprs = load_zs_and_exprs()
+    # xs, ys = make_and_store_exs(zs, exprs)
+    # # xs, ys = load_exs()
 
-    print('Making examples...')
-    # load exprs, zs
-    exprs = []
-    zs = []
-    with open('../data/exprs.dat', 'rb') as f:
-        exprs = pickle.load(f)
-    with open('../data/zs.dat', 'rb') as f:
-        zs = pickle.load(f)
-    # make exs
-    xs, ys = make_exs(exprs, zs, n_fs, k_f, n_xs)
-    # save exs
-    print('Saving examples...')
-    with open('../data/exs.dat', 'wb') as f:
-        pickle.dump((xs, ys), f)
+    # # Format examples
+    # n_exs = len(xs)
+    # xs = T.stack([T.reshape(x, (n_xs * 2, 1, B_W, B_H)) for x in xs])
+    # ys = T.reshape(T.tensor(ys), (n_exs, 1)) # reshape ys into a column vector
+    # print(xs.shape, ys.shape)
 
-    # print('Loading exs from file...', end=' ')
-    # xs, ys = None, None
-    # with open('../data/exs.dat', 'rb') as f:
-    #     xs, ys = pickle.load(f)
-
-    # Format examples
-    n_exs = len(xs)
-    xs = T.stack([T.reshape(x, (n_xs * 2, 1, B_W, B_H)) for x in xs])
-    ys = T.reshape(T.tensor(ys), (n_exs, 1)) # reshape ys into a column vector
-    print(xs.shape, ys.shape)
-    threshold = 0.5
-
-    # Build and train NN
-    print('Training NN...')
-    net = Net(n=n_xs)
-    net.train(xs, ys, epochs)
-
-    # Test NN
-    print('Testing NN...')
-    n_correct = 0
-    fps, fns, tps, tns = 0, 0, 0, 0
-    for i, (x, y) in enumerate(zip(xs, ys)):
-        y = bool(y.item())
-        prediction = net(x).item() > threshold
-
-        tps += y and prediction
-        tns += not y and not prediction
-        fps += not y and prediction
-        fns += y and not prediction
-
-        n_correct += y == prediction
-
-    print("|correct|:", n_correct, "|exs|:", n_exs, "correct %:", n_correct/n_exs * 100)
-    print("fps:", fps, "fns:", fns)
-
-    # for f, xs in exs:
-    #     print('f:', f.pretty_print())
-    #     for x in xs:
-    #         for e in x:
-    #             print(e.pretty_print())
-    #             print()
-    #         print()
+    # # Train and test NN
+    # net = train_nn(n_xs, xs, ys, epochs)
+    # test_nn(net, xs, ys, threshold)

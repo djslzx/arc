@@ -1,19 +1,19 @@
 import itertools
 import time
 import random
-from pprint import pp
+import torch as T
 from grammar import *
 
 VERBOSE = True
 
-def eval(expr, xs):
-    def handle(x):
-        y = None
-        try: y = expr.eval(x)
-        except AssertionError: pass
-        return y
+def eval(expr, envs):
+    def handle(env):
+        try: 
+            return expr.eval(env)
+        except AssertionError: 
+            return None
 
-    return tuple(handle(x) for x in xs)
+    return tuple(handle(env) for env in envs)
 
 def bottom_up(global_bound, grammar, exs):
     """
@@ -28,10 +28,9 @@ def bottom_up(global_bound, grammar, exs):
         zs = eval(expr, xs)
         if ys == zs:
             return expr
-
     return None
 
-def bottom_up_generator(global_bound, grammar, xs):
+def bottom_up_generator(global_bound, grammar, envs):
     """
     global_bound: int. an upper bound on the size of expression
     yields: sequence of programs, ordered by expression size, which are semantically distinct on the input examples
@@ -45,11 +44,13 @@ def bottom_up_generator(global_bound, grammar, xs):
 
         Use (output, type) pairs to address an issue with how Python thinks True == 1
         """
-        ys = tuple((y, type(y)) for y in eval(expr, xs))
-        if any(ys) and ys not in seen: # don't include `ys` if all entries are None
+        ys = tuple((y, type(y)) for y in eval(expr, envs))
+        if any(y for y,_ in ys) and ys not in seen: # don't include `ys` if all entries are None
             seen.add(ys)
-            if key not in exprs: exprs[key] = [expr]
-            else: exprs[key].append(expr)    
+            if key not in exprs: 
+                exprs[key] = [expr]
+            else: 
+                exprs[key].append(expr)    
 
     # Add all terminals to `exprs` as exprs of size 1
     for x in grammar.consts:
@@ -69,7 +70,13 @@ def bottom_up_generator(global_bound, grammar, xs):
                     expr = op(*args)
                     yield expr, size
                     add_expr((op.return_type, size), expr)
-        if VERBOSE: print(f"|exprs| = {sum(len(l) for l in exprs.values())}")
+        if VERBOSE: 
+            print(f"|exprs| = {sum(len(l) for l in exprs.values())}")
+            # print("exprs:")
+            # for k,v in exprs.items():
+            #     print(k)
+            #     for x in v:
+            #         print("  ", x)
 
 def integer_partitions(target_value, number_of_arguments):
     """
@@ -143,5 +150,48 @@ def test_bottom_up():
 
     # print(" [+] bottom-up synthesis passes tests")
 
+def test_bottom_up_tensor():
+    g = Grammar(
+        ops=[Program, Rect, Plus, Minus, Times],
+        consts= [Zn(Num(i)) for i in range(Z_SIZE)] # [Num(i) for i in range(5)]
+    )
+
+    test_cases = [
+        # [
+        #     ({"z_n": [0, 0, 0, 0, 0, 1]}, 1),
+        #     ({"z_n": [0, 0, 0, 0, 0, 2]}, 2),
+        #     ({"z_n": [0, 0, 0, 0, 0, 3]}, 3),
+        # ],
+        # [
+        #     ({"z_n": T.tensor([0, 0, 0, 0, 0, 1])}, 1),
+        #     ({"z_n": T.tensor([0, 0, 0, 0, 0, 2])}, 2),
+        #     ({"z_n": T.tensor([0, 0, 0, 0, 0, 3])}, 3),
+        # ],
+        # [
+        #     ({"z_n": [0, 1, 2, 3, 4, 5]}, 
+        #      Rect(Num(1), Num(1), 
+        #           Num(3), Num(4)).eval({}))
+        # ],
+        [
+            ({"z_n": T.tensor([0, 1, 2, 3, 4, 5])}, 
+             Rect(Num(1), Num(1), 
+                  Num(3), Num(4)).eval({}))
+        ],
+    ]
+
+    bound = 5
+    for test_case in test_cases:
+        envs = [env for env,_ in test_case]
+        for env in envs:
+            if 'z_n' not in env:
+                env['z_n'] = T.rand(Z_SIZE)
+
+        start_time = time.time()
+        print(f"\nTesting {test_case}...")
+        expr = bottom_up(bound, g, test_case)
+        print(f"\nSynthesized program:\t {expr.pretty_print() if expr is not None else 'None'} in {time.time() - start_time} seconds")
+    
+
 if __name__ == "__main__":
-    test_bottom_up()
+    test_bottom_up_tensor()
+    # test_bottom_up()
