@@ -17,12 +17,17 @@ import torch.nn.functional as F
 import itertools
 import pickle
 
+import util
 from grammar import *
 from bottom_up import *
 from learn import *
 
 # Use a GPU
 device = T.device("cuda:0" if T.cuda.is_available() else "cpu")
+if T.cuda.is_available():
+    print("Using GPU")
+else:
+    print("Using CPU")
 
 class Net(nn.Module):
 
@@ -78,17 +83,14 @@ class Net(nn.Module):
 
     def train(self, xs, ys, epochs):
         criterion = nn.BCEWithLogitsLoss()
-        optimizer = T.optim.Adam(net.parameters(), lr=0.001)
+        optimizer = T.optim.Adam(self.parameters(), lr=0.001)
 
         dataset = T.utils.data.TensorDataset(xs, ys)
         dataloader = T.utils.data.DataLoader(dataset, shuffle=True)
+        self.to(device)
 
         for epoch in range(1, epochs+1):
             for i, (x,y) in enumerate(dataloader, 1):
-                # send x,y to GPU
-                x.to(device)
-                y.to(device)
-
                 optimizer.zero_grad()
                 out = self(x)
                 loss = criterion(out, y.squeeze(0))
@@ -97,6 +99,8 @@ class Net(nn.Module):
 
             # print statistics
             print('[%d] loss: %.3f' % (epoch, loss.item()))
+            if loss.item() < 0.0001:
+                break
 
         T.save(self.state_dict(), './model.pt')
         print('Finished Training')
@@ -137,7 +141,7 @@ def make_exs(exprs, zs, n_fs, k_f, n_xs, empty_thresh=0.3):
     k_f: number of times to repeat each f
     n_xs: number of xs to generate for each example
     """
-    assert n_xs <= len(zs), "not enough zs to sample xs from"
+    assert n_xs * k_f <= len(zs), "not enough zs to sample xs from"
 
     def eval(f, z):
         try:
@@ -149,49 +153,46 @@ def make_exs(exprs, zs, n_fs, k_f, n_xs, empty_thresh=0.3):
     zs = set(zs)
     exprs = set(exprs)
     pools = {}
-    seen = {}
+    seen = set()
     while len(pools) < n_fs:
-        f = random.choice(exprs - pools.keys() - seen)
-        seen.append(f)
-        pool = []
+        f = random.choice(list(exprs - pools.keys() - seen))
+        seen.add(f)
+        xs = []
         for z in zs:
-            cand = eval(f, z)
-            if not empty(cand):
-                pool.append(cand)
-                if len(pool) >= n_xs: 
-                    pools[f] = pool
+            x = eval(f, z)
+            if not empty(x):
+                xs.append(x)
+                if len(xs) >= n_xs * k_f: 
+                    pools[f] = xs
                     break
 
     ins, outs = [], []
     for f, f_pool in pools.items():
-        for i in range(k_f):
-            pool = f_pool[i * n_xs: (i+1) * n_xs]
-            
-
-
-            # Add matching examples using xs generated with f
-            ins.append(T.stack(random.sample(f_pool, n_xs) + 
-                               random.sample(f_pool, n_xs)))
+        # Add matching examples using xs generated with f
+        for p1, p2 in util.chunk_pairs(f_pool, n_xs, k_f):
+            v1 = T.stack(p1)
+            v2 = T.stack(p2)
+            ins.append(T.cat((v1, v2)))
             outs.append(1.0)
 
-            # Add non-matching examples by pairing f with g
-            assert n_fs > 1, "Tried to generate non-matching f's when there's only one f"
-            while True:
-                g, g_pool = random.choice(list(pools.items()))
-                if g != f: break
-            f_xs = random.sample(f_pool, n_xs)
-            g_xs = []
-            while True:
-                g_xs = random.sample(g_pool, n_xs)
-                if T.abs(T.sum(T.stack(g_xs) - T.stack(f_xs))) < 0.001: break
-            ins.append(T.stack(f_xs + g_xs))
-            outs.append(0.0)
+        # Add non-matching examples by pairing f with some g
+        assert n_fs > 1, "Tried to generate non-matching f's when there's only one f"
+        non_matching = 0
+        while non_matching < k_f:
+            g = random.choice(list(pools.keys() - {f}))
+            g_pool = pools[g]
+
+            f_xs = T.stack(random.sample(f_pool, n_xs))
+            g_xs = T.stack(random.sample(g_pool, n_xs))
+            if not f_xs.isclose(g_xs).all():
+                ins.append(T.cat((f_xs, g_xs)))
+                outs.append(0.0)
+                non_matching += 1
 
     return ins, outs
 
 def make_zs_and_exprs():
     print('Making and writing Z...')
-    # zs = [gen_zn() for _ in range(n_zs)]
     zs = gen_zs(n_zs)
     with open('../data/zs.dat', 'wb') as f:
         pickle.dump(zs, f)
@@ -233,7 +234,7 @@ def train_nn(n_xs, xs, ys, epochs):
     net.train(xs, ys, epochs)
     return net
 
-def test_nn(net, xs, ys):
+def test_nn(net, xs, ys, threshold):
     print('Testing NN...')
     n_correct = 0
     fps, fns, tps, tns = 0, 0, 0, 0
@@ -266,18 +267,20 @@ if __name__ == '__main__':
     # print(len(zn), len(zn[0]), random.sample(zn, 10))
     # print(zs.shape, zs[400:410])
 
-    zs, exprs = make_zs_and_exprs()
-    print(len(zs), len(exprs))
-    # # zs, exprs = load_zs_and_exprs()
-    # xs, ys = make_and_store_exs(zs, exprs)
+    # zs, exprs = make_zs_and_exprs()
+    # print(len(zs), len(exprs))
+    zs, exprs = load_zs_and_exprs()
+    xs, ys = make_and_store_exs(zs, exprs)
     # # xs, ys = load_exs()
 
-    # # Format examples
-    # n_exs = len(xs)
-    # xs = T.stack([T.reshape(x, (n_xs * 2, 1, B_W, B_H)) for x in xs])
-    # ys = T.reshape(T.tensor(ys), (n_exs, 1)) # reshape ys into a column vector
-    # print(xs.shape, ys.shape)
+    # Format examples
+    n_exs = len(xs)
+    xs = T.stack([T.reshape(x, (n_xs * 2, 1, B_W, B_H)) for x in xs])
+    ys = T.reshape(T.tensor(ys), (n_exs, 1)) # reshape ys into a column vector
+    xs = xs.to(device)
+    ys = ys.to(device)
+    print(xs.shape, ys.shape)
 
-    # # Train and test NN
-    # net = train_nn(n_xs, xs, ys, epochs)
-    # test_nn(net, xs, ys, threshold)
+    # Train and test NN
+    net = train_nn(n_xs, xs, ys, epochs)
+    test_nn(net, xs, ys, threshold)
