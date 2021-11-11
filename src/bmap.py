@@ -54,7 +54,7 @@ class Bitmap:
                 if self.mat[y][x]]
 
     def as_tensor(self):
-        return T.tensor([[int(x) for x in row] for row in self.mat])
+        return T.tensor(self.mat).float()
 
     def n_pts(self):
         """Number of pixels toggled 'on'"""
