@@ -49,70 +49,61 @@ class N(Expr):
     def accept(self, v): return v.visit_N(self.n)
 class Z(Expr): 
     def __init__(self, i): self.i = i
-    def accept(self, v): return v.visit_Z(self.i.accept(v))
+    def accept(self, v): return v.visit_Z(self.i)
 class Not(Expr):
     def __init__(self, b): self.b = b
-    def accept(self, v): return v.visit_Not(self.b.accept(v))
+    def accept(self, v): return v.visit_Not(self.b)
 class Plus(Expr): 
     def __init__(self, x, y): 
         self.x = x
         self.y = y
-    def accept(self, v): return v.visit_Plus(self.x.accept(v), 
-                                             self.y.accept(v))
+    def accept(self, v): return v.visit_Plus(self.x, self.y)
 class Minus(Expr): 
     def __init__(self, x, y): 
         self.x = x
         self.y = y
-    def accept(self, v): return v.visit_Minus(self.x.accept(v), 
-                                              self.y.accept(v))
+    def accept(self, v): return v.visit_Minus(self.x, self.y)
 class Times(Expr): 
     def __init__(self, x, y): 
         self.x = x
         self.y = y
-    def accept(self, v): return v.visit_Times(self.x.accept(v), 
-                                              self.y.accept(v))
+    def accept(self, v): return v.visit_Times(self.x, self.y)
 class Lt(Expr): 
     def __init__(self, x, y): 
         self.x = x
         self.y = y
-    def accept(self, v): return v.visit_Lt(self.x.accept(v), 
-                                           self.y.accept(v))
+    def accept(self, v): return v.visit_Lt(self.x, self.y)
 class And(Expr): 
     def __init__(self, x, y): 
         self.x = x
         self.y = y
-    def accept(self, v): return v.visit_And(self.x.accept(v), 
-                                            self.y.accept(v))
+    def accept(self, v): return v.visit_And(self.x, self.y)
 class If(Expr): 
     def __init__(self, b, x, y): 
         self.b = b
         self.x = x
         self.y = y
-    def accept(self, v): return v.visit_If(self.b.accept(v),
-                                           self.x.accept(v), 
-                                           self.y.accept(v))
+    def accept(self, v): return v.visit_If(self.b, self.x, self.y)
 class Rect(Expr): 
     def __init__(self, x1, y1, x2, y2): 
         self.x1 = x1
         self.y1 = y1
         self.x2 = x2
         self.y2 = y2
-    def accept(self, v): return v.visit_Rect(self.x1.accept(v), 
-                                             self.y1.accept(v),
-                                             self.x2.accept(v), 
-                                             self.y2.accept(v))
+    def accept(self, v): return v.visit_Rect(self.x1, self.y1, self.x2, self.y2)
 class Union(Expr): 
     def __init__(self, b1, b2): 
         self.b1 = b1
         self.b2 = b2
-    def accept(self, v): return v.visit_Union(self.b1.accept(v), 
-                                              self.b2.accept(v))
+    def accept(self, v): return v.visit_Union(self.b1, self.b2)
 class Intersect(Expr): 
     def __init__(self, b1, b2): 
         self.b1 = b1
         self.b2 = b2
-    def accept(self, v): return v.visit_Intersect(self.b1.accept(v), 
-                                                  self.b2.accept(v))
+    def accept(self, v): return v.visit_Intersect(self.b1, self.b2)
+class ReflectH(Expr): 
+    def __init__(self, b): self.b = b
+    def accept(self, v): return v.visit_ReflectH(self.b)
 
 class Visitor:
     def _fail(self, s): assert False, f"Visitor subclass should implement `{s}`"
@@ -128,52 +119,69 @@ class Visitor:
     def visit_If(self, b, x, y): self._fail('If')
     def visit_Rect(self, x1, y1, x2, y2): self._fail('Rect')
     def visit_Union(self, b1, b2): self._fail('Union')
-    def visit_Intersect(self, b1, b2): self._fail('Union')
+    def visit_Intersect(self, b1, b2): self._fail('Intersect')
+    def visit_ReflectH(self, b): self._fail('ReflectH')
 
 class Eval(Visitor):
     def __init__(self, env): self.env = env
     def visit_F(self): return False
     def visit_N(self, n): return n
     def visit_Z(self, i): 
+        i = i.accept(self)
         assert isinstance(i, int)
         assert 'z' in self.env, "Eval env missing Z"
         z = self.env['z'][i]
         return z.item() if isinstance(z, T.LongTensor) else z
     def visit_Not(self, b): 
+        b = b.accept(self)
         assert isinstance(b, bool)
         return not b
     def visit_Plus(self, x, y): 
+        x, y = x.accept(self), y.accept(self)
         assert isinstance(x, int) and isinstance(y, int)
         return x + y
     def visit_Minus(self, x, y): 
+        x, y = x.accept(self), y.accept(self)
         assert isinstance(x, int) and isinstance(y, int)
         return x - y
     def visit_Times(self, x, y): 
+        x, y = x.accept(self), y.accept(self)
         assert isinstance(x, int) and isinstance(y, int)
         return x * y
     def visit_Lt(self, x, y): 
+        x, y = x.accept(self), y.accept(self)
         assert isinstance(x, int) and isinstance(y, int)
         return x < y
     def visit_And(self, x, y): 
+        x, y = x.accept(self), y.accept(self)
         assert isinstance(x, bool) and isinstance(y, bool)
         return x and y
     def visit_If(self, b, x, y): 
+        b, x, y = b.accept(self), x.accept(self), y.accept(self)
         assert isinstance(b, bool) and isinstance(x, int) and isinstance(y, int)
         return x if b else y
     def visit_Rect(self, x1, y1, x2, y2): 
+        x1, y1, x2, y2 = (x1.accept(self), y1.accept(self), 
+                          x2.accept(self), y2.accept(self))
         assert all(isinstance(v, int) for v in [x1, y1, x2, y2])
         assert 0 <= x1 < x2 <= B_W and 0 <= y1 < y2 <= B_H
         return T.tensor([[x1 <= x < x2 and y1 <= y < y2
                           for x in range(B_W)]
                          for y in range(B_H)]).float()
     def visit_Union(self, b1, b2): 
+        b1, b2 = b1.accept(self), b2.accept(self)
         assert isinstance(b1, T.FloatTensor) and isinstance(b2, T.FloatTensor), \
-            f"Union needs two float tensors: b1={b1}, b2={b2}"
+            f"Union needs two float tensors, found b1={b1}, b2={b2}"
         return b1.logical_or(b2).float()
     def visit_Intersect(self, b1, b2): 
+        b1, b2 = b1.accept(self), b2.accept(self)
         assert isinstance(b1, T.FloatTensor) and isinstance(b2, T.FloatTensor), \
-            f"Intersect needs two float tensors: b1={b1}, b2={b2}"
+            f"Intersect needs two float tensors, found b1={b1}, b2={b2}"
         return b1.logical_and(b2).float()
+    def visit_ReflectH(self, b): 
+        b = b.accept(self)
+        assert isinstance(b, T.FloatTensor)
+        return b.flip(1)
 
 class InTypes(Visitor):
     def __init__(self): pass
@@ -190,6 +198,7 @@ class InTypes(Visitor):
     def visit_Rect(self, x1, y1, x2, y2): return ['int', 'int', 'int', 'int']
     def visit_Union(self, b1, b2): return ['bitmap', 'bitmap']
     def visit_Intersect(self, b1, b2): return ['bitmap', 'bitmap']
+    def visit_ReflectH(self, b): return ['bitmap']
 
 class RetType(Visitor):
     def __init__(self): pass
@@ -206,38 +215,43 @@ class RetType(Visitor):
     def visit_Rect(self, x1, y1, x2, y2): return 'bitmap'
     def visit_Union(self, b1, b2): return 'bitmap'
     def visit_Intersect(self, b1, b2): return 'bitmap'
+    def visit_ReflectH(self, b): return 'bitmap'
 
 class Print(Visitor):
     def __init__(self): pass
     def visit_F(self): return 'False'
     def visit_N(self, n): return f'{n}'
-    def visit_Z(self, i): return f'z[{i}]'
-    def visit_Not(self, b): return f'(not {b})'
-    def visit_Plus(self, x, y): return f'(+ {x} {y})'
-    def visit_Minus(self, x, y): return f'(- {x} {y})'
-    def visit_Times(self, x, y): return f'(* {x} {y})'
-    def visit_Lt(self, x, y): return f'(< {x} {y})'
-    def visit_And(self, x, y): return f'(and {x} {y})'
-    def visit_If(self, b, x, y): return f'(if {b} {x} {y})'
-    def visit_Rect(self, x1, y1, x2, y2): return f'(R {x1} {y1} {x2} {y2})'
-    def visit_Union(self, b1, b2): return f'(u {b1} {b2})'
-    def visit_Intersect(self, b1, b2): return f'(n {b1} {b2})'
+    def visit_Z(self, i): return f'z[{i.accept(self)}]'
+    def visit_Not(self, b): return f'(not {b.accept(self)})'
+    def visit_Plus(self, x, y): return f'(+ {x.accept(self)} {y.accept(self)})'
+    def visit_Minus(self, x, y): return f'(- {x.accept(self)} {y.accept(self)})'
+    def visit_Times(self, x, y): return f'(* {x.accept(self)} {y.accept(self)})'
+    def visit_Lt(self, x, y): return f'(< {x.accept(self)} {y.accept(self)})'
+    def visit_And(self, x, y): return f'(and {x.accept(self)} {y.accept(self)})'
+    def visit_If(self, b, x, y): return f'(if {b} {x.accept(self)} {y.accept(self)})'
+    def visit_Rect(self, x1, y1, x2, y2): 
+        return f'(R {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
+    def visit_Union(self, b1, b2): return f'(u {b1.accept(self)} {b2.accept(self)})'
+    def visit_Intersect(self, b1, b2): return f'(n {b1.accept(self)} {b2.accept(self)})'
+    def visit_ReflectH(self, b): return f'(flip {b.accept(self)})'
 
 class Zs(Visitor):
     def __init__(self): pass
-    def visit_F(self): return {}
-    def visit_N(self, n): return {}
-    def visit_Z(self, i): return {i}
-    def visit_Not(self, b): return b
-    def visit_Plus(self, x, y): return x | y
-    def visit_Minus(self, x, y): return x | y
-    def visit_Times(self, x, y): return x | y
-    def visit_Lt(self, x, y): return x | y
-    def visit_And(self, x, y): return x | y
-    def visit_If(self, b, x, y): return b | x | y
-    def visit_Rect(self, x1, y1, x2, y2): x1 | y1 | x2 | y2
-    def visit_Union(self, b1, b2): return b1 | b2
-    def visit_Intersect(self, b1, b2): return b1 | b2
+    def visit_F(self): return set()
+    def visit_N(self, n): return set()
+    def visit_Z(self, i): return {i.accept(Eval({}))}
+    def visit_Not(self, b): return b.accept(self)
+    def visit_Plus(self, x, y): return x.accept(self) | y.accept(self)
+    def visit_Minus(self, x, y): return x.accept(self) | y.accept(self)
+    def visit_Times(self, x, y): return x.accept(self) | y.accept(self)
+    def visit_Lt(self, x, y): return x.accept(self) | y.accept(self)
+    def visit_And(self, x, y): return x.accept(self) | y.accept(self)
+    def visit_If(self, b, x, y): return b.accept(self) | x.accept(self) | y.accept(self)  
+    def visit_Rect(self, x1, y1, x2, y2): 
+        return x1.accept(self) | y1.accept(self) | x2.accept(self) | y2.accept(self)
+    def visit_Union(self, b1, b2): return b1.accept(self) | b2.accept(self)
+    def visit_Intersect(self, b1, b2): return b1.accept(self) | b2.accept(self)
+    def visit_ReflectH(self, b): return b.accept(self)
 
 def img_to_tensor(lines):
     """Converts a list of strings into a float tensor"""
@@ -271,6 +285,22 @@ def test_eval():
                     N(1), N(1)),
                Rect(N(2), N(3), 
                     N(4), N(4))),
+         lambda z: img_to_tensor(["#___",
+                                  "____",
+                                  "____",
+                                  "__##"])),
+        (ReflectH(Union(Rect(N(0), N(0), 
+                             N(1), N(1)),
+                        Rect(N(2), N(3), 
+                             N(4), N(4)))),
+         lambda z: img_to_tensor(["___#",
+                                  "____",
+                                  "____",
+                                  "##__"])),
+        (ReflectH(ReflectH(Union(Rect(N(0), N(0), 
+                                      N(1), N(1)),
+                                 Rect(N(2), N(3), 
+                                      N(4), N(4))))),
          lambda z: img_to_tensor(["#___",
                                   "____",
                                   "____",
@@ -320,7 +350,7 @@ def test_eval():
 def test_zs():
     test_cases = [
         (Rect(N(0), N(1), N(4), N(4)), 
-         {}),
+         set()),
         (Rect(Z(N(0)), Z(N(1)), N(4), N(4)), 
          {0, 1}),
         (Rect(Z(N(0)), Z(N(1)), Z(N(2)), Z(N(3))),
@@ -330,8 +360,7 @@ def test_zs():
     ]
     for expr, ans in test_cases:
         out = expr.zs()
-        print(expr, out, ans)
-        # assert out == ans, f"test_zs failed: expected={ans}, actual={out}"
+        assert out == ans, f"test_zs failed: expected={ans}, actual={out}"
     print(" [+] passed test_zs")
 
 if __name__ == '__main__':
