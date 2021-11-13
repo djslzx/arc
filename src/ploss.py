@@ -29,30 +29,36 @@ if T.cuda.is_available():
 else:
     print("Using CPU")
 
+# Tensorboard
+import torch.utils.tensorboard as tb
+
 class Net(nn.Module):
 
-    def __init__(self, n, c=6, w=B_W, h=B_H):
+    def __init__(self, n, c=6):
         """
         n: number of elts in each example set
         """
         super(Net, self).__init__()
         self.n = n
         self.c = c
-        self.w = w
-        self.h = h
         self.conv_stack = nn.Sequential(
             nn.Conv2d(1, c, 3, padding='same'),
+            nn.BatchNorm2d(c),
             nn.ReLU(),
             nn.Conv2d(c, c, 3, padding='same'),
+            nn.BatchNorm2d(c),
             nn.ReLU(),
             nn.Conv2d(c, c, 3, padding='same'),
+            nn.BatchNorm2d(c),
             nn.ReLU(),
             nn.Conv2d(c, c, 3, padding='same'),
+            nn.BatchNorm2d(c),
             nn.ReLU(),
             nn.Conv2d(c, c, 3, padding='same'),
+            nn.BatchNorm2d(c),
             nn.ReLU(),
         )
-        k = 2 * c * w * h
+        k = 2 * c * B_H * B_W
         self.linear_stack = nn.Sequential(
             nn.Linear(k, k),
             nn.ReLU(),
@@ -81,14 +87,31 @@ class Net(nn.Module):
         # x = x.unsqueeze(0)
         return x
 
-    def train(self, xs, ys, epochs):
+    # def log_embeddings(self, writer, data, labels):
+
+    #     def select_n_random(data, labels, n=100):
+    #         assert len(data) == len(labels)
+    #         perm = T.randperm(len(data))
+    #         return data[perm][:n], labels[perm][:n]
+
+    #     # select random images and their target indices
+    #     data, labels = select_n_random(data, labels)
+
+    #     # log embeddings
+    #     features = data.view(40, -1)
+    #     print(features.shape)
+    #     writer.add_embedding(features, metadata=labels)
+
+    def train(self, data, labels, epochs):
         criterion = nn.BCEWithLogitsLoss()
         optimizer = T.optim.Adam(self.parameters(), lr=0.001)
 
-        dataset = T.utils.data.TensorDataset(xs, ys)
+        dataset = T.utils.data.TensorDataset(data, labels)
         dataloader = T.utils.data.DataLoader(dataset, shuffle=True)
         self.to(device)
-
+        
+        writer = tb.SummaryWriter() # tensorboard
+        
         for epoch in range(1, epochs+1):
             for i, (x,y) in enumerate(dataloader, 1):
                 optimizer.zero_grad()
@@ -98,8 +121,11 @@ class Net(nn.Module):
                 optimizer.step()
 
             # print statistics
-            print('[%d] loss: %.3f' % (epoch, loss.item()))
-            if loss.item() < 0.0001:
+            print('[%d/%d] loss: %.10f' % (epoch, epochs, loss.item()), end='\r')
+            writer.add_scalar('training loss', loss.item(), epoch)
+
+            if loss.item() == 0:
+                print('[%d/%d] loss: %.3f' % (epoch, epochs, loss.item()))
                 break
 
         T.save(self.state_dict(), './model.pt')
@@ -166,14 +192,14 @@ def make_exs(exprs, zs, n_fs, k_f, n_xs, empty_thresh=0.3):
                     pools[f] = xs
                     break
 
-    ins, outs = [], []
+    data, labels = [], []
     for f, f_pool in pools.items():
         # Add matching examples using xs generated with f
         for p1, p2 in util.chunk_pairs(f_pool, n_xs, k_f):
             v1 = T.stack(p1)
             v2 = T.stack(p2)
-            ins.append(T.cat((v1, v2)))
-            outs.append(1.0)
+            data.append(T.cat((v1, v2)))
+            labels.append(1.0)
 
         # Add non-matching examples by pairing f with some g
         assert n_fs > 1, "Tried to generate non-matching f's when there's only one f"
@@ -185,11 +211,11 @@ def make_exs(exprs, zs, n_fs, k_f, n_xs, empty_thresh=0.3):
             f_xs = T.stack(random.sample(f_pool, n_xs))
             g_xs = T.stack(random.sample(g_pool, n_xs))
             if not f_xs.isclose(g_xs).all():
-                ins.append(T.cat((f_xs, g_xs)))
-                outs.append(0.0)
+                data.append(T.cat((f_xs, g_xs)))
+                labels.append(0.0)
                 non_matching += 1
 
-    return ins, outs
+    return data, labels
 
 def make_zs_and_exprs():
     print('Making and writing Z...')
@@ -211,7 +237,7 @@ def load_zs_and_exprs():
         zs = pickle.load(f)
     return zs, exprs
     
-def make_and_store_exs(zs, exprs):
+def make_and_store_exs(zs, exprs, n_fs, k_f, n_xs):
     print('Making examples...')
     xs, ys = make_exs(exprs, zs, n_fs, k_f, n_xs)
 
@@ -227,12 +253,10 @@ def load_exs():
         xs, ys = pickle.load(f)
     return xs, ys
 
-def train_nn(n_xs, xs, ys, epochs):
+def train_nn(net, n_xs, xs, ys, epochs):
     print('Training NN...')
-    net = Net(n=n_xs)
     net.to(device)
     net.train(xs, ys, epochs)
-    return net
 
 def test_nn(net, xs, ys, threshold):
     print('Testing NN...')
@@ -253,24 +277,22 @@ if __name__ == '__main__':
 
     g = Grammar(ops=[Plus, Times, Minus, Rect, Program],
                 consts=[Zn(Num(i)) for i in range(Z_SIZE)] + [Num(i) for i in range(Z_LO, Z_HI + 1)])
-    n_fs = 2
-    k_f = 1
-    n_xs = 1
+    n_fs = 100
+    k_f = 2
+    n_xs = 5
     n_zs = 1000
     epochs = 10000
     depth = 5
     threshold = 0.5
     print(f"Params: depth={depth}, n_fs={n_fs}, k_f={k_f}, n_xs={n_xs}, n_zs={n_zs}")
 
-    # zn = [gen_zn() for _ in range(n_zs)]
     # zs = gen_zs(n_zs)
     # print(len(zn), len(zn[0]), random.sample(zn, 10))
     # print(zs.shape, zs[400:410])
 
     # zs, exprs = make_zs_and_exprs()
-    # print(len(zs), len(exprs))
     zs, exprs = load_zs_and_exprs()
-    xs, ys = make_and_store_exs(zs, exprs)
+    xs, ys = make_and_store_exs(zs, exprs, n_fs, k_f, n_xs)
     # # xs, ys = load_exs()
 
     # Format examples
@@ -282,5 +304,8 @@ if __name__ == '__main__':
     print(xs.shape, ys.shape)
 
     # Train and test NN
-    net = train_nn(n_xs, xs, ys, epochs)
+    net = Net(n=n_xs)
+    train_nn(net, n_xs, xs, ys, epochs)
     test_nn(net, xs, ys, threshold)
+
+    
