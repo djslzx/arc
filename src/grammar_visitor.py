@@ -17,7 +17,7 @@ class Grammar:
 '''
 Grammar
 
-- Expr: F, N, Z, +, -, *, <, and, not, if, rect, prog
+- Expr: F, Num, Z, +, -, *, <, and, not, if, rect, prog
 + reflect, diagonal/horizontal/vertical line
 '''
 
@@ -25,10 +25,6 @@ class Visited:
     def accept(self, visitor):
         assert False, "Visited subclass should implement `accept`"
     def eval(self, env): return self.accept(Eval(env))
-    @property
-    def in_types(self): return self.accept(InTypes())
-    @property
-    def return_type(self): return self.accept(RetType())
     def zs(self): return self.accept(Zs())
     def __str__(self): return self.accept(Print())
 
@@ -42,49 +38,71 @@ class Expr(Visited):
     def __lt__(self, other): return str(self) < str(other)
 
 class F(Expr): 
+    in_types = []
+    out_type = 'bool'
     def __init__(self): pass
     def accept(self, v): return v.visit_F()
-class N(Expr): 
+class Num(Expr): 
+    in_types = []
+    out_type = 'int'
     def __init__(self, n): self.n = n
-    def accept(self, v): return v.visit_N(self.n)
+    def accept(self, v): return v.visit_Num(self.n)
 class Z(Expr): 
+    in_types = []
+    out_type = 'int'
     def __init__(self, i): self.i = i
     def accept(self, v): return v.visit_Z(self.i)
 class Not(Expr):
+    in_types = ['bool']
+    out_type = 'bool'
     def __init__(self, b): self.b = b
     def accept(self, v): return v.visit_Not(self.b)
 class Plus(Expr): 
+    in_types = ['int', 'int']
+    out_type = 'int'
     def __init__(self, x, y): 
         self.x = x
         self.y = y
     def accept(self, v): return v.visit_Plus(self.x, self.y)
 class Minus(Expr): 
+    in_types = ['int', 'int']
+    out_type = 'int'
     def __init__(self, x, y): 
         self.x = x
         self.y = y
     def accept(self, v): return v.visit_Minus(self.x, self.y)
 class Times(Expr): 
+    in_types = ['int', 'int']
+    out_type = 'int'
     def __init__(self, x, y): 
         self.x = x
         self.y = y
     def accept(self, v): return v.visit_Times(self.x, self.y)
 class Lt(Expr): 
+    in_types = ['bool', 'bool']
+    out_type = 'bool'
     def __init__(self, x, y): 
         self.x = x
         self.y = y
     def accept(self, v): return v.visit_Lt(self.x, self.y)
 class And(Expr): 
+    in_types = ['bool', 'bool']
+    out_type = 'bool'
     def __init__(self, x, y): 
         self.x = x
         self.y = y
     def accept(self, v): return v.visit_And(self.x, self.y)
 class If(Expr): 
+    in_types = ['bool', 'int', 'int']
+    out_type = 'int'
     def __init__(self, b, x, y): 
         self.b = b
         self.x = x
         self.y = y
     def accept(self, v): return v.visit_If(self.b, self.x, self.y)
 class Rect(Expr): 
+    in_types = ['int', 'int', 'int', 'int']
+    out_type = 'bitmap'
     def __init__(self, x1, y1, x2, y2): 
         self.x1 = x1
         self.y1 = y1
@@ -92,23 +110,29 @@ class Rect(Expr):
         self.y2 = y2
     def accept(self, v): return v.visit_Rect(self.x1, self.y1, self.x2, self.y2)
 class Union(Expr): 
+    in_types = ['bitmap', 'bitmap']
+    out_type = 'bitmap'
     def __init__(self, b1, b2): 
         self.b1 = b1
         self.b2 = b2
     def accept(self, v): return v.visit_Union(self.b1, self.b2)
 class Intersect(Expr): 
+    in_types = ['bitmap', 'bitmap']
+    out_type = 'bitmap'
     def __init__(self, b1, b2): 
         self.b1 = b1
         self.b2 = b2
     def accept(self, v): return v.visit_Intersect(self.b1, self.b2)
 class ReflectH(Expr): 
+    in_types = ['bitmap']
+    out_type = 'bitmap'
     def __init__(self, b): self.b = b
     def accept(self, v): return v.visit_ReflectH(self.b)
 
 class Visitor:
     def _fail(self, s): assert False, f"Visitor subclass should implement `{s}`"
     def visit_F(self): self._fail('F')
-    def visit_N(self, n): self._fail('N')
+    def visit_Num(self, n): self._fail('Num')
     def visit_Z(self, i): self._fail('Z')
     def visit_Not(self, b): self._fail('Not')
     def visit_Plus(self, x, y): self._fail('Plus')
@@ -125,10 +149,8 @@ class Visitor:
 class Eval(Visitor):
     def __init__(self, env): self.env = env
     def visit_F(self): return False
-    def visit_N(self, n): return n
+    def visit_Num(self, n): return n
     def visit_Z(self, i): 
-        i = i.accept(self)
-        assert isinstance(i, int)
         assert 'z' in self.env, "Eval env missing Z"
         z = self.env['z'][i]
         return z.item() if isinstance(z, T.LongTensor) else z
@@ -183,45 +205,11 @@ class Eval(Visitor):
         assert isinstance(b, T.FloatTensor)
         return b.flip(1)
 
-class InTypes(Visitor):
-    def __init__(self): pass
-    def visit_F(self): return []
-    def visit_N(self, n): return []
-    def visit_Z(self, i): return ['int']
-    def visit_Not(self, b): return ['bool']
-    def visit_Plus(self, x, y): return ['int', 'int']
-    def visit_Minus(self, x, y): return ['int', 'int']
-    def visit_Times(self, x, y): return ['int', 'int']
-    def visit_Lt(self, x, y): return ['int', 'int']
-    def visit_And(self, x, y): return ['bool', 'bool']
-    def visit_If(self, b, x, y): return ['bool', 'int', 'int']
-    def visit_Rect(self, x1, y1, x2, y2): return ['int', 'int', 'int', 'int']
-    def visit_Union(self, b1, b2): return ['bitmap', 'bitmap']
-    def visit_Intersect(self, b1, b2): return ['bitmap', 'bitmap']
-    def visit_ReflectH(self, b): return ['bitmap']
-
-class RetType(Visitor):
-    def __init__(self): pass
-    def visit_F(self): return 'bool'
-    def visit_N(self, n): return 'int'
-    def visit_Z(self, i): return 'int'
-    def visit_Not(self, b): return 'bool'
-    def visit_Plus(self, x, y): return 'int'
-    def visit_Minus(self, x, y): return 'int'
-    def visit_Times(self, x, y): return 'int'
-    def visit_Lt(self, x, y): return 'bool'
-    def visit_And(self, x, y): return 'bool'
-    def visit_If(self, b, x, y): return 'int'
-    def visit_Rect(self, x1, y1, x2, y2): return 'bitmap'
-    def visit_Union(self, b1, b2): return 'bitmap'
-    def visit_Intersect(self, b1, b2): return 'bitmap'
-    def visit_ReflectH(self, b): return 'bitmap'
-
 class Print(Visitor):
     def __init__(self): pass
     def visit_F(self): return 'False'
-    def visit_N(self, n): return f'{n}'
-    def visit_Z(self, i): return f'z[{i.accept(self)}]'
+    def visit_Num(self, n): return f'{n}'
+    def visit_Z(self, i): return f'z[{i}]'
     def visit_Not(self, b): return f'(not {b.accept(self)})'
     def visit_Plus(self, x, y): return f'(+ {x.accept(self)} {y.accept(self)})'
     def visit_Minus(self, x, y): return f'(- {x.accept(self)} {y.accept(self)})'
@@ -238,8 +226,8 @@ class Print(Visitor):
 class Zs(Visitor):
     def __init__(self): pass
     def visit_F(self): return set()
-    def visit_N(self, n): return set()
-    def visit_Z(self, i): return {i.accept(Eval({}))}
+    def visit_Num(self, n): return set()
+    def visit_Z(self, i): return {i}
     def visit_Not(self, b): return b.accept(self)
     def visit_Plus(self, x, y): return x.accept(self) | y.accept(self)
     def visit_Minus(self, x, y): return x.accept(self) | y.accept(self)
@@ -264,43 +252,43 @@ def test_eval():
          lambda z: False),
         (Not(F()),
          lambda z: True),
-        (Times(Z(N(0)), Z(N(1))),
+        (Times(Z(0), Z(1)),
          lambda z: z[0] * z[1]),
-        (If(Lt(Z(N(0)), Z(N(1))),
-            Z(N(0)), 
-            Z(N(1))),
+        (If(Lt(Z(0), Z(1)),
+            Z(0), 
+            Z(1)),
          lambda z: min(z[0], z[1])),
-        (If(Not(Lt(Z(N(0)), 
-                   Z(N(1)))),
-            Times(Z(N(0)), Z(N(1))), 
-            Plus(Z(N(0)), Z(N(1)))), 
+        (If(Not(Lt(Z(0), 
+                   Z(1))),
+            Times(Z(0), Z(1)), 
+            Plus(Z(0), Z(1))), 
          lambda z: z[0] * z[1] if not (z[0] < z[1]) else z[0] + z[1]),
-        (Rect(N(0), N(0), 
-              N(1), N(2)),
+        (Rect(Num(0), Num(0), 
+              Num(1), Num(2)),
          lambda z: img_to_tensor(["#___",
                                   "#___",
                                   "____",
                                   "____"])),
-        (Union(Rect(N(0), N(0), 
-                    N(1), N(1)),
-               Rect(N(2), N(3), 
-                    N(4), N(4))),
+        (Union(Rect(Num(0), Num(0), 
+                    Num(1), Num(1)),
+               Rect(Num(2), Num(3), 
+                    Num(4), Num(4))),
          lambda z: img_to_tensor(["#___",
                                   "____",
                                   "____",
                                   "__##"])),
-        (ReflectH(Union(Rect(N(0), N(0), 
-                             N(1), N(1)),
-                        Rect(N(2), N(3), 
-                             N(4), N(4)))),
+        (ReflectH(Union(Rect(Num(0), Num(0), 
+                             Num(1), Num(1)),
+                        Rect(Num(2), Num(3), 
+                             Num(4), Num(4)))),
          lambda z: img_to_tensor(["___#",
                                   "____",
                                   "____",
                                   "##__"])),
-        (ReflectH(ReflectH(Union(Rect(N(0), N(0), 
-                                      N(1), N(1)),
-                                 Rect(N(2), N(3), 
-                                      N(4), N(4))))),
+        (ReflectH(ReflectH(Union(Rect(Num(0), Num(0), 
+                                      Num(1), Num(1)),
+                                 Rect(Num(2), Num(3), 
+                                      Num(4), Num(4))))),
          lambda z: img_to_tensor(["#___",
                                   "____",
                                   "____",
@@ -311,7 +299,7 @@ def test_eval():
             for y in range(10):
                 out = expr.eval({"z":[x, y]})
                 expected = correct_semantics([x, y])
-                t = expr.return_type
+                t = expr.out_type
                 # print(expr, out, expected)
                 if t in ['int', 'bool']:
                     assert out == expected, f"failed eval test:\n"\
@@ -325,8 +313,8 @@ def test_eval():
                     assert False, "type error in eval test"
 
     # (0,0), (1,1)
-    expr = Rect(N(0),N(0), 
-                N(1),N(1))
+    expr = Rect(Num(0),Num(0), 
+                Num(1),Num(1))
     out = expr.eval({'z':[]})
     expected = img_to_tensor(["#___",
                               "____",
@@ -335,10 +323,10 @@ def test_eval():
     assert T.equal(expected, out), f"test_render failed:\n expected={expected},\n out={out}"
 
     # (1,0), (3,3)
-    expr = Rect(Z(N(0)), 
-                N(0), 
-                Plus(N(2), N(1)), 
-                N(3)) 
+    expr = Rect(Z(0), 
+                Num(0), 
+                Plus(Num(2), Num(1)), 
+                Num(3)) 
     out = expr.eval({'z': [1,2,3]})
     expected = img_to_tensor(["_##_",
                               "_##_",
@@ -349,13 +337,13 @@ def test_eval():
 
 def test_zs():
     test_cases = [
-        (Rect(N(0), N(1), N(4), N(4)), 
+        (Rect(Num(0), Num(1), Num(4), Num(4)), 
          set()),
-        (Rect(Z(N(0)), Z(N(1)), N(4), N(4)), 
+        (Rect(Z(0), Z(1), Num(4), Num(4)), 
          {0, 1}),
-        (Rect(Z(N(0)), Z(N(1)), Z(N(2)), Z(N(3))),
+        (Rect(Z(0), Z(1), Z(2), Z(3)),
          {0, 1, 2, 3}),
-        (Rect(Z(N(0)), Z(N(1)), Z(N(0)), Z(N(1))),
+        (Rect(Z(0), Z(1), Z(0), Z(1)),
          {0, 1}),
     ]
     for expr, ans in test_cases:
