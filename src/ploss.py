@@ -253,13 +253,17 @@ def load_exs():
         xs, ys = pickle.load(f)
     return xs, ys
 
-def train_nn(net, n_xs, xs, ys, epochs):
+def train_nn(net, xs, ys, epochs):
     print('Training NN...')
+    start_time = time.time()
     net.to(device)
     net.train(xs, ys, epochs)
+    end_time = time.time()
+    print(f'Took {(end_time - start_time):.5f}s to train.')
 
 def test_nn(net, xs, ys, threshold):
     print('Testing NN...')
+    n_exs = len(xs)
     n_correct = 0
     fps, fns, tps, tns = 0, 0, 0, 0
     for i, (x, y) in enumerate(zip(xs, ys)):
@@ -274,10 +278,9 @@ def test_nn(net, xs, ys, threshold):
 
 if __name__ == '__main__':
     # test_percent_empty()
-
     g = Grammar(ops=[Plus, Times, Minus, Rect, Program],
                 consts=[Zn(Num(i)) for i in range(Z_SIZE)] + [Num(i) for i in range(Z_LO, Z_HI + 1)])
-    n_fs = 100
+    n_fs = 200
     k_f = 2
     n_xs = 5
     n_zs = 1000
@@ -286,26 +289,38 @@ if __name__ == '__main__':
     threshold = 0.5
     print(f"Params: depth={depth}, n_fs={n_fs}, k_f={k_f}, n_xs={n_xs}, n_zs={n_zs}")
 
+    def reshape_data(data):
+        return T.stack([T.reshape(x, (n_xs * 2, 1, B_W, B_H)) for x in data]).to(device)
+    
+    def reshape_labels(labels):
+        return T.reshape(T.tensor(labels), (len(labels), 1)).to(device)
+
     # zs = gen_zs(n_zs)
     # print(len(zn), len(zn[0]), random.sample(zn, 10))
     # print(zs.shape, zs[400:410])
 
     # zs, exprs = make_zs_and_exprs()
     zs, exprs = load_zs_and_exprs()
-    xs, ys = make_and_store_exs(zs, exprs, n_fs, k_f, n_xs)
-    # # xs, ys = load_exs()
+    data, labels = make_and_store_exs(zs, exprs, n_fs, k_f, n_xs)
+    # # xs, labels = load_exs()
 
     # Format examples
-    n_exs = len(xs)
-    xs = T.stack([T.reshape(x, (n_xs * 2, 1, B_W, B_H)) for x in xs])
-    ys = T.reshape(T.tensor(ys), (n_exs, 1)) # reshape ys into a column vector
-    xs = xs.to(device)
-    ys = ys.to(device)
-    print(xs.shape, ys.shape)
+    d = len(data)//2
+    train_data, test_data = data[:d], data[d:]
+    train_labels, test_labels = labels[:d], labels[d:]
 
-    # Train and test NN
+    n_exs = len(train_data)
+    train_data = reshape_data(train_data)
+    train_labels = reshape_labels(train_labels)
+    test_data = reshape_data(test_data)
+    test_labels = reshape_labels(test_labels)
+
+    print("train:", train_data.shape, train_labels.shape)
+    print("test:", test_data.shape, test_labels.shape)
+
+    # Train and test
     net = Net(n=n_xs)
-    train_nn(net, n_xs, xs, ys, epochs)
-    test_nn(net, xs, ys, threshold)
+    train_nn(net, train_data, train_labels, epochs)
+    test_nn(net, test_data, test_labels, threshold)
 
     
