@@ -1,3 +1,5 @@
+import torch as T
+
 def avg(it):
     s = 0
     n = 0
@@ -29,3 +31,7 @@ def chunk_pairs(l, k, n):
         yield (l[start:mid] if start < mid else l[start:] + l[:mid],
                l[mid:end] if mid < end else l[mid:] + l[:end])
 
+def img_to_tensor(lines):
+    """Converts a list of strings into a float tensor"""
+    return T.tensor([[c == "#" for c in line] 
+                     for line in lines]).float()

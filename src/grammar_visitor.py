@@ -1,3 +1,4 @@
+import util
 import torch as T
 
 # bitmap size constants
@@ -100,6 +101,15 @@ class If(Expr):
         self.x = x
         self.y = y
     def accept(self, v): return v.visit_If(self.b, self.x, self.y)
+class Line(Expr):
+    in_types = ['int', 'int', 'int', 'int']
+    out_type = 'bitmap'
+    def __init__(self, x1, y1, x2, y2):
+        self.x1 = x1
+        self.y1 = y1
+        self.x2 = x2
+        self.y2 = y2
+    def accept(self, v): return v.visit_Line(self.x1, self.y1, self.x2, self.y2)
 class Rect(Expr): 
     in_types = ['int', 'int', 'int', 'int']
     out_type = 'bitmap'
@@ -141,6 +151,7 @@ class Visitor:
     def visit_Lt(self, x, y): self._fail('Lt')
     def visit_And(self, x, y): self._fail('And')
     def visit_If(self, b, x, y): self._fail('If')
+    def visit_Line(self, x1, y1, x2, y2): self._fail('Line')
     def visit_Rect(self, x1, y1, x2, y2): self._fail('Rect')
     def visit_Union(self, b1, b2): self._fail('Union')
     def visit_Intersect(self, b1, b2): self._fail('Intersect')
@@ -182,6 +193,12 @@ class Eval(Visitor):
         b, x, y = b.accept(self), x.accept(self), y.accept(self)
         assert isinstance(b, bool) and isinstance(x, int) and isinstance(y, int)
         return x if b else y
+    def visit_Line(self, x1, y1, x2, y2): 
+        x1, y1, x2, y2 = (x1.accept(self), y1.accept(self), 
+                          x2.accept(self), y2.accept(self))
+        assert all(isinstance(v, int) for v in [x1, y1, x2, y2])
+        assert 0 <= x1 < x2 <= B_W and 0 <= y1 <= B_H and 0 <= y2 <= B_H
+        return util.tensor_line(x1, y1, x2, y2, B_W, B_H)
     def visit_Rect(self, x1, y1, x2, y2): 
         x1, y1, x2, y2 = (x1.accept(self), y1.accept(self), 
                           x2.accept(self), y2.accept(self))
@@ -218,6 +235,8 @@ class Print(Visitor):
     def visit_And(self, x, y): return f'(and {x.accept(self)} {y.accept(self)})'
     def visit_If(self, b, x, y): return f'(if {b} {x.accept(self)} {y.accept(self)})'
     def visit_Rect(self, x1, y1, x2, y2): 
+        return f'(L {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
+    def visit_Rect(self, x1, y1, x2, y2): 
         return f'(R {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
     def visit_Union(self, b1, b2): return f'(u {b1.accept(self)} {b2.accept(self)})'
     def visit_Intersect(self, b1, b2): return f'(n {b1.accept(self)} {b2.accept(self)})'
@@ -237,14 +256,11 @@ class Zs(Visitor):
     def visit_If(self, b, x, y): return b.accept(self) | x.accept(self) | y.accept(self)  
     def visit_Rect(self, x1, y1, x2, y2): 
         return x1.accept(self) | y1.accept(self) | x2.accept(self) | y2.accept(self)
+    def visit_Line(self, x1, y1, x2, y2): 
+        return x1.accept(self) | y1.accept(self) | x2.accept(self) | y2.accept(self)
     def visit_Union(self, b1, b2): return b1.accept(self) | b2.accept(self)
     def visit_Intersect(self, b1, b2): return b1.accept(self) | b2.accept(self)
     def visit_ReflectH(self, b): return b.accept(self)
-
-def img_to_tensor(lines):
-    """Converts a list of strings into a float tensor"""
-    return T.tensor([[c == "#" for c in line] 
-                     for line in lines]).float()
 
 def test_eval():
     tests = [
@@ -265,34 +281,52 @@ def test_eval():
          lambda z: z[0] * z[1] if not (z[0] < z[1]) else z[0] + z[1]),
         (Rect(Num(0), Num(0), 
               Num(1), Num(2)),
-         lambda z: img_to_tensor(["#___",
-                                  "#___",
-                                  "____",
-                                  "____"])),
+         lambda z: util.img_to_tensor(["#___",
+                                       "#___",
+                                       "____",
+                                       "____"])),
+        # (Line(Num(0), Num(0), 
+        #       Num(1), Num(2)),
+        #  lambda z: util.img_to_tensor(["#___",
+        #                                "_#__",
+        #                                "_#__",
+        #                                "____"])),
+        # (Line(Num(0), Num(0), 
+        #       Num(3), Num(3)),
+        #  lambda z: util.img_to_tensor(["#___",
+        #                                "_#__",
+        #                                "__#_",
+        #                                "___#"])),
+        (ReflectH(Line(Num(0), Num(0), 
+                       Num(3), Num(3))),
+         lambda z: util.img_to_tensor(["___#",
+                                       "__#_",
+                                       "_#__",
+                                       "#___"])),
         (Union(Rect(Num(0), Num(0), 
                     Num(1), Num(1)),
                Rect(Num(2), Num(3), 
                     Num(4), Num(4))),
-         lambda z: img_to_tensor(["#___",
-                                  "____",
-                                  "____",
-                                  "__##"])),
+         lambda z: util.img_to_tensor(["#___",
+                                       "____",
+                                       "____",
+                                       "__##"])),
         (ReflectH(Union(Rect(Num(0), Num(0), 
                              Num(1), Num(1)),
                         Rect(Num(2), Num(3), 
                              Num(4), Num(4)))),
-         lambda z: img_to_tensor(["___#",
-                                  "____",
-                                  "____",
-                                  "##__"])),
+         lambda z: util.img_to_tensor(["___#",
+                                       "____",
+                                       "____",
+                                       "##__"])),
         (ReflectH(ReflectH(Union(Rect(Num(0), Num(0), 
                                       Num(1), Num(1)),
                                  Rect(Num(2), Num(3), 
                                       Num(4), Num(4))))),
-         lambda z: img_to_tensor(["#___",
-                                  "____",
-                                  "____",
-                                  "__##"])),
+         lambda z: util.img_to_tensor(["#___",
+                                       "____",
+                                       "____",
+                                       "__##"])),
     ]
     for expr, correct_semantics in tests:
         for x in range(10):
@@ -316,10 +350,10 @@ def test_eval():
     expr = Rect(Num(0),Num(0), 
                 Num(1),Num(1))
     out = expr.eval({'z':[]})
-    expected = img_to_tensor(["#___",
-                              "____",
-                              "____",
-                              "____"])
+    expected = util.img_to_tensor(["#___",
+                                   "____",
+                                   "____",
+                                   "____"])
     assert T.equal(expected, out), f"test_render failed:\n expected={expected},\n out={out}"
 
     # (1,0), (3,3)
@@ -328,10 +362,10 @@ def test_eval():
                 Plus(Num(2), Num(1)), 
                 Num(3)) 
     out = expr.eval({'z': [1,2,3]})
-    expected = img_to_tensor(["_##_",
-                              "_##_",
-                              "_##_",
-                              "____"])
+    expected = util.img_to_tensor(["_##_",
+                                   "_##_",
+                                   "_##_",
+                                   "____"])
     assert T.equal(expected, out), f"test_render failed:\n expected={expected},\n out={out}"
     print(" [+] passed test_eval")
 

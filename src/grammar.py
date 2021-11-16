@@ -119,6 +119,8 @@ class Zn(Expr):
         out = env["z_n"][i]
         if isinstance(out, T.LongTensor):
             return out.item()
+        else:
+            return out
 
     def zs(self):
         return {self.i.eval({})}

@@ -167,21 +167,11 @@ def test_bottom_up_tensor():
     )
 
     test_cases = [
-        # [
-        #     ({"z": [0, 0, 0, 0, 0, 1]}, 1),
-        #     ({"z": [0, 0, 0, 0, 0, 2]}, 2),
-        #     ({"z": [0, 0, 0, 0, 0, 3]}, 3),
-        # ],
-        # [
-        #     ({"z": T.tensor([0, 0, 0, 0, 0, 1])}, 1),
-        #     ({"z": T.tensor([0, 0, 0, 0, 0, 2])}, 2),
-        #     ({"z": T.tensor([0, 0, 0, 0, 0, 3])}, 3),
-        # ],
-        # [
-        #     ({"z": [0, 1, 2, 3, 4, 5]}, 
-        #      Rect(Num(1), Num(1), 
-        #           Num(3), Num(4)).eval({}))
-        # ],
+        [
+            ({"z": T.tensor([0, 0, 0, 0, 0, 1])}, 1),
+            ({"z": T.tensor([0, 0, 0, 0, 0, 2])}, 2),
+            ({"z": T.tensor([0, 0, 0, 0, 0, 3])}, 3),
+        ],
         [
             ({"z": T.tensor([0, 1, 2, 3, 4, 5])}, 
              Rect(Num(1), Num(1), 
@@ -204,4 +194,4 @@ def test_bottom_up_tensor():
 
 if __name__ == "__main__":
     test_bottom_up_tensor()
-    test_bottom_up()
+    # test_bottom_up()
