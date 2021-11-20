@@ -108,7 +108,7 @@ def integer_partitions(target_value, number_of_arguments):
 
 def test_bottom_up():
     grammar = Grammar(
-        ops=[Union, Rect, Plus, Minus, Times, If, And, Not],
+        ops=[Stack, Rect, Plus, Minus, Times, If, And, Not],
         consts=[Num(i) for i in range(Z_SIZE)] + [Z(i) for i in range(Z_SIZE)],
     )
 
@@ -128,13 +128,13 @@ def test_bottom_up():
           Rect(Num(3), Num(3), 
                Num(4), Num(4)).eval({}))],
         # U((R Z1 Z1 Z2 Z2) (R Z2 Z2 Z3 Z3))
-        [({"z": [0, 1, 2, 3, 4, 4]}, 
-          Union(Rect(Num(1), Num(1), 
+        [({"z": [0, 1, 2, 3, 4, 4]},
+          Stack(Rect(Num(1), Num(1),
                      Num(2), Num(2)),
                 Rect(Num(2), Num(2), 
                      Num(3), Num(3))).eval({})),
-         ({"z": [1, 2, 3, 4, 4, 4]}, 
-          Union(Rect(Num(2), Num(2), 
+         ({"z": [1, 2, 3, 4, 4, 4]},
+          Stack(Rect(Num(2), Num(2),
                      Num(3), Num(3)),
                 Rect(Num(3), Num(3), 
                      Num(4), Num(4))).eval({}))
@@ -162,7 +162,7 @@ def test_bottom_up():
 
 def test_bottom_up_tensor():
     grammar = Grammar(
-        ops=[Union, Rect, Plus, Minus, Times],
+        ops=[Stack, Rect, Plus, Minus, Times],
         consts= [Z(i) for i in range(Z_SIZE)] # [Num(i) for i in range(5)]
     )
 

@@ -168,6 +168,17 @@ class Line(Expr):
     def accept(self, v): return v.visit_Line(self.x1, self.y1, self.x2, self.y2)
 
 
+class Point(Expr):
+    in_types = ['int', 'int']
+    out_type = 'bitmap'
+
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def accept(self, v): return v.visit_Point(self.x, self.y)
+
+
 class Rect(Expr):
     in_types = ['int', 'int', 'int', 'int']
     out_type = 'bitmap'
@@ -181,7 +192,7 @@ class Rect(Expr):
     def accept(self, v): return v.visit_Rect(self.x1, self.y1, self.x2, self.y2)
 
 
-class Union(Expr):
+class Stack(Expr):
     in_types = ['bitmap', 'bitmap']
     out_type = 'bitmap'
 
@@ -189,7 +200,7 @@ class Union(Expr):
         self.b1 = b1
         self.b2 = b2
 
-    def accept(self, v): return v.visit_Union(self.b1, self.b2)
+    def accept(self, v): return v.visit_Stack(self.b1, self.b2)
 
 
 class Intersect(Expr):
@@ -211,6 +222,14 @@ class ReflectH(Expr):
 
     def accept(self, v): return v.visit_ReflectH(self.b)
 
+
+class ReflectV(Expr):
+    in_types = ['bitmap']
+    out_type = 'bitmap'
+
+    def __init__(self, b): self.b = b
+
+    def accept(self, v): return v.visit_ReflectV(self.b)
 
 class Visitor:
     @staticmethod
@@ -236,11 +255,13 @@ class Visitor:
 
     def visit_If(self, b, x, y): self.fail('If')
 
+    def visit_Point(self, x, y): self.fail('Point')
+
     def visit_Line(self, x1, y1, x2, y2): self.fail('Line')
 
     def visit_Rect(self, x1, y1, x2, y2): self.fail('Rect')
 
-    def visit_Union(self, b1, b2): self.fail('Union')
+    def visit_Stack(self, b1, b2): self.fail('Union')
 
     def visit_Intersect(self, b1, b2): self.fail('Intersect')
 
@@ -303,6 +324,11 @@ class Eval(Visitor):
         assert isinstance(b, bool) and isinstance(x, int) and isinstance(y, int)
         return x if b else y
 
+    def visit_Point(self, x, y):
+        x, y = x.accept(self), y.accept(self)
+        assert isinstance(x, int) and isinstance(y, int)
+        return Eval.make_bitmap(lambda p: p[0] == x and p[1] == y)
+
     def visit_Line(self, x1, y1, x2, y2):
         x1, y1, x2, y2 = (x1.accept(self), y1.accept(self),
                           x2.accept(self), y2.accept(self))
@@ -325,7 +351,7 @@ class Eval(Visitor):
         assert 0 <= x1 < x2 <= B_W and 0 <= y1 < y2 <= B_H
         return Eval.make_bitmap(lambda p: x1 <= p[0] < x2 and y1 <= p[1] < y2)
 
-    def visit_Union(self, b1, b2):
+    def visit_Stack(self, b1, b2):
         b1, b2 = b1.accept(self), b2.accept(self)
         assert isinstance(b1, T.FloatTensor) and isinstance(b2, T.FloatTensor), \
             f"Union needs two float tensors, found b1={b1}, b2={b2}"
@@ -341,6 +367,11 @@ class Eval(Visitor):
         b = b.accept(self)
         assert isinstance(b, T.FloatTensor)
         return b.flip(1)
+
+    def visit_ReflectV(self, b):
+        b = b.accept(self)
+        assert isinstance(b, T.FloatTensor)
+        return b.flip(0)
 
 
 class Print(Visitor):
@@ -366,17 +397,21 @@ class Print(Visitor):
 
     def visit_If(self, b, x, y): return f'(if {b} {x.accept(self)} {y.accept(self)})'
 
+    def visit_Point(self, x, y): return f'(P {x.accept(self)} {y.accept(self)})'
+
     def visit_Line(self, x1, y1, x2, y2):
         return f'(L {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
 
     def visit_Rect(self, x1, y1, x2, y2):
         return f'(R {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
 
-    def visit_Union(self, b1, b2): return f'(u {b1.accept(self)} {b2.accept(self)})'
+    def visit_Stack(self, b1, b2): return f'(u {b1.accept(self)} {b2.accept(self)})'
 
     def visit_Intersect(self, b1, b2): return f'(n {b1.accept(self)} {b2.accept(self)})'
 
-    def visit_ReflectH(self, b): return f'(flip {b.accept(self)})'
+    def visit_ReflectH(self, b): return f'(reflect-h {b.accept(self)})'
+
+    def visit_ReflectV(self, b): return f'(reflect-v {b.accept(self)})'
 
 
 class Zs(Visitor):
@@ -402,17 +437,21 @@ class Zs(Visitor):
 
     def visit_If(self, b, x, y): return b.accept(self) | x.accept(self) | y.accept(self)
 
+    def visit_Point(self, x, y): return x.accept(self) | y.accept(self)
+
     def visit_Rect(self, x1, y1, x2, y2):
         return x1.accept(self) | y1.accept(self) | x2.accept(self) | y2.accept(self)
 
     def visit_Line(self, x1, y1, x2, y2):
         return x1.accept(self) | y1.accept(self) | x2.accept(self) | y2.accept(self)
 
-    def visit_Union(self, b1, b2): return b1.accept(self) | b2.accept(self)
+    def visit_Stack(self, b1, b2): return b1.accept(self) | b2.accept(self)
 
     def visit_Intersect(self, b1, b2): return b1.accept(self) | b2.accept(self)
 
     def visit_ReflectH(self, b): return b.accept(self)
+
+    def visit_ReflectV(self, b): return b.accept(self)
 
 
 def test_eval():
@@ -480,7 +519,23 @@ def test_eval():
                                        "__#_",
                                        "_#__",
                                        "#___"])),
-        (Union(Rect(Num(0), Num(0),
+        (Stack(Stack(Point(Num(0), Num(0)),
+                     Point(Num(1), Num(3))),
+               Stack(Point(Num(2), Num(0)),
+                     Point(Num(3), Num(1)))),
+         lambda z: util.img_to_tensor(["#_#_",
+                                       "___#",
+                                       "____",
+                                       "_#__"])),
+        (ReflectV(Stack(Stack(Point(Num(0), Num(0)),
+                              Point(Num(1), Num(3))),
+                        Stack(Point(Num(2), Num(0)),
+                              Point(Num(3), Num(1))))),
+         lambda z: util.img_to_tensor(["_#__",
+                                       "____",
+                                       "___#",
+                                       "#_#_"])),
+        (Stack(Rect(Num(0), Num(0),
                     Num(1), Num(1)),
                Rect(Num(2), Num(3),
                     Num(4), Num(4))),
@@ -488,7 +543,7 @@ def test_eval():
                                        "____",
                                        "____",
                                        "__##"])),
-        (ReflectH(Union(Rect(Num(0), Num(0),
+        (ReflectH(Stack(Rect(Num(0), Num(0),
                              Num(1), Num(1)),
                         Rect(Num(2), Num(3),
                              Num(4), Num(4)))),
@@ -496,7 +551,7 @@ def test_eval():
                                        "____",
                                        "____",
                                        "##__"])),
-        (ReflectH(ReflectH(Union(Rect(Num(0), Num(0),
+        (ReflectH(ReflectH(Stack(Rect(Num(0), Num(0),
                                       Num(1), Num(1)),
                                  Rect(Num(2), Num(3),
                                       Num(4), Num(4))))),
