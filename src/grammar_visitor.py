@@ -2,8 +2,8 @@ import util
 import torch as T
 
 # bitmap size constants
-B_W = 4
-B_H = 4
+B_W = 8
+B_H = 8
 
 # constants for z_n, z_b
 Z_SIZE = 6  # length of z_n, z_b
@@ -159,37 +159,40 @@ class Line(Expr):
     in_types = ['int', 'int', 'int', 'int']
     out_type = 'bitmap'
 
-    def __init__(self, x1, y1, x2, y2):
+    def __init__(self, x1, y1, x2, y2, color=1):
         self.x1 = x1
         self.y1 = y1
         self.x2 = x2
         self.y2 = y2
+        self.color = color
 
-    def accept(self, v): return v.visit_Line(self.x1, self.y1, self.x2, self.y2)
+    def accept(self, v): return v.visit_Line(self.x1, self.y1, self.x2, self.y2, self.color)
 
 
 class Point(Expr):
     in_types = ['int', 'int']
     out_type = 'bitmap'
 
-    def __init__(self, x, y):
+    def __init__(self, x, y, color=1):
         self.x = x
         self.y = y
+        self.color = color
 
-    def accept(self, v): return v.visit_Point(self.x, self.y)
+    def accept(self, v): return v.visit_Point(self.x, self.y, self.color)
 
 
 class Rect(Expr):
     in_types = ['int', 'int', 'int', 'int']
     out_type = 'bitmap'
 
-    def __init__(self, x1, y1, x2, y2):
+    def __init__(self, x1, y1, x2, y2, color=1):
         self.x1 = x1
         self.y1 = y1
         self.x2 = x2
         self.y2 = y2
+        self.color = color
 
-    def accept(self, v): return v.visit_Rect(self.x1, self.y1, self.x2, self.y2)
+    def accept(self, v): return v.visit_Rect(self.x1, self.y1, self.x2, self.y2, self.color)
 
 
 class Stack(Expr):
@@ -231,6 +234,7 @@ class ReflectV(Expr):
 
     def accept(self, v): return v.visit_ReflectV(self.b)
 
+
 class Visitor:
     @staticmethod
     def fail(s): assert False, f"Visitor subclass should implement `{s}`"
@@ -255,11 +259,11 @@ class Visitor:
 
     def visit_If(self, b, x, y): self.fail('If')
 
-    def visit_Point(self, x, y): self.fail('Point')
+    def visit_Point(self, x, y, color): self.fail('Point')
 
-    def visit_Line(self, x1, y1, x2, y2): self.fail('Line')
+    def visit_Line(self, x1, y1, x2, y2, color): self.fail('Line')
 
-    def visit_Rect(self, x1, y1, x2, y2): self.fail('Rect')
+    def visit_Rect(self, x1, y1, x2, y2, color): self.fail('Rect')
 
     def visit_Stack(self, b1, b2): self.fail('Union')
 
@@ -273,10 +277,10 @@ class Eval(Visitor):
         self.env = env
 
     @classmethod
-    def make_bitmap(cls, pred):
+    def make_bitmap(cls, pred, color=1):
         return T.tensor([[pred((x, y))
                           for x in range(B_W)]
-                         for y in range(B_H)]).float()
+                         for y in range(B_H)]).float() * color
 
     def visit_F(self):
         return False
@@ -324,32 +328,32 @@ class Eval(Visitor):
         assert isinstance(b, bool) and isinstance(x, int) and isinstance(y, int)
         return x if b else y
 
-    def visit_Point(self, x, y):
+    def visit_Point(self, x, y, color):
         x, y = x.accept(self), y.accept(self)
         assert isinstance(x, int) and isinstance(y, int)
-        return Eval.make_bitmap(lambda p: p[0] == x and p[1] == y)
+        return Eval.make_bitmap(lambda p: p[0] == x and p[1] == y, color=color)
 
-    def visit_Line(self, x1, y1, x2, y2):
+    def visit_Line(self, x1, y1, x2, y2, color):
         x1, y1, x2, y2 = (x1.accept(self), y1.accept(self),
                           x2.accept(self), y2.accept(self))
         assert all(isinstance(v, int) for v in [x1, y1, x2, y2])
         assert 0 <= x1 <= x2 <= B_W and 0 <= y1 <= y2 <= B_H
         assert x1 == x2 or y1 == y2 or abs(x2 - x1) == abs(y2 - y1)
         if x1 == x2:  # vertical
-            return Eval.make_bitmap(lambda p: x1 == p[0] and y1 <= p[1] <= y2)
+            return Eval.make_bitmap(lambda p: x1 == p[0] and y1 <= p[1] <= y2, color=color)
         elif y1 == y2:  # horizontal
-            return Eval.make_bitmap(lambda p: x1 <= p[0] <= x2 and y1 == p[1])
+            return Eval.make_bitmap(lambda p: x1 <= p[0] <= x2 and y1 == p[1], color=color)
         else:  # diagonal
             return Eval.make_bitmap(lambda p: x1 <= p[0] <= x2 and
                                               y1 <= p[1] <= y2 and
-                                              p[1] == y1 + (p[0] - x1))
+                                              p[1] == y1 + (p[0] - x1), color=color)
 
-    def visit_Rect(self, x1, y1, x2, y2):
+    def visit_Rect(self, x1, y1, x2, y2, color):
         x1, y1, x2, y2 = (x1.accept(self), y1.accept(self),
                           x2.accept(self), y2.accept(self))
         assert all(isinstance(v, int) for v in [x1, y1, x2, y2])
         assert 0 <= x1 < x2 <= B_W and 0 <= y1 < y2 <= B_H
-        return Eval.make_bitmap(lambda p: x1 <= p[0] < x2 and y1 <= p[1] < y2)
+        return Eval.make_bitmap(lambda p: x1 <= p[0] < x2 and y1 <= p[1] < y2, color=color)
 
     def visit_Stack(self, b1, b2):
         b1, b2 = b1.accept(self), b2.accept(self)
@@ -397,13 +401,13 @@ class Print(Visitor):
 
     def visit_If(self, b, x, y): return f'(if {b} {x.accept(self)} {y.accept(self)})'
 
-    def visit_Point(self, x, y): return f'(P {x.accept(self)} {y.accept(self)})'
+    def visit_Point(self, x, y, color): return f'(P[{color}] {x.accept(self)} {y.accept(self)})'
 
-    def visit_Line(self, x1, y1, x2, y2):
-        return f'(L {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
+    def visit_Line(self, x1, y1, x2, y2, color):
+        return f'(L[{color}] {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
 
-    def visit_Rect(self, x1, y1, x2, y2):
-        return f'(R {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
+    def visit_Rect(self, x1, y1, x2, y2, color):
+        return f'(R[{color}] {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
 
     def visit_Stack(self, b1, b2): return f'(u {b1.accept(self)} {b2.accept(self)})'
 
@@ -437,12 +441,12 @@ class Zs(Visitor):
 
     def visit_If(self, b, x, y): return b.accept(self) | x.accept(self) | y.accept(self)
 
-    def visit_Point(self, x, y): return x.accept(self) | y.accept(self)
+    def visit_Point(self, x, y, color): return x.accept(self) | y.accept(self)
 
-    def visit_Rect(self, x1, y1, x2, y2):
+    def visit_Rect(self, x1, y1, x2, y2, color):
         return x1.accept(self) | y1.accept(self) | x2.accept(self) | y2.accept(self)
 
-    def visit_Line(self, x1, y1, x2, y2):
+    def visit_Line(self, x1, y1, x2, y2, color):
         return x1.accept(self) | y1.accept(self) | x2.accept(self) | y2.accept(self)
 
     def visit_Stack(self, b1, b2): return b1.accept(self) | b2.accept(self)
@@ -476,49 +480,49 @@ def test_eval():
          lambda z: util.img_to_tensor(["#___",
                                        "#___",
                                        "____",
-                                       "____"])),
+                                       "____"], B_W, B_H)),
         (Line(Num(0), Num(0),
               Num(1), Num(1)),
          lambda z: util.img_to_tensor(["#___",
                                        "_#__",
                                        "____",
-                                       "____"])),
+                                       "____"], B_W, B_H)),
         (Line(Num(0), Num(0),
               Num(3), Num(3)),
          lambda z: util.img_to_tensor(["#___",
                                        "_#__",
                                        "__#_",
-                                       "___#"])),
+                                       "___#"], B_W, B_H)),
         (Line(Num(1), Num(0),
               Num(3), Num(2)),
          lambda z: util.img_to_tensor(["_#__",
                                        "__#_",
                                        "___#",
-                                       "____"])),
+                                       "____"], B_W, B_H)),
         (Line(Num(1), Num(2),
               Num(2), Num(3)),
          lambda z: util.img_to_tensor(["____",
                                        "____",
                                        "_#__",
-                                       "__#_"])),
+                                       "__#_"], B_W, B_H)),
         (Line(Num(1), Num(0),
               Num(3), Num(0)),
          lambda z: util.img_to_tensor(["_###",
                                        "____",
                                        "____",
-                                       "____"])),
+                                       "____"], B_W, B_H)),
         (Line(Num(1), Num(2),
               Num(1), Num(3)),
          lambda z: util.img_to_tensor(["____",
                                        "____",
                                        "_#__",
-                                       "_#__"])),
+                                       "_#__"], B_W, B_H)),
         (ReflectH(Line(Num(0), Num(0),
                        Num(3), Num(3))),
-         lambda z: util.img_to_tensor(["___#",
-                                       "__#_",
-                                       "_#__",
-                                       "#___"])),
+         lambda z: util.img_to_tensor(["_"*(B_W-4) + "___#",
+                                       "_"*(B_W-4) + "__#_",
+                                       "_"*(B_W-4) + "_#__",
+                                       "_"*(B_W-4) + "#___"], B_W, B_H)),
         (Stack(Stack(Point(Num(0), Num(0)),
                      Point(Num(1), Num(3))),
                Stack(Point(Num(2), Num(0)),
@@ -526,15 +530,16 @@ def test_eval():
          lambda z: util.img_to_tensor(["#_#_",
                                        "___#",
                                        "____",
-                                       "_#__"])),
+                                       "_#__"], B_W, B_H)),
         (ReflectV(Stack(Stack(Point(Num(0), Num(0)),
                               Point(Num(1), Num(3))),
                         Stack(Point(Num(2), Num(0)),
                               Point(Num(3), Num(1))))),
-         lambda z: util.img_to_tensor(["_#__",
+         lambda z: util.img_to_tensor(["____"] * (B_H - 4) +
+                                      ["_#__",
                                        "____",
                                        "___#",
-                                       "#_#_"])),
+                                       "#_#_"], B_W, B_H)),
         (Stack(Rect(Num(0), Num(0),
                     Num(1), Num(1)),
                Rect(Num(2), Num(3),
@@ -542,15 +547,15 @@ def test_eval():
          lambda z: util.img_to_tensor(["#___",
                                        "____",
                                        "____",
-                                       "__##"])),
+                                       "__##"], B_W, B_H)),
         (ReflectH(Stack(Rect(Num(0), Num(0),
                              Num(1), Num(1)),
                         Rect(Num(2), Num(3),
                              Num(4), Num(4)))),
-         lambda z: util.img_to_tensor(["___#",
-                                       "____",
-                                       "____",
-                                       "##__"])),
+         lambda z: util.img_to_tensor(["_"*(B_W-4) + "___#",
+                                       "_"*(B_W-4) + "____",
+                                       "_"*(B_W-4) + "____",
+                                       "_"*(B_W-4) + "##__"], B_W, B_H)),
         (ReflectH(ReflectH(Stack(Rect(Num(0), Num(0),
                                       Num(1), Num(1)),
                                  Rect(Num(2), Num(3),
@@ -558,7 +563,7 @@ def test_eval():
          lambda z: util.img_to_tensor(["#___",
                                        "____",
                                        "____",
-                                       "__##"])),
+                                       "__##"], B_W, B_H)),
     ]
     for expr, correct_semantics in tests:
         for x in range(10):
@@ -587,7 +592,7 @@ def test_eval():
     expected = util.img_to_tensor(["#___",
                                    "____",
                                    "____",
-                                   "____"])
+                                   "____"], B_W, B_H)
     assert T.equal(expected, out), f"test_render failed:\n expected={expected},\n out={out}"
 
     # (1,0), (3,3)
@@ -599,7 +604,7 @@ def test_eval():
     expected = util.img_to_tensor(["_##_",
                                    "_##_",
                                    "_##_",
-                                   "____"])
+                                   "____"], B_W, B_H)
     assert T.equal(expected, out), f"test_render failed:\n expected={expected},\n out={out}"
     print(" [+] passed test_eval")
 

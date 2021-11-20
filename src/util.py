@@ -31,7 +31,21 @@ def chunk_pairs(l, k, n):
         yield (l[start:mid] if start < mid else l[start:] + l[:mid],
                l[mid:end] if mid < end else l[mid:] + l[:end])
 
-def img_to_tensor(lines):
+def img_to_tensor(lines, w=-1, h=-1):
     """Converts a list of strings into a float tensor"""
-    return T.tensor([[c == "#" for c in line] 
-                     for line in lines]).float()
+    if h == -1: h = len(lines)
+    if w == -1: w = len(lines[0])
+
+    return T.tensor([[y < len(lines) and 
+                      x < len(lines[0]) and 
+                      lines[y][x] == '#' 
+                      for x in range(w)] 
+                     for y in range(h)]).float()
+
+if __name__ == '__main__':
+    print(img_to_tensor(['_#_',
+                         '#_#',
+                         '__#']))
+    print(img_to_tensor(['_#_',
+                         '#_#',
+                         '__#'], 8, 8))
