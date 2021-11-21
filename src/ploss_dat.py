@@ -12,49 +12,63 @@ def gen_zs(n):
     zs = (T.rand(n, Z_SIZE) * (Z_HI - Z_LO) - Z_LO).long()
     return zs
 
-def nest_stacks(elts, n):
-    if n == 1:
+def nest_stacks(elts):
+    if len(elts) == 1:
         return elts[0]
     else:
-        k = 2 ** (floor(log2(n)) - 1)
-        return Stack(nest_stacks(elts[:n-k], n-k), 
-                     nest_stacks(elts[n-k:], k))
+        return Stack(nest_stacks(elts[:1]), 
+                     nest_stacks(elts[1:]))
 
 def gen_random_expr(zs, n_objs, aexprs, k):
     envs = [{'z': z} for z in zs]
-    objects = [Line, Rect]
+    objects = [Point, Line, Rect]
+    colors = list(range(1, 10))
 
     objs = []
-    n_found = 0
     n_misses = 0
-    while n_found < n_objs:
+    while len(objs) < n_objs:
         f = choice(objects)
+        color = choice(colors)
         args = [choice(aexprs) for t in f.in_types]
-        e = f(*args)
+        e = f(*args, color)
         
         # check that e is well-formed
         outs = eval(e, envs)
         ok = sum(out is not None for out in outs)
         if ok >= k * len(zs):
             objs.append(e)
-            n_found += 1
         else:
             n_misses += 1    
         print("Misses:", n_misses, end='\r')
 
-    return nest_stacks(objs, n_objs)
+    print()
+    return nest_stacks(objs)
 
 def gen_random_exprs(zs, n_exprs, n_objs, aexprs, k):
-    exprs = []
     for i in range(n_exprs):
         expr = gen_random_expr(zs, n_objs, aexprs, k)
-        print('expr generated:', expr)
-        exprs.append(expr)
-    return exprs
+        print(f'expr generated [{i+1}/{n_exprs}]: {expr}')
+        yield expr
+
+def save(zs, exprs):
+    print('Saving zs and exprs...')
+    with open('../data/zs.dat', 'wb') as f:
+        pickle.dump(zs, f)
+    with open('../data/exprs.dat', 'wb') as f:
+        for expr in exprs:
+            pickle.dump(expr, f)
+
+def visualize(expr, env, i, j):
+    try:
+        viz(expr.eval(env), f'e{i}-{j}', str(expr), 
+            f'../data/expr-viz/e{i}-{j}.png', 
+            show=False, save=True)
+    except AssertionError:
+        pass
 
 if __name__ == '__main__':
-    n_exprs = 10
-    n_zs = 100
+    n_exprs = 1000
+    n_zs = 1000
     abound = 1
     n_objs = 3
 
@@ -66,12 +80,18 @@ if __name__ == '__main__':
     aexprs = [e for e, s in bottom_up_generator(abound, g, envs)]
     # for a in aexprs: print(a)
 
-    # print(nest_stacks([Num(i) for i in range(10)], 10))
-    exprs = gen_random_exprs(zs, n_exprs, n_objs, aexprs, n_zs * 0.5)
-    
-    for expr in exprs:
-        for env in envs:
-            try:
-                viz(expr.eval(env), str(expr))
-            except AssertionError:
-                pass
+    # print(nest_stacks([Num(i) for i in range(10)]))
+    # expr = gen_random_expr(zs, n_objs, aexprs, 0.5)
+
+    gen = gen_random_exprs(zs, n_exprs, n_objs, aexprs, 1.0)
+    exprs = []
+    for i, expr in enumerate(gen):
+        exprs.append(expr)
+
+        # visualize first 50 f, each with first 10 z's
+        if i < 50:
+            for j, env in enumerate(envs[:10]):
+                visualize(expr, env, i, j)
+
+    # save(zs, exprs)
+
