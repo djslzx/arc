@@ -52,23 +52,30 @@ def bottom_up_generator(global_bound, grammar, envs):
     exprs = dict() # (type, size) => values
     seen = set()
 
+    def eval_expr(expr):
+        return tuple((y, type(y)) for y in eval(expr, envs))        
+
+    def new_expr(expr):
+        ys = eval_expr(expr)
+        is_new = ys not in seen and any(y is not None for y,_ in ys)
+        seen.add(ys)
+        return is_new
+
     def add_expr(key, expr):
         """
         Add a expr to exprs[k] if not observationally equivalent to a pre-existing program.
 
         Use (output, type) pairs to address an issue with how Python thinks True == 1
         """
-        ys = tuple((y, type(y)) for y in eval(expr, envs))
-        if any(y is not None for y,_ in ys) and ys not in seen: # don't include `ys` if all entries are None
-            seen.add(ys)
-            if key not in exprs: 
-                exprs[key] = [expr]
-            else: 
-                exprs[key].append(expr)    
+        if key not in exprs: 
+            exprs[key] = [expr]
+        else: 
+            exprs[key].append(expr)    
 
     # Add all terminals to `exprs` as exprs of size 1
     for x in grammar.consts:
         yield x, 1
+        seen.add(eval_expr(x))
         add_expr((x.out_type, 1), x)
 
     # Generate all exprs of size `size` and add to `exprs`
@@ -82,8 +89,10 @@ def bottom_up_generator(global_bound, grammar, envs):
                 for args in itertools.product(*[exprs.get((typ, size+1), []) 
                                                 for typ, size in zip(in_types, partition)]):
                     expr = op(*args)
-                    yield expr, size
-                    add_expr((op.out_type, size), expr)
+                    if new_expr(expr):
+                        yield expr, size
+                        add_expr((op.out_type, size), expr)
+                    
         if VERBOSE: 
             print(f"|exprs| = {sum(len(l) for l in exprs.values())}")
             # print("exprs:")
@@ -108,7 +117,7 @@ def integer_partitions(target_value, number_of_arguments):
 
 def test_bottom_up():
     grammar = Grammar(
-        ops=[Stack, Rect, Plus, Minus, Times, If, And, Not],
+        ops=[Stack, Rect, Line, Point, Plus, Minus, Times, If, And, Not],
         consts=[Num(i) for i in range(Z_SIZE)] + [Z(i) for i in range(Z_SIZE)],
     )
 
@@ -193,5 +202,5 @@ def test_bottom_up_tensor():
     
 
 if __name__ == "__main__":
-    test_bottom_up_tensor()
-    # test_bottom_up()
+    # test_bottom_up_tensor()
+    test_bottom_up()

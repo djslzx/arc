@@ -36,10 +36,16 @@ def img_to_tensor(lines, w=-1, h=-1):
     if h == -1: h = len(lines)
     if w == -1: w = len(lines[0])
 
-    return T.tensor([[y < len(lines) and 
-                      x < len(lines[0]) and 
-                      lines[y][x] == '#' 
-                      for x in range(w)] 
+    def cell(x, y):
+        if y < len(lines) and x < len(lines[0]) and lines[y][x] not in [' ', '_', '-']:
+            try: 
+                return int(lines[y][x])
+            except ValueError:
+                return 1
+        else:
+            return 0
+
+    return T.tensor([[cell(x, y) for x in range(w)] 
                      for y in range(h)]).float()
 
 if __name__ == '__main__':
@@ -48,4 +54,10 @@ if __name__ == '__main__':
                          '__#']))
     print(img_to_tensor(['_#_',
                          '#_#',
-                         '__#'], 8, 8))
+                         '__#'], 2, 2))
+    print(img_to_tensor(['_#_',
+                         '#_#',
+                         '__#'], 4, 4))
+    print(img_to_tensor(['_1_',
+                         '2_2',
+                         '__3'], 4, 4))
