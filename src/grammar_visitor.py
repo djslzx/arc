@@ -8,7 +8,7 @@ B_H = 8
 # constants for z_n, z_b
 Z_SIZE = 6  # length of z_n, z_b
 Z_LO = 0  # min poss value in z_n
-Z_HI = max(B_W, B_H)  # max poss value in z_n
+Z_HI = max(B_W, B_H) - 1  # max poss value in z_n
 
 '''
 Grammar
@@ -49,6 +49,15 @@ class Expr(Visited):
     def __gt__(self, other): return str(self) > str(other)
 
     def __lt__(self, other): return str(self) < str(other)
+
+
+class Empty(Expr):
+    in_types = []
+    out_type = 'None'
+
+    def __init__(self): pass
+
+    def accept(self, v): return None
 
 
 class F(Expr):
@@ -238,6 +247,8 @@ class Visitor:
     @staticmethod
     def fail(s): assert False, f"Visitor subclass should implement `{s}`"
 
+    def visit_Empty(self): self.fail('Empty')
+
     def visit_F(self): self.fail('F')
 
     def visit_Num(self, n): self.fail('Num')
@@ -280,6 +291,9 @@ class Eval(Visitor):
         return T.tensor([[f((x, y))
                           for x in range(B_W)]
                          for y in range(B_H)]).float()
+
+    def visit_Empty(self):
+        return None
 
     def visit_F(self):
         return False
@@ -390,6 +404,8 @@ class Eval(Visitor):
 class Print(Visitor):
     def __init__(self): pass
 
+    def visit_Empty(self): return 'Empty'
+
     def visit_F(self): return 'False'
 
     def visit_Num(self, n): return f'{n}'
@@ -418,17 +434,19 @@ class Print(Visitor):
     def visit_Rect(self, x1, y1, x2, y2, color):
         return f'(R[{color}] {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
 
-    def visit_Stack(self, b1, b2): return f'(u {b1.accept(self)} {b2.accept(self)})'
+    def visit_Stack(self, b1, b2): return f'[{b1.accept(self)} {b2.accept(self)}]'
 
     def visit_Intersect(self, b1, b2): return f'(n {b1.accept(self)} {b2.accept(self)})'
 
     def visit_ReflectH(self, b): return f'(reflect-h {b.accept(self)})'
 
     def visit_ReflectV(self, b): return f'(reflect-v {b.accept(self)})'
-
+    
 
 class Zs(Visitor):
     def __init__(self): pass
+
+    def visit_Empty(self): return set()
 
     def visit_F(self): return set()
 
