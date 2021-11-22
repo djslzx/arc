@@ -410,7 +410,7 @@ class Print(Visitor):
 
     def visit_Num(self, n): return f'{n}'
 
-    def visit_Z(self, i): return f'z[{i}]'
+    def visit_Z(self, i): return f'z{i}'
 
     def visit_Not(self, b): return f'(not {b.accept(self)})'
 

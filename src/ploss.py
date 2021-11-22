@@ -18,7 +18,7 @@ import itertools
 import pickle
 
 import util
-from grammar import *
+from grammar_visitor import *
 from bottom_up import *
 from learn import *
 
@@ -34,13 +34,14 @@ import torch.utils.tensorboard as tb
 
 class Net(nn.Module):
 
-    def __init__(self, n, c=6):
+    def __init__(self, n, c=6, batch_size=4):
         """
         n: number of elts in each example set
         """
         super(Net, self).__init__()
         self.n = n
         self.c = c
+        self.batch_size = batch_size
         self.conv_stack = nn.Sequential(
             nn.Conv2d(1, c, 3, padding='same'),
             nn.BatchNorm2d(c),
@@ -71,10 +72,12 @@ class Net(nn.Module):
 
     def forward(self, x):
         """
-        x: a tensor w/ shape (2N x 1 x Bw x Bh)
+        x: a tensor w/ shape (2N x 1 x Bh x Bw)
         """
+        # x = x.reshape(-1, 1, B_H, B_W)
         x = x.squeeze(dim=0)
         x = self.conv_stack(x)
+        # x = x.reshape(-1, 2*self.n, self.c, B_H, B_W)
 
         # Split, max pool, flatten, and concat
         a, b = x.split(self.n)
@@ -131,116 +134,63 @@ class Net(nn.Module):
         T.save(self.state_dict(), './model.pt')
         print('Finished Training')
 
-def gen_zs(n):
-    zs = (T.rand(n, Z_SIZE) * (Z_HI - Z_LO) - Z_LO).long()
-    return zs
-
-def gen_exprs(grammar, zs, return_type, max_size):
-    envs = [{'z_n': z} for z in zs]
-    # for env in envs: print(" ", env)
-    return list(p for p, _ in bottom_up_generator(max_size, grammar, envs)
-                if p.return_type == return_type)
-
-def empty(t): return t.sum() == 0
-
-def percent_empty(xs):
-    return sum(empty(x) for x in xs)/len(xs)
-
-def test_percent_empty():
-    tests = [
-        ([T.ones(4,4)], 0),
-        ([T.zeros(4,4)], 1),
-        ([T.zeros(4,4), T.zeros(4,4)], 1),
-        ([T.zeros(4,4), T.zeros(4,4), T.ones(4,4)], 0.66),
-        ([T.zeros(4,4), T.zeros(4,4), T.ones(4,4), T.ones(4,4)], 0.5),
-    ]
-    for args, expected in tests:
-        actual = percent_empty(args)
-        assert abs(actual - expected) < 0.01, \
-            f"test failed: percent_empty({args})={actual}, expected={expected}"
-
-def make_exs(exprs, zs, n_fs, k_f, n_xs, empty_thresh=0.3):
+def make_data(exprs, zs, n_fs, n_reps, subset_size):
     """
-    Generate exs = [{f(z)} | f is an expr]
+    Generate examples [{f(z) | z in a subset of zs} | f is an expr]
 
     n_fs: number of unique f's to use
-    k_f: number of times to repeat each f
-    n_xs: number of xs to generate for each example
+    n_reps: number of times to repeat each f
+    subset_size: number of xs to generate for each example set
     """
-    assert n_xs * k_f <= len(zs), "not enough zs to sample xs from"
+    assert subset_size * n_reps <= len(zs), "not enough zs to sample xs from"
 
     def eval(f, z):
         try:
-            return f.eval({'z_n': z}).as_tensor()
+            return f.eval({'z': z})
         except AssertionError:
             return T.zeros(B_W, B_H)
 
-    # print(type(zs), type(zs[0]), type(zs[0][0]))
-    zs = set(zs)
-    exprs = set(exprs)
-    pools = {}
-    seen = set()
-    while len(pools) < n_fs:
-        f = random.choice(list(exprs - pools.keys() - seen))
-        seen.add(f)
-        xs = []
-        for z in zs:
-            x = eval(f, z)
-            if not empty(x):
-                xs.append(x)
-                if len(xs) >= n_xs * k_f: 
-                    pools[f] = xs
-                    break
+    xs = dict()
+    for i, f in enumerate(exprs[:n_fs]):
+        print(f'Evaluating exprs... [{i+1}/{len(exprs)}]', end='\r')
+        xs[f] = [eval(f, z) for z in zs]
+    print()
 
     data, labels = [], []
-    for f, f_pool in pools.items():
-        # Add matching examples using xs generated with f
-        for p1, p2 in util.chunk_pairs(f_pool, n_xs, k_f):
-            v1 = T.stack(p1)
-            v2 = T.stack(p2)
-            data.append(T.cat((v1, v2)))
+    for i, (f, f_xs) in enumerate(xs.items()):
+        print(f'Generating positive and negative examples... [{i+1}/{len(xs)}]', end='\r')
+        # positive examples
+        for p1, p2 in util.chunk_pairs(f_xs, subset_size, n_reps):
+            data.append(T.cat((T.stack(p1), T.stack(p2))))
             labels.append(1.0)
-
-        # Add non-matching examples by pairing f with some g
-        assert n_fs > 1, "Tried to generate non-matching f's when there's only one f"
-        non_matching = 0
-        while non_matching < k_f:
-            g = random.choice(list(pools.keys() - {f}))
-            g_pool = pools[g]
-
-            f_xs = T.stack(random.sample(f_pool, n_xs))
-            g_xs = T.stack(random.sample(g_pool, n_xs))
-            if not f_xs.isclose(g_xs).all():
-                data.append(T.cat((f_xs, g_xs)))
-                labels.append(0.0)
-                non_matching += 1
+        # negative examples
+        for i in range(n_reps):
+            g = random.choice(list(xs.keys() - {f}))
+            g_xs = xs[g]
+            f_subset = T.stack(random.sample(f_xs, subset_size))
+            g_subset = T.stack(random.sample(g_xs, subset_size))
+            data.append(T.cat((f_subset, g_subset)))
+            labels.append(0.0)
+    print()
 
     return data, labels
 
-def make_zs_and_exprs():
-    print('Making and writing Z...')
-    zs = gen_zs(n_zs)
-    with open('../data/zs.dat', 'wb') as f:
-        pickle.dump(zs, f)
-
-    print('Making and writing exprs...')
-    exprs = gen_exprs(g, zs, 'Bitmap', depth)
-    with open('../data/exprs.dat', 'wb') as f:
-        pickle.dump(exprs, f)
-    return zs, exprs
-
 def load_zs_and_exprs():
-    print('Loading Z, F...')
+    print('Loading zs, exprs...')
+    exprs = []
     with open('../data/exprs.dat', 'rb') as f: 
-        exprs = pickle.load(f)
+        while True:
+            try:
+                exprs.append(pickle.load(f))
+            except EOFError: 
+                break
     with open('../data/zs.dat', 'rb') as f: 
         zs = pickle.load(f)
     return zs, exprs
     
-def make_and_store_exs(zs, exprs, n_fs, k_f, n_xs):
-    print('Making examples...')
-    xs, ys = make_exs(exprs, zs, n_fs, k_f, n_xs)
-
+def make_and_store_data(exprs, zs, n_fs, n_reps, subset_size):
+    print('Making data...')
+    xs, ys = make_data(exprs, zs, n_fs, n_reps, subset_size)
     print('Saving examples...')
     with open('../data/exs.dat', 'wb') as f:
         pickle.dump((xs, ys), f)
@@ -256,16 +206,19 @@ def load_exs():
 def train_nn(net, xs, ys, epochs):
     print('Training NN...')
     start_time = time.time()
-    net.to(device)
     net.train(xs, ys, epochs)
     end_time = time.time()
     print(f'Took {(end_time - start_time):.5f}s to train.')
 
-def test_nn(net, xs, ys, threshold):
+def test_nn(net, xs, ys, exprs, threshold):
     print('Testing NN...')
     n_exs = len(xs)
+    n_xs = len(xs[0])//2
     n_correct = 0
     fps, fns, tps, tns = 0, 0, 0, 0
+    # fp_pairs = {}
+    # fn_pairs = {}
+
     for i, (x, y) in enumerate(zip(xs, ys)):
         y = bool(y.item())
         prediction = net(x).item() > threshold
@@ -273,35 +226,39 @@ def test_nn(net, xs, ys, threshold):
         fns += y and not prediction
         n_correct += y == prediction
 
+        # if not y and prediction:
+        #     fp_pairs[i] = (x[:n_xs], x[n_xs:])
+        # if y and not prediction:
+        #     fn_pairs[i] = (x[:n_xs], x[n_xs:])
+
     print("|correct|:", n_correct, "|exs|:", n_exs, "correct %:", n_correct/n_exs * 100)
     print("fps:", fps, "fns:", fns)
 
+    # fp_exs = random.sample(fp_pairs.items(), min(2, fps))
+    # fn_exs = random.sample(fn_pairs.items(), min(2, fns))
+    # for fp_ex in fp_exs:
+    #     print("fp:", fp_ex)
+    #     # print(exprs[i//n_reps].pretty_print())
+    # for fn_ex in fn_exs:
+    #     print("fn:", fn_ex)
+    #     # print(exprs[i//n_reps].pretty_print())
+
 if __name__ == '__main__':
-    # test_percent_empty()
-    g = Grammar(ops=[Plus, Times, Minus, Rect, Program],
-                consts=[Zn(Num(i)) for i in range(Z_SIZE)] + [Num(i) for i in range(Z_LO, Z_HI + 1)])
-    n_fs = 200
-    k_f = 2
-    n_xs = 5
-    n_zs = 1000
-    epochs = 10000
-    depth = 5
+    zs, exprs = load_zs_and_exprs()
+    n_fs = 100
+    n_reps=  10
+    epochs = 1000
     threshold = 0.5
-    print(f"Params: depth={depth}, n_fs={n_fs}, k_f={k_f}, n_xs={n_xs}, n_zs={n_zs}")
+    subset_size = 5             # len(zs)/n_reps
+    print(f"Params: n_fs={n_fs}, n_reps={n_reps}, subset_size={subset_size}, epochs={epochs}, thresh={threshold}")
 
     def reshape_data(data):
-        return T.stack([T.reshape(x, (n_xs * 2, 1, B_W, B_H)) for x in data]).to(device)
+        return T.stack([T.reshape(x, (subset_size * 2, 1, B_W, B_H)) for x in data]).to(device)
     
     def reshape_labels(labels):
         return T.reshape(T.tensor(labels), (len(labels), 1)).to(device)
 
-    # zs = gen_zs(n_zs)
-    # print(len(zn), len(zn[0]), random.sample(zn, 10))
-    # print(zs.shape, zs[400:410])
-
-    # zs, exprs = make_zs_and_exprs()
-    zs, exprs = load_zs_and_exprs()
-    data, labels = make_and_store_exs(zs, exprs, n_fs, k_f, n_xs)
+    data, labels = make_and_store_data(exprs, zs, n_fs, n_reps, subset_size)
     # # xs, labels = load_exs()
 
     # Format examples
@@ -319,8 +276,9 @@ if __name__ == '__main__':
     print("test:", test_data.shape, test_labels.shape)
 
     # Train and test
-    net = Net(n=n_xs)
+    net = Net(n=subset_size).to(device)
     train_nn(net, train_data, train_labels, epochs)
-    test_nn(net, test_data, test_labels, threshold)
+    # net.load_state_dict(T.load('model.pt'))
+    test_nn(net, test_data, test_labels, exprs, threshold)
 
     
