@@ -33,15 +33,20 @@ def chunk_pairs(l, k, n):
 
 def img_to_tensor(lines, w=-1, h=-1):
     """Converts a list of strings into a float tensor"""
-    if h == -1: h = len(lines)
-    if w == -1: w = len(lines[0])
+    lines_l = len(lines)
+    lines_w = max(len(line) for line in lines)
+
+    if h == -1: h = lines_l
+    if w == -1: w = lines_w
 
     def cell(x, y):
-        if y < len(lines) and x < len(lines[0]) and lines[y][x] not in [' ', '_', '-']:
+        if y < lines_l and x < lines_w:
             try: 
                 return int(lines[y][x])
             except ValueError:
-                return 1
+                return int(lines[y][x] == '#')
+            except IndexError:
+                return 0
         else:
             return 0
 
