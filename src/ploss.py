@@ -29,6 +29,8 @@ if T.cuda.is_available():
 else:
     print("Using CPU")
 
+PATH='./model.pt'
+
 # Tensorboard
 import torch.utils.tensorboard as tb
 
@@ -74,10 +76,8 @@ class Net(nn.Module):
         """
         x: a tensor w/ shape (2N x 1 x Bh x Bw)
         """
-        # x = x.reshape(-1, 1, B_H, B_W)
         x = x.squeeze(dim=0)
         x = self.conv_stack(x)
-        # x = x.reshape(-1, 2*self.n, self.c, B_H, B_W)
 
         # Split, max pool, flatten, and concat
         a, b = x.split(self.n)
@@ -87,23 +87,10 @@ class Net(nn.Module):
 
         x = x.flatten()
         x = self.linear_stack(x)
-        # x = x.unsqueeze(0)
         return x
 
-    # def log_embeddings(self, writer, data, labels):
-
-    #     def select_n_random(data, labels, n=100):
-    #         assert len(data) == len(labels)
-    #         perm = T.randperm(len(data))
-    #         return data[perm][:n], labels[perm][:n]
-
-    #     # select random images and their target indices
-    #     data, labels = select_n_random(data, labels)
-
-    #     # log embeddings
-    #     features = data.view(40, -1)
-    #     print(features.shape)
-    #     writer.add_embedding(features, metadata=labels)
+    def load(self):
+        self.load_state_dict(torch.load(PATH))
 
     def train(self, data, labels, epochs):
         criterion = nn.BCEWithLogitsLoss()
@@ -111,9 +98,9 @@ class Net(nn.Module):
 
         dataset = T.utils.data.TensorDataset(data, labels)
         dataloader = T.utils.data.DataLoader(dataset, shuffle=True)
+
         self.to(device)
-        
-        writer = tb.SummaryWriter() # tensorboard
+        writer = tb.SummaryWriter()
         
         for epoch in range(1, epochs+1):
             for i, (x,y) in enumerate(dataloader, 1):
@@ -131,7 +118,7 @@ class Net(nn.Module):
                 print('[%d/%d] loss: %.3f' % (epoch, epochs, loss.item()))
                 break
 
-        T.save(self.state_dict(), './model.pt')
+        T.save(self.state_dict(), PATH)
         print('Finished Training')
 
 def make_data(exprs, zs, n_fs, n_reps, subset_size):
@@ -144,6 +131,9 @@ def make_data(exprs, zs, n_fs, n_reps, subset_size):
     """
     assert subset_size * n_reps <= len(zs), "not enough zs to sample xs from"
 
+    def cost_from_dist(d):
+        return 1/(1 + d)
+
     def eval(f, z):
         try:
             return f.eval({'z': z})
@@ -152,7 +142,7 @@ def make_data(exprs, zs, n_fs, n_reps, subset_size):
 
     xs = dict()
     for i, f in enumerate(exprs[:n_fs]):
-        print(f'Evaluating exprs... [{i+1}/{len(exprs)}]', end='\r')
+        print(f'Evaluating exprs... [{i+1}/{n_fs}]', end='\r')
         xs[f] = [eval(f, z) for z in zs]
     print()
 
@@ -162,18 +152,18 @@ def make_data(exprs, zs, n_fs, n_reps, subset_size):
         # positive examples
         for p1, p2 in util.chunk_pairs(f_xs, subset_size, n_reps):
             data.append(T.cat((T.stack(p1), T.stack(p2))))
-            labels.append(1.0)
+            labels.append(cost_from_dist(0))
         # negative examples
         for i in range(n_reps):
             g = random.choice(list(xs.keys() - {f}))
             g_xs = xs[g]
+            d = f.dist_to(g)
             f_subset = T.stack(random.sample(f_xs, subset_size))
             g_subset = T.stack(random.sample(g_xs, subset_size))
             data.append(T.cat((f_subset, g_subset)))
-            labels.append(0.0)
+            labels.append(cost_from_dist(d))
     print()
-
-    return data, labels
+    return T.stack(data), T.tensor(labels)
 
 def load_zs_and_exprs():
     print('Loading zs, exprs...')
@@ -196,8 +186,8 @@ def make_and_store_data(exprs, zs, n_fs, n_reps, subset_size):
         pickle.dump((xs, ys), f)
     return xs, ys
 
-def load_exs():
-    print('Loading exs from file...', end=' ')
+def load_data():
+    print('Loading data from file...')
     xs, ys = None, None
     with open('../data/exs.dat', 'rb') as f:
         xs, ys = pickle.load(f)
@@ -210,29 +200,35 @@ def train_nn(net, xs, ys, epochs):
     end_time = time.time()
     print(f'Took {(end_time - start_time):.5f}s to train.')
 
-def test_nn(net, xs, ys, exprs, threshold):
+def test_nn(net, inputs, outputs, exprs):
     print('Testing NN...')
-    n_exs = len(xs)
-    n_xs = len(xs[0])//2
+    n_exs = len(inputs)
     n_correct = 0
     fps, fns, tps, tns = 0, 0, 0, 0
-    # fp_pairs = {}
-    # fn_pairs = {}
 
-    for i, (x, y) in enumerate(zip(xs, ys)):
-        y = bool(y.item())
-        prediction = net(x).item() > threshold
-        fps += not y and prediction
-        fns += y and not prediction
-        n_correct += y == prediction
+    predictions = []
+    for i, o in zip(inputs, outputs):
+        label = o.item()
+        predicted = net(i).item()
+        predictions.append(predicted)
 
-        # if not y and prediction:
-        #     fp_pairs[i] = (x[:n_xs], x[n_xs:])
-        # if y and not prediction:
-        #     fn_pairs[i] = (x[:n_xs], x[n_xs:])
+        l = label > 0.5
+        p = predicted > 0.5
 
-    print("|correct|:", n_correct, "|exs|:", n_exs, "correct %:", n_correct/n_exs * 100)
-    print("fps:", fps, "fns:", fns)
+        fps += not l and p
+        fns += l and not p
+
+        n_correct += l == p
+
+    predictions = T.tensor(predictions).to(device)
+    print('predictions', tensor_stats(predictions))
+    print('scaled predictions', tensor_stats(1/predictions - 1))
+    diffs = T.abs(predictions - outputs).to(device)
+    print('diffs', tensor_stats(diffs))
+    print('labels', tensor_stats(outputs))
+
+    print(f'|correct|: {n_correct}, |exs|: {n_exs}, correct %: {n_correct/n_exs * 100}%')
+    print(f'fps: {fps}, fns: {fns}')
 
     # fp_exs = random.sample(fp_pairs.items(), min(2, fps))
     # fn_exs = random.sample(fn_pairs.items(), min(2, fns))
@@ -243,26 +239,41 @@ def test_nn(net, xs, ys, exprs, threshold):
     #     print("fn:", fn_ex)
     #     # print(exprs[i//n_reps].pretty_print())
 
+def tensor_stats(tensor):
+    return f'''stats: 
+    max={tensor.max().item()}, 
+    min={tensor.min().item()}, 
+    mean={tensor.mean().item()}, 
+    median={tensor.median().item()}, 
+    |{{x = 0}}|={(tensor == 0).sum()},
+    |{{x > 0}}|={(tensor > 0).sum()},
+    shape={tensor.shape},
+    '''
+
 if __name__ == '__main__':
     zs, exprs = load_zs_and_exprs()
     n_fs = 100
     n_reps=  10
     epochs = 1000
-    threshold = 0.5
     subset_size = 5             # len(zs)/n_reps
-    print(f"Params: n_fs={n_fs}, n_reps={n_reps}, subset_size={subset_size}, epochs={epochs}, thresh={threshold}")
+    print(f"Params: n_fs={n_fs}, n_reps={n_reps}, subset_size={subset_size}, epochs={epochs}")
 
     def reshape_data(data):
         return T.stack([T.reshape(x, (subset_size * 2, 1, B_W, B_H)) for x in data]).to(device)
     
     def reshape_labels(labels):
-        return T.reshape(T.tensor(labels), (len(labels), 1)).to(device)
+        return T.reshape(labels, (len(labels), 1)).to(device)
 
-    data, labels = make_and_store_data(exprs, zs, n_fs, n_reps, subset_size)
-    # # xs, labels = load_exs()
+    # data, labels = make_and_store_data(exprs, zs, n_fs, n_reps, subset_size)
+    data, labels = load_data()
+
+    # Print stats on data, labels
+    print(f'data:\n    shape={data.shape}')
+    print('labels', tensor_stats(labels))
 
     # Format examples
     d = len(data)//2
+    # labels = 1/(labels + 1)
     train_data, test_data = data[:d], data[d:]
     train_labels, test_labels = labels[:d], labels[d:]
 
@@ -279,6 +290,7 @@ if __name__ == '__main__':
     net = Net(n=subset_size).to(device)
     train_nn(net, train_data, train_labels, epochs)
     # net.load_state_dict(T.load('model.pt'))
-    test_nn(net, test_data, test_labels, exprs, threshold)
+    test_nn(net, test_data, test_labels, exprs)
 
     
+

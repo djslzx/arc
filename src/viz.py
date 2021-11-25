@@ -54,7 +54,7 @@ def viz_json(fname):
         x, y = T.tensor(x), T.tensor(y)
         viz_task(name, i, x, y)
 
-def viz(t, title, subtitle, fname=None, show=True, save=False):
+def viz(t, title='', subtitle='', fname=None, show=True, save=False):
     f, ax = plt.subplots(2, 1)
     f.suptitle(title)
     plt.figtext(0.5, 0.01, subtitle, wrap=True, horizontalalignment='center', fontsize=9)

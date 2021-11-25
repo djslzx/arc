@@ -1,5 +1,8 @@
+from math import log2
 import util
+import nltk
 import torch as T
+import torch.nn.functional as F
 
 # bitmap size constants
 B_W = 8
@@ -13,7 +16,7 @@ Z_HI = max(B_W, B_H) - 1  # max poss value in z_n
 '''
 Grammar
 
-- Expr: F, Num, Z, +, -, *, <, and, not, if, rect, prog
+- Expr: Nil, Num, Z, +, -, *, <, and, not, if, rect, prog
 + reflect, diagonal/horizontal/vertical line
 '''
 
@@ -31,6 +34,8 @@ class Visited:
     def eval(self, env): return self.accept(Eval(env))
 
     def zs(self): return self.accept(Zs())
+
+    def __len__(self): return self.accept(Size())
 
     def __str__(self): return self.accept(Print())
 
@@ -50,6 +55,11 @@ class Expr(Visited):
 
     def __lt__(self, other): return str(self) < str(other)
 
+    def dist_to(self, other): 
+        '''Edit distance to transform self into other'''
+        # TODO: make this better
+        return nltk.edit_distance(str(self), str(other))
+
 
 class Empty(Expr):
     in_types = []
@@ -57,16 +67,16 @@ class Empty(Expr):
 
     def __init__(self): pass
 
-    def accept(self, v): return None
+    def accept(self, v): return v.visit_Empty()
 
 
-class F(Expr):
+class Nil(Expr):
     in_types = []
     out_type = 'bool'
 
     def __init__(self): pass
 
-    def accept(self, v): return v.visit_F()
+    def accept(self, v): return v.visit_Nil()
 
 
 class Num(Expr):
@@ -243,13 +253,25 @@ class ReflectV(Expr):
     def accept(self, v): return v.visit_ReflectV(self.b)
 
 
+class Translate(Expr):
+    in_types = ['bitmap', 'int', 'int']
+    out_type = 'bitmap'
+
+    def __init__(self, b, dx, dy):
+        self.b = b
+        self.dx = dx
+        self.dy = dy
+
+    def accept(self, v): return v.visit_Translate(self.b, self.dx, self.dy)
+        
+
 class Visitor:
     @staticmethod
     def fail(s): assert False, f"Visitor subclass should implement `{s}`"
 
     def visit_Empty(self): self.fail('Empty')
 
-    def visit_F(self): self.fail('F')
+    def visit_Nil(self): self.fail('Nil')
 
     def visit_Num(self, n): self.fail('Num')
 
@@ -281,6 +303,10 @@ class Visitor:
 
     def visit_ReflectH(self, b): self.fail('ReflectH')
 
+    def visit_ReflectV(self, b): self.fail('ReflectV')
+
+    def visit_Translate(self, b, dx, dy): self.fail('Translate')
+
 
 class Eval(Visitor):
     def __init__(self, env):
@@ -295,7 +321,7 @@ class Eval(Visitor):
     def visit_Empty(self):
         return None
 
-    def visit_F(self):
+    def visit_Nil(self):
         return False
 
     def visit_Num(self, n):
@@ -400,13 +426,75 @@ class Eval(Visitor):
         assert isinstance(b, T.FloatTensor)
         return b.flip(0)
 
+    def visit_Translate(self, bmp, dx, dy): 
+        bmp, dx, dy = bmp.accept(self), dx.accept(self), dy.accept(self)
+        assert isinstance(bmp, T.FloatTensor) and isinstance(dx, int) and isinstance(dy, int)
+
+        a, b = (dx, 0) if dx > 0 else (0, -dx)
+        c, d = (dy, 0) if dy > 0 else (0, -dy)
+
+        def slices(delta):
+            if delta == 0:  return None, None
+            elif delta > 0: return None, -delta
+            else:           return -delta, None
+        
+        c_lo, c_hi = slices(dx)
+        r_lo, r_hi = slices(dy)
+        # print(f'slices: [{r_lo}:{r_hi}, {c_lo}:{c_hi}]')
+
+        return F.pad(bmp[r_lo:r_hi, c_lo:c_hi], (a, b, c, d))
+
+
+class Size(Visitor):
+    def __init__(self): pass
+
+    def visit_Empty(self): return 0
+
+    def visit_Nil(self): return 1
+
+    def visit_Num(self, n): return 1
+
+    def visit_Z(self, i): return 1
+
+    def visit_Not(self, b): return b.accept(self) + 1
+
+    def visit_Plus(self, x, y): return x.accept(self) + y.accept(self) + 1
+
+    def visit_Minus(self, x, y): return x.accept(self) + y.accept(self) + 1
+
+    def visit_Times(self, x, y): return x.accept(self) + y.accept(self) + 1
+
+    def visit_Lt(self, x, y): return x.accept(self) + y.accept(self) + 1
+
+    def visit_And(self, x, y): return x.accept(self) + y.accept(self) + 1
+
+    def visit_If(self, b, x, y): return b.accept(self) + x.accept(self) + y.accept(self) + 1
+
+    def visit_Point(self, x, y, color): return x.accept(self) + y.accept(self) + 1
+
+    def visit_Line(self, x1, y1, x2, y2, color): 
+        return x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self) + 1
+
+    def visit_Rect(self, x1, y1, x2, y2, color):
+        return x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self) + 1
+
+    def visit_Stack(self, b1, b2): return b1.accept(self) + b2.accept(self) + 1
+
+    def visit_Intersect(self, b1, b2): return b1.accept(self) + b2.accept(self) + 1
+
+    def visit_ReflectH(self, b): return b.accept(self) + 1
+
+    def visit_ReflectV(self, b): return b.accept(self) + 1
+
+    def visit_Translate(self, b, x, y): return b.accept(self) + x.accept(self) + y.accept(self) + 1
+
 
 class Print(Visitor):
     def __init__(self): pass
 
     def visit_Empty(self): return 'Empty'
 
-    def visit_F(self): return 'False'
+    def visit_Nil(self): return 'False'
 
     def visit_Num(self, n): return f'{n}'
 
@@ -424,7 +512,7 @@ class Print(Visitor):
 
     def visit_And(self, x, y): return f'(and {x.accept(self)} {y.accept(self)})'
 
-    def visit_If(self, b, x, y): return f'(if {b} {x.accept(self)} {y.accept(self)})'
+    def visit_If(self, b, x, y): return f'(if {b.accept(self)} {x.accept(self)} {y.accept(self)})'
 
     def visit_Point(self, x, y, color): return f'(P[{color}] {x.accept(self)} {y.accept(self)})'
 
@@ -441,6 +529,8 @@ class Print(Visitor):
     def visit_ReflectH(self, b): return f'(reflect-h {b.accept(self)})'
 
     def visit_ReflectV(self, b): return f'(reflect-v {b.accept(self)})'
+
+    def visit_Translate(self, b, x, y): return f'(translate {b.accept(self)} {x.accept(self)} {y.accept(self)})'
     
 
 class Zs(Visitor):
@@ -448,7 +538,7 @@ class Zs(Visitor):
 
     def visit_Empty(self): return set()
 
-    def visit_F(self): return set()
+    def visit_Nil(self): return set()
 
     def visit_Num(self, n): return set()
 
@@ -484,12 +574,14 @@ class Zs(Visitor):
 
     def visit_ReflectV(self, b): return b.accept(self)
 
+    def visit_Translate(self, b, x, y): return b.accept(self) | x.accept(self) | y.accept(self)
 
 def test_eval():
     tests = [
-        (F(),
+        # Basic semantics 
+        (Nil(),
          lambda z: False),
-        (Not(F()),
+        (Not(Nil()),
          lambda z: True),
         (Times(Z(0), Z(1)),
          lambda z: z[0] * z[1]),
@@ -508,6 +600,7 @@ def test_eval():
                                        "#___",
                                        "____",
                                        "____"], w=B_W, h=B_H)),
+        # Line tests
         (Line(Num(0), Num(0),
               Num(1), Num(1)),
          lambda z: util.img_to_tensor(["#___",
@@ -544,6 +637,7 @@ def test_eval():
                                        "____",
                                        "_#__",
                                        "_#__"], w=B_W, h=B_H)),
+        # Reflection
         (ReflectH(Line(Num(0), Num(0),
                        Num(3), Num(3))),
          lambda z: util.img_to_tensor(["_"*(B_W-4) + "___#",
@@ -567,6 +661,7 @@ def test_eval():
                                        "____",
                                        "___#",
                                        "#_#_"], w=B_W, h=B_H)),
+        # Stacking
         (Stack(Rect(Num(0), Num(0),
                     Num(1), Num(1)),
                Rect(Num(2), Num(3),
@@ -634,6 +729,88 @@ def test_eval():
                                    "____"], w=B_W, h=B_H)
     assert T.equal(expected, out), f"test_render failed:\n expected={expected},\n out={out}"
     print(" [+] passed test_eval")
+
+def test_eval_bitmap():
+    tests = [
+        # Translate
+        (Translate(Line(Num(0), Num(0),
+                        Num(3), Num(3)),
+                   Num(0),
+                   Num(0)),
+         ["#___",
+          "_#__",
+          "__#_",
+          "___#"]),
+        (Translate(Line(Num(0), Num(0),
+                        Num(3), Num(3)),
+                   Num(1),
+                   Num(0)),
+         ["_#___",
+          "__#__",
+          "___#_",
+          "____#"]),
+        (Translate(Line(Num(0), Num(0),
+                        Num(3), Num(3)),
+                   Num(-1),
+                   Num(0)),
+         ["___",
+          "#__",
+          "_#_",
+          "__#"]),
+        (Translate(Line(Num(0), Num(0),
+                        Num(3), Num(3)),
+                   Num(0),
+                   Num(1)),
+         ["____",
+          "#___",
+          "_#__",
+          "__#_",
+          "___#"]),
+        (Translate(Line(Num(0), Num(0),
+                        Num(3), Num(3)),
+                   Num(0),
+                   Num(-1)),
+         ["_#__",
+          "__#_",
+          "___#"]),
+        (Translate(Line(Num(0), Num(0),
+                        Num(3), Num(3)),
+                   Num(-1),
+                   Num(-1)),
+         ["#__",
+          "_#_",
+          "__#"]),
+        (Translate(Line(Num(0), Num(0),
+                        Num(3), Num(3)),
+                   Num(1),
+                   Num(1)),
+         ["_____",
+          "_#___",
+          "__#__",
+          "___#_",
+          "____#"]),
+        (Translate(Line(Num(0), Num(0),
+                        Num(3), Num(3)),
+                   Num(2),
+                   Num(3)),
+         ["______",
+          "______",
+          "______",
+          "__#___",
+          "___#__",
+          "____#_",
+          "_____#"]),
+    ]
+    for expr, correct_semantics in tests:
+        out = expr.eval({"z": []})
+        expected = util.img_to_tensor(correct_semantics, w=B_W, h=B_H)
+        assert T.equal(out, expected), \
+            f"failed eval test:\n" \
+            f" expr=\n{expr}\n" \
+            f" expected=\n{expected}\n" \
+            f" out=\n{out}"
+    print(" [+] passed test_eval_bitmap")
+        
 
 def test_eval_color():
     tests = [
@@ -703,6 +880,7 @@ def test_zs():
 
 
 if __name__ == '__main__':
-    test_eval()
-    test_eval_color()
-    test_zs()
+    # test_eval()
+    test_eval_bitmap()
+    # test_eval_color()
+    # test_zs()
