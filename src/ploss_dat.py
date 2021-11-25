@@ -64,9 +64,10 @@ def save_zs(zs):
 
 def visualize(expr, env, i, j):
     try:
-        viz(expr.eval(env), f'e{i}-{j}', str(expr), 
-            f'../data/viz/exprs-2/e{i}-{j}.png', 
-            show=False, save=True)
+        viz(expr.eval(env), 
+            f'e{i}-{j}', str(expr), 
+            fname=f'../data/viz/exprs-2/e{i}-{j}.png', 
+            show=False)
     except AssertionError:
         pass
 
