@@ -69,7 +69,6 @@ def viz(t, title='', subtitle='', fname=None, show=True):
     ax[0].imshow(t)
     ax[1].imshow(t)
     label(ax[1], t)
-
     output(fname, show)
 
 if __name__ == '__main__':

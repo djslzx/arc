@@ -29,7 +29,7 @@ class Grammar:
 
 class Visited:
     def accept(self, visitor):
-        assert False, "Visited subclass should implement `accept`"
+        assert False, f"`accept` not implemented for {type(self).__name__}"
 
     def eval(self, env): return self.accept(Eval(env))
 
@@ -41,7 +41,7 @@ class Visited:
 
 
 class Expr(Visited):
-    def accept(self, visitor): assert False, f"not implemented for {self}"
+    def accept(self, visitor): assert False, f"not implemented for {type(self).__name__}"
 
     def __repr__(self): return str(self)
 
@@ -59,6 +59,10 @@ class Expr(Visited):
         '''Edit distance to transform self into other'''
         # TODO: make this better
         return nltk.edit_distance(str(self), str(other))
+
+
+# class FuncExpr(Expr):
+#     def as_func(self): assert False, f"not implemented for {type(self).__name__}"
 
 
 class Empty(Expr):
@@ -217,57 +221,68 @@ class Stack(Expr):
     in_types = ['bitmap', 'bitmap']
     out_type = 'bitmap'
 
-    def __init__(self, b1, b2):
-        self.b1 = b1
-        self.b2 = b2
+    def __init__(self, bmp1, bmp2):
+        self.bmp1 = bmp1
+        self.bmp2 = bmp2
 
-    def accept(self, v): return v.visit_Stack(self.b1, self.b2)
+    def accept(self, v): return v.visit_Stack(self.bmp1, self.bmp2)
+
+
+class Loop(Expr):
+    in_types = ['bitmap', 'int', ('bitmap', 'bitmap')]
+    out_type = 'bitmap'
+    
+    def __init__(self, bmp, n, f):
+        self.bmp = bmp
+        self.n = n
+        self.f = f
+        
+    def accept(self, v): return v.visit_Loop(self.bmp, self.n, self.f)
 
 
 class Intersect(Expr):
     in_types = ['bitmap', 'bitmap']
     out_type = 'bitmap'
 
-    def __init__(self, b1, b2):
-        self.b1 = b1
-        self.b2 = b2
+    def __init__(self, bmp1, bmp2):
+        self.bmp1 = bmp1
+        self.bmp2 = bmp2
 
-    def accept(self, v): return v.visit_Intersect(self.b1, self.b2)
+    def accept(self, v): return v.visit_Intersect(self.bmp1, self.bmp2)
 
 
 class ReflectH(Expr):
     in_types = ['bitmap']
     out_type = 'bitmap'
 
-    def __init__(self, b): self.b = b
+    def __init__(self, bmp): self.bmp = bmp
 
-    def accept(self, v): return v.visit_ReflectH(self.b)
+    def accept(self, v): return v.visit_ReflectH(self.bmp)
 
 
 class ReflectV(Expr):
     in_types = ['bitmap']
     out_type = 'bitmap'
 
-    def __init__(self, b): self.b = b
+    def __init__(self, bmp): self.bmp = bmp
 
-    def accept(self, v): return v.visit_ReflectV(self.b)
+    def accept(self, v): return v.visit_ReflectV(self.bmp)
 
 
 class Translate(Expr):
     in_types = ['bitmap', 'int', 'int']
     out_type = 'bitmap'
 
-    def __init__(self, b, dx, dy):
-        self.b = b
+    def __init__(self, bmp, dx, dy):
+        self.bmp = bmp
         self.dx = dx
         self.dy = dy
 
-    def accept(self, v): return v.visit_Translate(self.b, self.dx, self.dy)
+    def accept(self, v): return v.visit_Translate(self.bmp, self.dx, self.dy)
         
-
 class Visitor:
-    @staticmethod
-    def fail(s): assert False, f"Visitor subclass should implement `{s}`"
+
+    def fail(self, s): assert False, f"Visitor subclass `{type(self).__name__}` should implement `visit_{s}`"
 
     def visit_Empty(self): self.fail('Empty')
 
@@ -297,15 +312,17 @@ class Visitor:
 
     def visit_Rect(self, x1, y1, x2, y2, color): self.fail('Rect')
 
-    def visit_Stack(self, b1, b2): self.fail('Union')
+    def visit_Stack(self, bmp1, bmp2): self.fail('Union')
 
-    def visit_Intersect(self, b1, b2): self.fail('Intersect')
+    def visit_Intersect(self, bmp1, bmp2): self.fail('Intersect')
 
-    def visit_ReflectH(self, b): self.fail('ReflectH')
+    def visit_ReflectH(self, bmp): self.fail('ReflectH')
 
-    def visit_ReflectV(self, b): self.fail('ReflectV')
+    def visit_ReflectV(self, bmp): self.fail('ReflectV')
 
-    def visit_Translate(self, b, dx, dy): self.fail('Translate')
+    def visit_Translate(self, bmp, dx, dy): self.fail('Translate')
+
+    def visit_Loop(self, bmp, n, f): self.fail('Loop')
 
 
 class Eval(Visitor):
@@ -404,27 +421,27 @@ class Eval(Visitor):
             return c1 if c1 > 0 else c2
         return Eval.make_bitmap(f)
 
-    def visit_Intersect(self, b1, b2):
-        b1, b2 = b1.accept(self), b2.accept(self)
-        assert isinstance(b1, T.FloatTensor) and isinstance(b2, T.FloatTensor), \
-            f"Intersect needs two float tensors, found b1={b1}, b2={b2}"
+    def visit_Intersect(self, bmp1, bmp2):
+        bmp1, bmp2 = bmp1.accept(self), bmp2.accept(self)
+        assert isinstance(bmp1, T.FloatTensor) and isinstance(bmp2, T.FloatTensor), \
+            f"Intersect needs two float tensors, found bmp1={bmp1}, bmp2={bmp2}"
         def f(p):
             x, y = p
-            c1, c2 = b1[y][x], b2[y][x]
+            c1, c2 = bmp1[y][x], bmp2[y][x]
             if c1 == 0: return c2
             elif c2 == 0: return c1
             else: return 0
-        return Eval.make_bitmap(f)
+        return Eval.make_bmpitmap(f)
 
-    def visit_ReflectH(self, b):
-        b = b.accept(self)
-        assert isinstance(b, T.FloatTensor)
-        return b.flip(1)
+    def visit_ReflectH(self, bmp):
+        bmp = bmp.accept(self)
+        assert isinstance(bmp, T.FloatTensor)
+        return bmp.flip(dim=1)
 
-    def visit_ReflectV(self, b):
-        b = b.accept(self)
-        assert isinstance(b, T.FloatTensor)
-        return b.flip(0)
+    def visit_ReflectV(self, bmp):
+        bmp = bmp.accept(self)
+        assert isinstance(bmp, T.FloatTensor)
+        return bmp.flip(dim=0)
 
     def visit_Translate(self, bmp, dx, dy): 
         bmp, dx, dy = bmp.accept(self), dx.accept(self), dy.accept(self)
@@ -440,9 +457,40 @@ class Eval(Visitor):
         
         c_lo, c_hi = slices(dx)
         r_lo, r_hi = slices(dy)
-        # print(f'slices: [{r_lo}:{r_hi}, {c_lo}:{c_hi}]')
 
         return F.pad(bmp[r_lo:r_hi, c_lo:c_hi], (a, b, c, d))
+
+    def visit_Loop(self, bmp, n, f): 
+        bmp, n = bmp.accept(self), n.accept(self)
+        f = f.accept(Func())
+        for i in range(n):
+            bmp = f(bmp)
+        return bmp
+
+
+class Func(Visitor):
+    def __init__(self): pass
+    
+    def visit_ReflectH(self, b):
+        return lambda bmp: bmp.flip(dim=1)
+
+    def visit_ReflectV(self, b):
+        return lambda bmp: bmp.flip(dim=0)
+
+    def visit_Translate(self, bmp, dx, dy):
+        dx, dy = dx.eval({}), dy.eval({})
+
+        def slices(delta):
+            if delta == 0:  return None, None
+            elif delta > 0: return None, -delta
+            else:           return -delta, None
+
+        a, b = (dx, 0) if dx > 0 else (0, -dx)
+        c, d = (dy, 0) if dy > 0 else (0, -dy)
+        c_lo, c_hi = slices(dx)
+        r_lo, r_hi = slices(dy)
+        
+        return lambda bmp: F.pad(bmp[r_lo:r_hi, c_lo:c_hi], (a, b, c, d))
 
 
 class Size(Visitor):
@@ -478,15 +526,15 @@ class Size(Visitor):
     def visit_Rect(self, x1, y1, x2, y2, color):
         return x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self) + 1
 
-    def visit_Stack(self, b1, b2): return b1.accept(self) + b2.accept(self) + 1
+    def visit_Stack(self, bmp1, bmp2): return bmp1.accept(self) + bmp2.accept(self) + 1
 
-    def visit_Intersect(self, b1, b2): return b1.accept(self) + b2.accept(self) + 1
+    def visit_Intersect(self, bmp1, bmp2): return bmp1.accept(self) + bmp2.accept(self) + 1
 
-    def visit_ReflectH(self, b): return b.accept(self) + 1
+    def visit_ReflectH(self, bmp): return bmp.accept(self) + 1
 
-    def visit_ReflectV(self, b): return b.accept(self) + 1
+    def visit_ReflectV(self, bmp): return bmp.accept(self) + 1
 
-    def visit_Translate(self, b, x, y): return b.accept(self) + x.accept(self) + y.accept(self) + 1
+    def visit_Translate(self, bmp, x, y): return bmp.accept(self) + x.accept(self) + y.accept(self) + 1
 
 
 class Print(Visitor):
@@ -522,16 +570,17 @@ class Print(Visitor):
     def visit_Rect(self, x1, y1, x2, y2, color):
         return f'(R[{color}] {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
 
-    def visit_Stack(self, b1, b2): return f'[{b1.accept(self)} {b2.accept(self)}]'
+    def visit_Stack(self, bmp1, bmp2): return f'[{bmp1.accept(self)} {bmp2.accept(self)}]'
 
-    def visit_Intersect(self, b1, b2): return f'(n {b1.accept(self)} {b2.accept(self)})'
+    def visit_Intersect(self, bmp1, bmp2): return f'(n {bmp1.accept(self)} {bmp2.accept(self)})'
 
-    def visit_ReflectH(self, b): return f'(reflect-h {b.accept(self)})'
+    def visit_ReflectH(self, bmp): return f'(reflect-h {bmp.accept(self)})'
 
-    def visit_ReflectV(self, b): return f'(reflect-v {b.accept(self)})'
+    def visit_ReflectV(self, bmp): return f'(reflect-v {bmp.accept(self)})'
 
-    def visit_Translate(self, b, x, y): return f'(translate {b.accept(self)} {x.accept(self)} {y.accept(self)})'
+    def visit_Translate(self, bmp, x, y): return f'(translate {bmp.accept(self)} {x.accept(self)} {y.accept(self)})'
     
+    def visit_Loop(self, bmp, n, f): return f'(loop {bmp.accept(self)} {n.accept(self)} {f.accept(self)})'
 
 class Zs(Visitor):
     def __init__(self): pass
