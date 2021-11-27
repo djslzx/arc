@@ -31,7 +31,7 @@ class Visited:
     def accept(self, visitor):
         assert False, f"`accept` not implemented for {type(self).__name__}"
 
-    def eval(self, env): return self.accept(Eval(env))
+    def eval(self, env={}): return self.accept(Eval(env))
 
     def zs(self): return self.accept(Zs())
 
@@ -59,10 +59,6 @@ class Expr(Visited):
         '''Edit distance to transform self into other'''
         # TODO: make this better
         return nltk.edit_distance(str(self), str(other))
-
-
-# class FuncExpr(Expr):
-#     def as_func(self): assert False, f"not implemented for {type(self).__name__}"
 
 
 class Empty(Expr):
@@ -228,57 +224,67 @@ class Stack(Expr):
     def accept(self, v): return v.visit_Stack(self.bmp1, self.bmp2)
 
 
-class Loop(Expr):
-    in_types = ['bitmap', 'int', ('bitmap', 'bitmap')]
+class Apply(Expr):
+    """Applies a transformation to a bitmap"""
+    in_types = [('any', 'bitmap'), 'bitmap']
     out_type = 'bitmap'
     
-    def __init__(self, bmp, n, f):
-        self.bmp = bmp
-        self.n = n
+    def __init__(self, f, bmp):
         self.f = f
+        self.bmp = bmp
         
-    def accept(self, v): return v.visit_Loop(self.bmp, self.n, self.f)
+    def accept(self, v): return v.visit_Apply(self.f, self.bmp)
 
 
-class Intersect(Expr):
-    in_types = ['bitmap', 'bitmap']
+class Repeat(Expr):
+    in_types = [('any', 'bitmap'), 'int']
+    out_type = 'bitmap'
+    
+    def __init__(self, f, n):
+        self.f = f
+        self.n = n
+        
+    def accept(self, v): return v.visit_Repeat(self.f, self.n)
+
+
+# class Intersect(Expr):
+#     in_types = ['bitmap', 'bitmap']
+#     out_type = 'bitmap'
+
+#     def __init__(self, bmp1, bmp2):
+#         self.bmp1 = bmp1
+#         self.bmp2 = bmp2
+
+#     def accept(self, v): return v.visit_Intersect(self.bmp1, self.bmp2)
+
+
+class HFlip(Expr):
+    in_types = []
     out_type = 'bitmap'
 
-    def __init__(self, bmp1, bmp2):
-        self.bmp1 = bmp1
-        self.bmp2 = bmp2
+    def __init__(self): pass
 
-    def accept(self, v): return v.visit_Intersect(self.bmp1, self.bmp2)
+    def accept(self, v): return v.visit_HFlip()
 
 
-class ReflectH(Expr):
-    in_types = ['bitmap']
+class VFlip(Expr):
+    in_types = []
     out_type = 'bitmap'
 
-    def __init__(self, bmp): self.bmp = bmp
+    def __init__(self): pass
 
-    def accept(self, v): return v.visit_ReflectH(self.bmp)
-
-
-class ReflectV(Expr):
-    in_types = ['bitmap']
-    out_type = 'bitmap'
-
-    def __init__(self, bmp): self.bmp = bmp
-
-    def accept(self, v): return v.visit_ReflectV(self.bmp)
+    def accept(self, v): return v.visit_VFlip()
 
 
 class Translate(Expr):
-    in_types = ['bitmap', 'int', 'int']
+    in_types = ['int', 'int']
     out_type = 'bitmap'
 
-    def __init__(self, bmp, dx, dy):
-        self.bmp = bmp
+    def __init__(self, dx, dy):
         self.dx = dx
         self.dy = dy
 
-    def accept(self, v): return v.visit_Translate(self.bmp, self.dx, self.dy)
+    def accept(self, v): return v.visit_Translate(self.dx, self.dy)
         
 class Visitor:
 
@@ -314,15 +320,17 @@ class Visitor:
 
     def visit_Stack(self, bmp1, bmp2): self.fail('Union')
 
-    def visit_Intersect(self, bmp1, bmp2): self.fail('Intersect')
+    # def visit_Intersect(self, bmp1, bmp2): self.fail('Intersect')
 
-    def visit_ReflectH(self, bmp): self.fail('ReflectH')
+    def visit_HFlip(self): self.fail('HFlip')
 
-    def visit_ReflectV(self, bmp): self.fail('ReflectV')
+    def visit_VFlip(self): self.fail('VFlip')
 
     def visit_Translate(self, bmp, dx, dy): self.fail('Translate')
 
-    def visit_Loop(self, bmp, n, f): self.fail('Loop')
+    def visit_Apply(self, f, bmp): self.fail('Apply')
+
+    def visit_Repeat(self, f, n): self.fail('Repeat')
 
 
 class Eval(Visitor):
@@ -421,63 +429,25 @@ class Eval(Visitor):
             return c1 if c1 > 0 else c2
         return Eval.make_bitmap(f)
 
-    def visit_Intersect(self, bmp1, bmp2):
-        bmp1, bmp2 = bmp1.accept(self), bmp2.accept(self)
-        assert isinstance(bmp1, T.FloatTensor) and isinstance(bmp2, T.FloatTensor), \
-            f"Intersect needs two float tensors, found bmp1={bmp1}, bmp2={bmp2}"
-        def f(p):
-            x, y = p
-            c1, c2 = bmp1[y][x], bmp2[y][x]
-            if c1 == 0: return c2
-            elif c2 == 0: return c1
-            else: return 0
-        return Eval.make_bmpitmap(f)
+    # def visit_Intersect(self, bmp1, bmp2):
+    #     bmp1, bmp2 = bmp1.accept(self), bmp2.accept(self)
+    #     assert isinstance(bmp1, T.FloatTensor) and isinstance(bmp2, T.FloatTensor), \
+    #         f"Intersect needs two float tensors, found bmp1={bmp1}, bmp2={bmp2}"
+    #     def f(p):
+    #         x, y = p
+    #         c1, c2 = bmp1[y][x], bmp2[y][x]
+    #         if c1 == 0: return c2
+    #         elif c2 == 0: return c1
+    #         else: return 0
+    #     return Eval.make_bmpitmap(f)
 
-    def visit_ReflectH(self, bmp):
-        bmp = bmp.accept(self)
-        assert isinstance(bmp, T.FloatTensor)
-        return bmp.flip(dim=1)
+    def visit_HFlip(self):
+        return lambda bmp: bmp.flip(1)
 
-    def visit_ReflectV(self, bmp):
-        bmp = bmp.accept(self)
-        assert isinstance(bmp, T.FloatTensor)
-        return bmp.flip(dim=0)
+    def visit_VFlip(self):
+        return lambda bmp: bmp.flip(0)
 
-    def visit_Translate(self, bmp, dx, dy): 
-        bmp, dx, dy = bmp.accept(self), dx.accept(self), dy.accept(self)
-        assert isinstance(bmp, T.FloatTensor) and isinstance(dx, int) and isinstance(dy, int)
-
-        a, b = (dx, 0) if dx > 0 else (0, -dx)
-        c, d = (dy, 0) if dy > 0 else (0, -dy)
-
-        def slices(delta):
-            if delta == 0:  return None, None
-            elif delta > 0: return None, -delta
-            else:           return -delta, None
-        
-        c_lo, c_hi = slices(dx)
-        r_lo, r_hi = slices(dy)
-
-        return F.pad(bmp[r_lo:r_hi, c_lo:c_hi], (a, b, c, d))
-
-    def visit_Loop(self, bmp, n, f): 
-        bmp, n = bmp.accept(self), n.accept(self)
-        f = f.accept(Func())
-        for i in range(n):
-            bmp = f(bmp)
-        return bmp
-
-
-class Func(Visitor):
-    def __init__(self): pass
-    
-    def visit_ReflectH(self, b):
-        return lambda bmp: bmp.flip(dim=1)
-
-    def visit_ReflectV(self, b):
-        return lambda bmp: bmp.flip(dim=0)
-
-    def visit_Translate(self, bmp, dx, dy):
+    def visit_Translate(self, dx, dy): 
         dx, dy = dx.eval({}), dy.eval({})
 
         def slices(delta):
@@ -491,6 +461,18 @@ class Func(Visitor):
         r_lo, r_hi = slices(dy)
         
         return lambda bmp: F.pad(bmp[r_lo:r_hi, c_lo:c_hi], (a, b, c, d))
+
+    def visit_Repeat(self, f, n): 
+        n, f = n.accept(self), f.accept(self)
+        def g(bmp):
+            for i in range(n):
+                bmp = f(bmp)
+            return bmp
+        return g
+
+    def visit_Apply(self, f, bmp): 
+        f, bmp = f.accept(self), bmp.accept(self)
+        return f(bmp)
 
 
 class Size(Visitor):
@@ -528,13 +510,17 @@ class Size(Visitor):
 
     def visit_Stack(self, bmp1, bmp2): return bmp1.accept(self) + bmp2.accept(self) + 1
 
-    def visit_Intersect(self, bmp1, bmp2): return bmp1.accept(self) + bmp2.accept(self) + 1
+    # def visit_Intersect(self, bmp1, bmp2): return bmp1.accept(self) + bmp2.accept(self) + 1
 
-    def visit_ReflectH(self, bmp): return bmp.accept(self) + 1
+    def visit_HFlip(self): return 1
 
-    def visit_ReflectV(self, bmp): return bmp.accept(self) + 1
+    def visit_VFlip(self): return 1
 
-    def visit_Translate(self, bmp, x, y): return bmp.accept(self) + x.accept(self) + y.accept(self) + 1
+    def visit_Translate(self, x, y): return x.accept(self) + y.accept(self) + 1
+
+    def visit_Apply(self, f, bmp): return f.accept(self) + bmp.accept(self) + 1
+
+    def visit_Repeat(self, f, n): return f.accept(self) + n.accept(self) + 1
 
 
 class Print(Visitor):
@@ -572,15 +558,19 @@ class Print(Visitor):
 
     def visit_Stack(self, bmp1, bmp2): return f'[{bmp1.accept(self)} {bmp2.accept(self)}]'
 
-    def visit_Intersect(self, bmp1, bmp2): return f'(n {bmp1.accept(self)} {bmp2.accept(self)})'
+    # def visit_Intersect(self, bmp1, bmp2): return f'(n {bmp1.accept(self)} {bmp2.accept(self)})'
 
-    def visit_ReflectH(self, bmp): return f'(reflect-h {bmp.accept(self)})'
+    def visit_HFlip(self): return 'h-flip'
 
-    def visit_ReflectV(self, bmp): return f'(reflect-v {bmp.accept(self)})'
+    def visit_VFlip(self): return 'v-flip'
 
-    def visit_Translate(self, bmp, x, y): return f'(translate {bmp.accept(self)} {x.accept(self)} {y.accept(self)})'
+    def visit_Translate(self, x, y): return f'(translate {x.accept(self)} {y.accept(self)})'
     
-    def visit_Loop(self, bmp, n, f): return f'(loop {bmp.accept(self)} {n.accept(self)} {f.accept(self)})'
+    def visit_Apply(self, f, bmp): return f'(apply {f.accept(self)} {bmp.accept(self)})'
+
+    def visit_Repeat(self, f, n): return f'(repeat {f.accept(self)} {n.accept(self)})'
+
+
 
 class Zs(Visitor):
     def __init__(self): pass
@@ -617,13 +607,18 @@ class Zs(Visitor):
 
     def visit_Stack(self, b1, b2): return b1.accept(self) | b2.accept(self)
 
-    def visit_Intersect(self, b1, b2): return b1.accept(self) | b2.accept(self)
+    # def visit_Intersect(self, b1, b2): return b1.accept(self) | b2.accept(self)
 
-    def visit_ReflectH(self, b): return b.accept(self)
+    def visit_HFlip(self): return set()
 
-    def visit_ReflectV(self, b): return b.accept(self)
+    def visit_VFlip(self): return set()
 
-    def visit_Translate(self, b, x, y): return b.accept(self) | x.accept(self) | y.accept(self)
+    def visit_Translate(self, x, y): return x.accept(self) | y.accept(self)
+
+    def visit_Apply(self, f, bmp): return f.accept(self) | bmp.accept(self)
+
+    def visit_Repeat(self, f, n): return f.accept(self) | n.accept(self)
+
 
 def test_eval():
     tests = [
@@ -687,7 +682,7 @@ def test_eval():
                                        "_#__",
                                        "_#__"], w=B_W, h=B_H)),
         # Reflection
-        (ReflectH(Line(Num(0), Num(0),
+        (HFlip(Line(Num(0), Num(0),
                        Num(3), Num(3))),
          lambda z: util.img_to_tensor(["_"*(B_W-4) + "___#",
                                        "_"*(B_W-4) + "__#_",
@@ -701,7 +696,7 @@ def test_eval():
                                        "___#",
                                        "____",
                                        "_#__"], w=B_W, h=B_H)),
-        (ReflectV(Stack(Stack(Point(Num(0), Num(0)),
+        (VFlip(Stack(Stack(Point(Num(0), Num(0)),
                               Point(Num(1), Num(3))),
                         Stack(Point(Num(2), Num(0)),
                               Point(Num(3), Num(1))))),
@@ -719,7 +714,7 @@ def test_eval():
                                        "____",
                                        "____",
                                        "__##"], w=B_W, h=B_H)),
-        (ReflectH(Stack(Rect(Num(0), Num(0),
+        (HFlip(Stack(Rect(Num(0), Num(0),
                              Num(1), Num(1)),
                         Rect(Num(2), Num(3),
                              Num(4), Num(4)))),
@@ -727,7 +722,7 @@ def test_eval():
                                        "_"*(B_W-4) + "____",
                                        "_"*(B_W-4) + "____",
                                        "_"*(B_W-4) + "##__"], w=B_W, h=B_H)),
-        (ReflectH(ReflectH(Stack(Rect(Num(0), Num(0),
+        (HFlip(HFlip(Stack(Rect(Num(0), Num(0),
                                       Num(1), Num(1)),
                                  Rect(Num(2), Num(3),
                                       Num(4), Num(4))))),
