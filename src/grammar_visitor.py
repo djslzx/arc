@@ -226,7 +226,7 @@ class Join(Expr):
 
 class Apply(Expr):
     """Applies a transformation to a bitmap"""
-    in_types = [('any', 'bitmap'), 'bitmap']
+    in_types = ['transform', 'bitmap']
     out_type = 'bitmap'
     
     def __init__(self, f, bmp):
@@ -237,8 +237,8 @@ class Apply(Expr):
 
 
 class Repeat(Expr):
-    in_types = [('any', 'bitmap'), 'int']
-    out_type = 'bitmap'
+    in_types = ['transform', 'int']
+    out_type = 'transform'
     
     def __init__(self, f, n):
         self.f = f
@@ -247,20 +247,19 @@ class Repeat(Expr):
     def accept(self, v): return v.visit_Repeat(self.f, self.n)
 
 
-# class Intersect(Expr):
-#     in_types = ['bitmap', 'bitmap']
-#     out_type = 'bitmap'
+class Intersect(Expr):
+    in_types = ['bitmap']
+    out_type = 'transform'
 
-#     def __init__(self, bmp1, bmp2):
-#         self.bmp1 = bmp1
-#         self.bmp2 = bmp2
+    def __init__(self, bmp):
+        self.bmp = bmp
 
-#     def accept(self, v): return v.visit_Intersect(self.bmp1, self.bmp2)
+    def accept(self, v): return v.visit_Intersect(self.bmp)
 
 
 class HFlip(Expr):
     in_types = []
-    out_type = 'bitmap'
+    out_type = 'transform'
 
     def __init__(self): pass
 
@@ -269,7 +268,7 @@ class HFlip(Expr):
 
 class VFlip(Expr):
     in_types = []
-    out_type = 'bitmap'
+    out_type = 'transform'
 
     def __init__(self): pass
 
@@ -278,7 +277,7 @@ class VFlip(Expr):
 
 class Translate(Expr):
     in_types = ['int', 'int']
-    out_type = 'bitmap'
+    out_type = 'transform'
 
     def __init__(self, dx, dy):
         self.dx = dx
@@ -320,7 +319,7 @@ class Visitor:
 
     def visit_Join(self, bmp1, bmp2): self.fail('Union')
 
-    # def visit_Intersect(self, bmp1, bmp2): self.fail('Intersect')
+    def visit_Intersect(self, bmp): self.fail('Intersect')
 
     def visit_HFlip(self): self.fail('HFlip')
 
@@ -416,8 +415,8 @@ class Eval(Visitor):
         x1, y1, x2, y2 = (x1.accept(self), y1.accept(self),
                           x2.accept(self), y2.accept(self))
         assert all(isinstance(v, int) for v in [x1, y1, x2, y2])
-        assert 0 <= x1 < x2 <= B_W and 0 <= y1 < y2 <= B_H
-        return Eval.make_bitmap(lambda p: (x1 <= p[0] < x2 and y1 <= p[1] < y2) * color)
+        assert 0 <= x1 <= x2 <= B_W and 0 <= y1 <= y2 <= B_H
+        return Eval.make_bitmap(lambda p: (x1 <= p[0] <= x2 and y1 <= p[1] <= y2) * color)
 
     def visit_Join(self, b1, b2):
         b1, b2 = b1.accept(self), b2.accept(self)
@@ -429,17 +428,16 @@ class Eval(Visitor):
             return c1 if c1 > 0 else c2
         return Eval.make_bitmap(f)
 
-    # def visit_Intersect(self, bmp1, bmp2):
-    #     bmp1, bmp2 = bmp1.accept(self), bmp2.accept(self)
-    #     assert isinstance(bmp1, T.FloatTensor) and isinstance(bmp2, T.FloatTensor), \
-    #         f"Intersect needs two float tensors, found bmp1={bmp1}, bmp2={bmp2}"
-    #     def f(p):
-    #         x, y = p
-    #         c1, c2 = bmp1[y][x], bmp2[y][x]
-    #         if c1 == 0: return c2
-    #         elif c2 == 0: return c1
-    #         else: return 0
-    #     return Eval.make_bmpitmap(f)
+    def visit_Intersect(self, bmp1):
+        bmp1 = bmp1.accept(self)
+        assert isinstance(bmp1, T.FloatTensor), \
+            f"Intersect needs a float tensor, found bmp={bmp}"
+        def intersect(pt, bmp2):
+            x, y = pt
+            c1, c2 = bmp1[y][x], bmp2[y][x]
+            return (c1 and c2) * c1
+
+        return lambda bmp: Eval.make_bitmap(lambda p: intersect(p, bmp))
 
     def visit_HFlip(self):
         return lambda bmp: bmp.flip(1)
@@ -510,7 +508,7 @@ class Size(Visitor):
 
     def visit_Join(self, bmp1, bmp2): return bmp1.accept(self) + bmp2.accept(self) + 1
 
-    # def visit_Intersect(self, bmp1, bmp2): return bmp1.accept(self) + bmp2.accept(self) + 1
+    def visit_Intersect(self, bmp): return bmp.accept(self) + 1
 
     def visit_HFlip(self): return 1
 
@@ -558,7 +556,7 @@ class Print(Visitor):
 
     def visit_Join(self, bmp1, bmp2): return f'[{bmp1.accept(self)} {bmp2.accept(self)}]'
 
-    # def visit_Intersect(self, bmp1, bmp2): return f'(n {bmp1.accept(self)} {bmp2.accept(self)})'
+    def visit_Intersect(self, bmp): return f'(intersect {bmp.accept(self)})'
 
     def visit_HFlip(self): return 'h-flip'
 
@@ -604,9 +602,9 @@ class Zs(Visitor):
     def visit_Line(self, x1, y1, x2, y2, color):
         return x1.accept(self) | y1.accept(self) | x2.accept(self) | y2.accept(self)
 
-    def visit_Join(self, b1, b2): return b1.accept(self) | b2.accept(self)
+    def visit_Join(self, bmp1, bmp2): return bmp1.accept(self) | bmp2.accept(self)
 
-    # def visit_Intersect(self, b1, b2): return b1.accept(self) | b2.accept(self)
+    def visit_Intersect(self, bmp): return bmp.accept(self)
 
     def visit_HFlip(self): return set()
 
@@ -639,9 +637,9 @@ def test_eval():
          lambda z: z[0] * z[1] if not (z[0] < z[1]) else z[0] + z[1]),
         (Rect(Num(0), Num(0),
               Num(1), Num(2)),
-         lambda z: util.img_to_tensor(["#___",
-                                       "#___",
-                                       "____",
+         lambda z: util.img_to_tensor(["##__",
+                                       "##__",
+                                       "##__",
                                        "____"], w=B_W, h=B_H)),
     ]
     for expr, correct_semantics in tests:
@@ -668,8 +666,8 @@ def test_eval():
     expr = Rect(Num(0), Num(0),
                 Num(1), Num(1))
     out = expr.eval({'z': []})
-    expected = util.img_to_tensor(["#___",
-                                   "____",
+    expected = util.img_to_tensor(["##__",
+                                   "##__",
                                    "____",
                                    "____"], w=B_W, h=B_H)
     assert T.equal(expected, out), f"test_render failed:\n expected={expected},\n out={out}"
@@ -680,10 +678,10 @@ def test_eval():
                 Plus(Num(2), Num(1)),
                 Num(3))
     out = expr.eval({'z': [1, 2, 3]})
-    expected = util.img_to_tensor(["_##_",
-                                   "_##_",
-                                   "_##_",
-                                   "____"], w=B_W, h=B_H)
+    expected = util.img_to_tensor(["_###",
+                                   "_###",
+                                   "_###",
+                                   "_###"], w=B_W, h=B_H)
     assert T.equal(expected, out), f"test_render failed:\n expected={expected},\n out={out}"
     print(" [+] passed test_eval")
 
@@ -756,18 +754,18 @@ def test_eval_bitmap():
 
         # Joining
         (Join(Rect(Num(0), Num(0),
-                   Num(1), Num(1)),
+                   Num(0), Num(0)),
               Rect(Num(2), Num(3),
-                   Num(4), Num(4))),
+                   Num(3), Num(3))),
          ["#___",
           "____",
           "____",
           "__##"]),
         (Apply(HFlip(),
                Join(Rect(Num(0), Num(0),
-                         Num(1), Num(1)),
+                         Num(0), Num(0)),
                     Rect(Num(2), Num(3),
-                         Num(4), Num(4)))),
+                         Num(3), Num(3)))),
          ["_"*(B_W-4) + "___#",
           "_"*(B_W-4) + "____",
           "_"*(B_W-4) + "____",
@@ -775,9 +773,9 @@ def test_eval_bitmap():
         (Apply(HFlip(),
                Apply(HFlip(), 
                      Join(Rect(Num(0), Num(0),
-                               Num(1), Num(1)),
+                               Num(0), Num(0)),
                           Rect(Num(2), Num(3),
-                               Num(4), Num(4))))),
+                               Num(3), Num(3))))),
         ["#___",
          "____",
          "____",
@@ -857,6 +855,13 @@ def test_eval_bitmap():
           "___#",
           "____#",
           "_____#"]),
+        (Apply(Intersect(Rect(Num(0), Num(0), Num(3), Num(3))),
+               Line(Num(0), Num(0), 
+                    Num(3), Num(3))),
+         ["#___",
+          "_#__",
+          "__#_",
+          "___#"]),
     ]
     for expr, correct_semantics in tests:
         out = expr.eval({"z": []})
@@ -872,7 +877,7 @@ def test_eval_bitmap():
 def test_eval_color():
     tests = [
         (Rect(Num(0), Num(0),
-              Num(1), Num(2), 2),
+              Num(0), Num(1), 2),
          ["2___",
           "2___",
           "____",
@@ -898,9 +903,9 @@ def test_eval_color():
           "____",
           "_3__"]),
         (Join(Rect(Num(0), Num(0),
-                   Num(1), Num(1), 1),
+                   Num(0), Num(0), 1),
               Rect(Num(2), Num(2),
-                   Num(4), Num(4), 6)),
+                   Num(3), Num(3), 6)),
          ["1___",
           "____",
           "__66",
@@ -918,9 +923,9 @@ def test_eval_color():
 
 def test_zs():
     test_cases = [
-        (Rect(Num(0), Num(1), Num(4), Num(4)),
+        (Rect(Num(0), Num(1), Num(3), Num(3)),
          set()),
-        (Rect(Z(0), Z(1), Num(4), Num(4)),
+        (Rect(Z(0), Z(1), Num(3), Num(3)),
          {0, 1}),
         (Rect(Z(0), Z(1), Z(2), Z(3)),
          {0, 1, 2, 3}),
