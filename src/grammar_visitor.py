@@ -213,7 +213,7 @@ class Rect(Expr):
     def accept(self, v): return v.visit_Rect(self.x1, self.y1, self.x2, self.y2, self.color)
 
 
-class Stack(Expr):
+class Join(Expr):
     in_types = ['bitmap', 'bitmap']
     out_type = 'bitmap'
 
@@ -221,7 +221,7 @@ class Stack(Expr):
         self.bmp1 = bmp1
         self.bmp2 = bmp2
 
-    def accept(self, v): return v.visit_Stack(self.bmp1, self.bmp2)
+    def accept(self, v): return v.visit_Join(self.bmp1, self.bmp2)
 
 
 class Apply(Expr):
@@ -318,7 +318,7 @@ class Visitor:
 
     def visit_Rect(self, x1, y1, x2, y2, color): self.fail('Rect')
 
-    def visit_Stack(self, bmp1, bmp2): self.fail('Union')
+    def visit_Join(self, bmp1, bmp2): self.fail('Union')
 
     # def visit_Intersect(self, bmp1, bmp2): self.fail('Intersect')
 
@@ -419,7 +419,7 @@ class Eval(Visitor):
         assert 0 <= x1 < x2 <= B_W and 0 <= y1 < y2 <= B_H
         return Eval.make_bitmap(lambda p: (x1 <= p[0] < x2 and y1 <= p[1] < y2) * color)
 
-    def visit_Stack(self, b1, b2):
+    def visit_Join(self, b1, b2):
         b1, b2 = b1.accept(self), b2.accept(self)
         assert isinstance(b1, T.FloatTensor) and isinstance(b2, T.FloatTensor), \
             f"Union needs two float tensors, found b1={b1}, b2={b2}"
@@ -508,7 +508,7 @@ class Size(Visitor):
     def visit_Rect(self, x1, y1, x2, y2, color):
         return x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self) + 1
 
-    def visit_Stack(self, bmp1, bmp2): return bmp1.accept(self) + bmp2.accept(self) + 1
+    def visit_Join(self, bmp1, bmp2): return bmp1.accept(self) + bmp2.accept(self) + 1
 
     # def visit_Intersect(self, bmp1, bmp2): return bmp1.accept(self) + bmp2.accept(self) + 1
 
@@ -556,7 +556,7 @@ class Print(Visitor):
     def visit_Rect(self, x1, y1, x2, y2, color):
         return f'(R[{color}] {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
 
-    def visit_Stack(self, bmp1, bmp2): return f'[{bmp1.accept(self)} {bmp2.accept(self)}]'
+    def visit_Join(self, bmp1, bmp2): return f'[{bmp1.accept(self)} {bmp2.accept(self)}]'
 
     # def visit_Intersect(self, bmp1, bmp2): return f'(n {bmp1.accept(self)} {bmp2.accept(self)})'
 
@@ -604,7 +604,7 @@ class Zs(Visitor):
     def visit_Line(self, x1, y1, x2, y2, color):
         return x1.accept(self) | y1.accept(self) | x2.accept(self) | y2.accept(self)
 
-    def visit_Stack(self, b1, b2): return b1.accept(self) | b2.accept(self)
+    def visit_Join(self, b1, b2): return b1.accept(self) | b2.accept(self)
 
     # def visit_Intersect(self, b1, b2): return b1.accept(self) | b2.accept(self)
 
@@ -726,6 +726,7 @@ def test_eval_bitmap():
           "____",
           "_#__",
           "_#__"]),
+
         # Reflection
         (Apply(HFlip(), 
                Line(Num(0), Num(0),
@@ -734,48 +735,49 @@ def test_eval_bitmap():
           "_"*(B_W-4) + "__#_",
           "_"*(B_W-4) + "_#__",
           "_"*(B_W-4) + "#___"]),
-        (Stack(Stack(Point(Num(0), Num(0)),
-                     Point(Num(1), Num(3))),
-               Stack(Point(Num(2), Num(0)),
-                     Point(Num(3), Num(1)))),
+        (Join(Join(Point(Num(0), Num(0)),
+                   Point(Num(1), Num(3))),
+              Join(Point(Num(2), Num(0)),
+                   Point(Num(3), Num(1)))),
          ["#_#_",
           "___#",
           "____",
           "_#__"]),
         (Apply(VFlip(),
-               Stack(Stack(Point(Num(0), Num(0)),
-                           Point(Num(1), Num(3))),
-                     Stack(Point(Num(2), Num(0)),
-                           Point(Num(3), Num(1))))),
+               Join(Join(Point(Num(0), Num(0)),
+                         Point(Num(1), Num(3))),
+                    Join(Point(Num(2), Num(0)),
+                         Point(Num(3), Num(1))))),
          ["____"] * (B_H - 4) +
          ["_#__",
           "____",
           "___#",
           "#_#_"]),
-        # Stacking
-        (Stack(Rect(Num(0), Num(0),
-                    Num(1), Num(1)),
-               Rect(Num(2), Num(3),
-                    Num(4), Num(4))),
+
+        # Joining
+        (Join(Rect(Num(0), Num(0),
+                   Num(1), Num(1)),
+              Rect(Num(2), Num(3),
+                   Num(4), Num(4))),
          ["#___",
           "____",
           "____",
           "__##"]),
         (Apply(HFlip(),
-               Stack(Rect(Num(0), Num(0),
-                          Num(1), Num(1)),
-                     Rect(Num(2), Num(3),
-                          Num(4), Num(4)))),
+               Join(Rect(Num(0), Num(0),
+                         Num(1), Num(1)),
+                    Rect(Num(2), Num(3),
+                         Num(4), Num(4)))),
          ["_"*(B_W-4) + "___#",
           "_"*(B_W-4) + "____",
           "_"*(B_W-4) + "____",
           "_"*(B_W-4) + "##__"]),
         (Apply(HFlip(),
                Apply(HFlip(), 
-                     Stack(Rect(Num(0), Num(0),
-                                Num(1), Num(1)),
-                           Rect(Num(2), Num(3),
-                                Num(4), Num(4))))),
+                     Join(Rect(Num(0), Num(0),
+                               Num(1), Num(1)),
+                          Rect(Num(2), Num(3),
+                               Num(4), Num(4))))),
         ["#___",
          "____",
          "____",
@@ -887,18 +889,18 @@ def test_eval_color():
           "____",
           "____",
           "____"]),
-        (Stack(Stack(Point(Num(0), Num(0), 2),
-                     Point(Num(1), Num(3), 3)),
-               Stack(Point(Num(2), Num(0), 7),
-                     Point(Num(3), Num(1), 9))),
+        (Join(Join(Point(Num(0), Num(0), 2),
+                   Point(Num(1), Num(3), 3)),
+              Join(Point(Num(2), Num(0), 7),
+                   Point(Num(3), Num(1), 9))),
          ["2_7_",
           "___9",
           "____",
           "_3__"]),
-        (Stack(Rect(Num(0), Num(0),
-                    Num(1), Num(1), 1),
-               Rect(Num(2), Num(2),
-                    Num(4), Num(4), 6)),
+        (Join(Rect(Num(0), Num(0),
+                   Num(1), Num(1), 1),
+              Rect(Num(2), Num(2),
+                   Num(4), Num(4), 6)),
          ["1___",
           "____",
           "__66",
