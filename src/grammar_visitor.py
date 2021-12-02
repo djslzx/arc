@@ -35,6 +35,10 @@ class Visited:
 
     def zs(self): return self.accept(Zs())
 
+    def serialize(self): return self.accept(Serialize())
+
+    def deserialize(self): return deserialize(self)
+
     def __len__(self): return self.accept(Size())
 
     def __str__(self): return self.accept(Print())
@@ -213,6 +217,15 @@ class Rect(Expr):
     def accept(self, v): return v.visit_Rect(self.x1, self.y1, self.x2, self.y2, self.color)
 
 
+class Seq(Expr):
+    in_types = ['list(bitmap)']
+    out_type = 'bitmap'
+    
+    def __init__(self, *bmps): 
+        self.bmps = bmps
+
+    def accept(self, v): return v.visit_Seq(self.bmps)
+
 class Join(Expr):
     in_types = ['bitmap', 'bitmap']
     out_type = 'bitmap'
@@ -317,7 +330,9 @@ class Visitor:
 
     def visit_Rect(self, x1, y1, x2, y2, color): self.fail('Rect')
 
-    def visit_Join(self, bmp1, bmp2): self.fail('Union')
+    def visit_Join(self, bmp1, bmp2): self.fail('Join')
+
+    def visit_Seq(self, bmps): self.fail('Seq')
 
     def visit_Intersect(self, bmp): self.fail('Intersect')
 
@@ -336,11 +351,21 @@ class Eval(Visitor):
     def __init__(self, env):
         self.env = env
 
-    @classmethod
-    def make_bitmap(cls, f):
+    @staticmethod
+    def make_bitmap(f):
         return T.tensor([[f((x, y))
                           for x in range(B_W)]
                          for y in range(B_H)]).float()
+
+    @staticmethod
+    def overlay(*bmps):
+        def overlay_pt(p):
+            x, y = p
+            for bmp in bmps:
+                if (c := bmp[y][x]) > 0:
+                    return c
+            return 0
+        return Eval.make_bitmap(overlay_pt)
 
     def visit_Empty(self):
         return None
@@ -418,15 +443,16 @@ class Eval(Visitor):
         assert 0 <= x1 <= x2 <= B_W and 0 <= y1 <= y2 <= B_H
         return Eval.make_bitmap(lambda p: (x1 <= p[0] <= x2 and y1 <= p[1] <= y2) * color)
 
-    def visit_Join(self, b1, b2):
-        b1, b2 = b1.accept(self), b2.accept(self)
-        assert isinstance(b1, T.FloatTensor) and isinstance(b2, T.FloatTensor), \
-            f"Union needs two float tensors, found b1={b1}, b2={b2}"
-        def f(p):
-            x, y = p
-            c1, c2 = b1[y][x], b2[y][x]
-            return c1 if c1 > 0 else c2
-        return Eval.make_bitmap(f)
+    def visit_Seq(self, bmps):
+        bmps = [bmp.accept(self) for bmp in bmps]
+        assert all(isinstance(bmp, T.FloatTensor) for bmp in bmps)
+        return Eval.overlay(bmps)
+
+    def visit_Join(self, bmp1, bmp2):
+        bmp1, bmp2 = bmp1.accept(self), bmp2.accept(self)
+        assert isinstance(bmp1, T.FloatTensor) and isinstance(bmp2, T.FloatTensor), \
+            f"Union needs two float tensors, found bmp1={bmp1}, bmp2={bmp2}"
+        return Eval.overlay(bmp1, bmp2)
 
     def visit_Intersect(self, bmp1):
         bmp1 = bmp1.accept(self)
@@ -506,6 +532,8 @@ class Size(Visitor):
     def visit_Rect(self, x1, y1, x2, y2, color):
         return x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self) + 1
 
+    def visit_Stack(self, bmps): return sum(bmp.accept(self) for bmp in bmps) + 1
+
     def visit_Join(self, bmp1, bmp2): return bmp1.accept(self) + bmp2.accept(self) + 1
 
     def visit_Intersect(self, bmp): return bmp.accept(self) + 1
@@ -554,6 +582,8 @@ class Print(Visitor):
     def visit_Rect(self, x1, y1, x2, y2, color):
         return f'(R[{color}] {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
 
+    def visit_Seq(self, bmps): return '; '.join([bmp.accept(self) for bmp in bmps])
+
     def visit_Join(self, bmp1, bmp2): return f'[{bmp1.accept(self)} {bmp2.accept(self)}]'
 
     def visit_Intersect(self, bmp): return f'(intersect {bmp.accept(self)})'
@@ -567,6 +597,116 @@ class Print(Visitor):
     def visit_Apply(self, f, bmp): return f'(apply {f.accept(self)} {bmp.accept(self)})'
 
     def visit_Repeat(self, f, n): return f'(repeat {f.accept(self)} {n.accept(self)})'
+
+
+def deserialize(seq):
+    '''
+    Deserialize a serialized seq into a program.
+    '''
+    def D(seq):
+        if not seq: return []
+        h, t = seq[0], D(seq[1:])
+        if h == '': 
+            return [Empty()] + t
+        if isinstance(h, bool) and h == False: 
+            return [Nil()] + t
+        if isinstance(h, int): 
+            return [Num(h)] + t
+        if isinstance(h, str) and h.startswith('z'): 
+            return [Z(int(h[1:]))] + t
+        if h == '~':
+            return [Not(t[0])] + t[1:]
+        if h == '+':
+            return [Plus(t[0], t[1])] + t[2:]
+        if h == '-':
+            return [Minus(t[0], t[1])] + t[2:]
+        if h == '*':
+            return [Times(t[0], t[1])] + t[2:]
+        if h == '<':
+            return [Lt(t[0], t[1])] + t[2:]
+        if h == '&':
+            return [And(t[0], t[1])] + t[2:]
+        if h == '?':
+            return [If(t[0], t[1], t[2])] + t[3:]
+        if h == 'P':
+            return [Point(t[1], t[2], color=t[0])] + t[3:]
+        if h == 'L':
+            return [Line(t[1], t[2], t[3], t[4], color=t[0])] + t[5:]
+        if h == 'R':
+            return [Rect(t[1], t[2], t[3], t[4], color=t[0])] + t[5:]
+        if h =='H':
+            return [HFlip()] + t
+        if h =='V':
+            return [VFlip()] + t
+        if h =='T':
+            return [Translate(t[0], t[1])] + t[2:]
+        if h =='A':
+            return [Apply(t[0], t[1])] + t[2:]
+        if h =='R':
+            return [Apply(t[0], t[1])] + t[2:]
+        if h == '{':
+            i = t.index('}')
+            print(t[:i])
+            return [Seq(*t[:i])] + t[i+1:]
+        else:
+            return seq
+
+    return D(seq)[0]
+
+
+class Serialize(Visitor):
+    def __init__(self): pass
+
+    def visit_Empty(self): return ['']
+
+    def visit_Nil(self): return [False]
+
+    def visit_Num(self, n): return [n]
+
+    def visit_Z(self, i): return [f'z{i}']
+
+    def visit_Not(self, b): return ['~'] + b.accept(self)
+
+    def visit_Plus(self, x, y): return ['+'] + x.accept(self) + y.accept(self)
+
+    def visit_Minus(self, x, y): return ['-'] + x.accept(self) + y.accept(self)
+
+    def visit_Times(self, x, y): return ['*'] + x.accept(self) + y.accept(self)
+
+    def visit_Lt(self, x, y): return ['<'] + x.accept(self) + y.accept(self)
+
+    def visit_And(self, x, y): return ['&'] + x.accept(self) + y.accept(self)
+
+    def visit_If(self, b, x, y): return ['?'] + b.accept(self) + x.accept(self) + y.accept(self)
+
+    def visit_Point(self, x, y, color): return ['P', color] + x.accept(self) + y.accept(self)
+
+    def visit_Line(self, x1, y1, x2, y2, color):
+        return ['L', color] + x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self)
+
+    def visit_Rect(self, x1, y1, x2, y2, color):
+        return ['R', color] + x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self)
+
+    def visit_Seq(self, bmps): 
+        l = ['{'];
+        for bmp in bmps:
+            l.extend(bmp.accept(self))
+        l.append('}')           # stop symbol
+        return l
+
+    def visit_Join(self, bmp1, bmp2): return [';'] + bmp1.accept(self) + bmp2.accept(self)
+
+    def visit_Intersect(self, bmp): return ['I'] + bmp.accept(self)
+
+    def visit_HFlip(self): return ['H']
+
+    def visit_VFlip(self): return ['V']
+
+    def visit_Translate(self, x, y): return ['T'] + x.accept(self) + y.accept(self)
+    
+    def visit_Apply(self, f, bmp): return ['A'] + f.accept(self) + bmp.accept(self)
+
+    def visit_Repeat(self, f, n): return ['R'] + f.accept(self) + n.accept(self)
 
 
 class Zs(Visitor):
@@ -601,6 +741,8 @@ class Zs(Visitor):
 
     def visit_Line(self, x1, y1, x2, y2, color):
         return x1.accept(self) | y1.accept(self) | x2.accept(self) | y2.accept(self)
+
+    def visit_Seq(self, bmps): return set.union(bmp.accept(self) for bmp in bmps)
 
     def visit_Join(self, bmp1, bmp2): return bmp1.accept(self) | bmp2.accept(self)
 
