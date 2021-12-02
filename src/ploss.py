@@ -131,8 +131,8 @@ def make_data(exprs, zs, n_fs, n_reps, subset_size):
     """
     assert subset_size * n_reps <= len(zs), "not enough zs to sample xs from"
 
-    def cost_from_dist(d):
-        return 1/(1 + d)
+    def score(dist):
+        return 1/(1 + dist)
 
     def eval(f, z):
         try:
@@ -152,16 +152,15 @@ def make_data(exprs, zs, n_fs, n_reps, subset_size):
         # positive examples
         for p1, p2 in util.chunk_pairs(f_xs, subset_size, n_reps):
             data.append(T.cat((T.stack(p1), T.stack(p2))))
-            labels.append(cost_from_dist(0))
+            labels.append(score(0))
         # negative examples
         for i in range(n_reps):
             g = random.choice(list(xs.keys() - {f}))
-            g_xs = xs[g]
-            d = f.dist_to(g)
+            g_xs = xs[g]        # modify to use the same zs for different f and g?
             f_subset = T.stack(random.sample(f_xs, subset_size))
             g_subset = T.stack(random.sample(g_xs, subset_size))
             data.append(T.cat((f_subset, g_subset)))
-            labels.append(cost_from_dist(d))
+            labels.append(score(f.dist_to(g)))
     print()
     return T.stack(data), T.tensor(labels)
 
