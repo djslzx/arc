@@ -1,8 +1,9 @@
-from math import log2
 import util
 import nltk
 import torch as T
 import torch.nn.functional as F
+import random
+from math import log2
 
 # bitmap size constants
 B_W = 8
@@ -178,7 +179,7 @@ class If(Expr):
 
 
 class Line(Expr):
-    in_types = ['int', 'int', 'int', 'int']
+    in_types = ['int', 'int', 'int', 'int', 'int']
     out_type = 'bitmap'
 
     def __init__(self, x1, y1, x2, y2, color=1):
@@ -192,7 +193,7 @@ class Line(Expr):
 
 
 class Point(Expr):
-    in_types = ['int', 'int']
+    in_types = ['int', 'int', 'int']
     out_type = 'bitmap'
 
     def __init__(self, x, y, color=1):
@@ -204,7 +205,7 @@ class Point(Expr):
 
 
 class Rect(Expr):
-    in_types = ['int', 'int', 'int', 'int']
+    in_types = ['int', 'int', 'int', 'int', 'int']
     out_type = 'bitmap'
 
     def __init__(self, x1, y1, x2, y2, color=1):
@@ -215,6 +216,20 @@ class Rect(Expr):
         self.color = color
 
     def accept(self, v): return v.visit_Rect(self.x1, self.y1, self.x2, self.y2, self.color)
+
+
+class Shape(Expr):
+    in_types = ['int', 'int', 'int', 'int', 'int']
+    out_type = 'bitmap'
+
+    def __init__(self, x, y, w, h, color=1):
+        self.x = x
+        self.y = y
+        self.w = w
+        self.h = h
+        self.color = color
+
+    def accept(self, v): return v.visit_Shape(self.x, self.y, self.w, self.h, self.color)
 
 
 class Seq(Expr):
@@ -330,6 +345,8 @@ class Visitor:
 
     def visit_Rect(self, x1, y1, x2, y2, color): self.fail('Rect')
 
+    def visit_Shape(self, x, y, w, h, color): self.fail('Shape')
+
     def visit_Join(self, bmp1, bmp2): self.fail('Join')
 
     def visit_Seq(self, bmps): self.fail('Seq')
@@ -379,7 +396,7 @@ class Eval(Visitor):
     def visit_Z(self, i):
         assert 'z' in self.env, "Eval env missing Z"
         z = self.env['z'][i]
-        return z.item() if isinstance(z, T.LongTensor) else z
+        return z.item() if isinstance(z, T.Tensor) else z
 
     def visit_Not(self, b):
         b = b.accept(self)
@@ -417,36 +434,50 @@ class Eval(Visitor):
         return x if b else y
 
     def visit_Point(self, x, y, color):
-        x, y = x.accept(self), y.accept(self)
+        x, y, c = x.accept(self), y.accept(self), color.accept(self)
         assert isinstance(x, int) and isinstance(y, int)
-        return Eval.make_bitmap(lambda p: (p[0] == x and p[1] == y) * color)
+        return Eval.make_bitmap(lambda p: (p[0] == x and p[1] == y) * c)
 
     def visit_Line(self, x1, y1, x2, y2, color):
+        c = color.accept(self)
         x1, y1, x2, y2 = (x1.accept(self), y1.accept(self),
                           x2.accept(self), y2.accept(self))
         assert all(isinstance(v, int) for v in [x1, y1, x2, y2])
-        assert 0 <= x1 <= x2 <= B_W and 0 <= y1 <= y2 <= B_H
+        assert 0 <= x1 <= x2 < B_W and 0 <= y1 <= y2 < B_H
         assert x1 == x2 or y1 == y2 or abs(x2 - x1) == abs(y2 - y1)
         if x1 == x2:  # vertical
-            return Eval.make_bitmap(lambda p: (x1 == p[0] and y1 <= p[1] <= y2) * color)
+            return Eval.make_bitmap(lambda p: (x1 == p[0] and y1 <= p[1] <= y2) * c)
         elif y1 == y2:  # horizontal
-            return Eval.make_bitmap(lambda p: (x1 <= p[0] <= x2 and y1 == p[1]) * color)
+            return Eval.make_bitmap(lambda p: (x1 <= p[0] <= x2 and y1 == p[1]) * c)
         else:  # diagonal
             return Eval.make_bitmap(lambda p: (x1 <= p[0] <= x2 and
                                                y1 <= p[1] <= y2 and
-                                               p[1] == y1 + (p[0] - x1)) * color)
+                                               p[1] == y1 + (p[0] - x1)) * c)
 
     def visit_Rect(self, x1, y1, x2, y2, color):
+        c = color.accept(self)
         x1, y1, x2, y2 = (x1.accept(self), y1.accept(self),
                           x2.accept(self), y2.accept(self))
         assert all(isinstance(v, int) for v in [x1, y1, x2, y2])
-        assert 0 <= x1 <= x2 <= B_W and 0 <= y1 <= y2 <= B_H
-        return Eval.make_bitmap(lambda p: (x1 <= p[0] <= x2 and y1 <= p[1] <= y2) * color)
+        assert 0 <= x1 <= x2 < B_W and 0 <= y1 <= y2 < B_H
+        return Eval.make_bitmap(lambda p: (x1 <= p[0] <= x2 and y1 <= p[1] <= y2) * c)
+
+    def visit_Shape(self, x, y, w, h, color):
+        c = color.accept(self)
+        x0, y0 = x.accept(self), y.accept(self)
+        w, h = w.accept(self), h.accept(self)
+        assert all(isinstance(v, int) for v in [x0, y0, w, h, c])
+        assert 0 <= x0 < B_W and 0 <= y0 < B_H
+        assert 0 <= w < B_W - x0 and 0 <= h < B_H - y0
+        shape = T.rand(h, w).round() * c
+        shape = F.pad(shape, (x0, B_W - (w + x0),
+                              y0, B_H - (h + y0)))
+        return shape
 
     def visit_Seq(self, bmps):
         bmps = [bmp.accept(self) for bmp in bmps]
-        assert all(isinstance(bmp, T.FloatTensor) for bmp in bmps)
-        return Eval.overlay(bmps)
+        assert all(isinstance(bmp, T.FloatTensor) for bmp in bmps), f"Seq contains unexpected type: {[type(bmp) for bmp in bmps]}"
+        return Eval.overlay(*bmps)
 
     def visit_Join(self, bmp1, bmp2):
         bmp1, bmp2 = bmp1.accept(self), bmp2.accept(self)
@@ -524,13 +555,16 @@ class Size(Visitor):
 
     def visit_If(self, b, x, y): return b.accept(self) + x.accept(self) + y.accept(self) + 1
 
-    def visit_Point(self, x, y, color): return x.accept(self) + y.accept(self) + 1
+    def visit_Point(self, x, y, color): return x.accept(self) + y.accept(self) + color.accept(self) + 1
 
     def visit_Line(self, x1, y1, x2, y2, color): 
-        return x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self) + 1
+        return x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self) + color.accept(self) + 1
 
     def visit_Rect(self, x1, y1, x2, y2, color):
-        return x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self) + 1
+        return x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self) + color.accept(self) + 1
+
+    def visit_Shape(self, x, y, w, h, color):
+        return x.accept(self) + y.accept(self) + w.accept(self) + h.accept(self) + color.accept(self) + 1
 
     def visit_Stack(self, bmps): return sum(bmp.accept(self) for bmp in bmps) + 1
 
@@ -577,10 +611,13 @@ class Print(Visitor):
     def visit_Point(self, x, y, color): return f'(P[{color}] {x.accept(self)} {y.accept(self)})'
 
     def visit_Line(self, x1, y1, x2, y2, color):
-        return f'(L[{color}] {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
+        return f'(L[{color.accept(self)}] {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
 
     def visit_Rect(self, x1, y1, x2, y2, color):
-        return f'(R[{color}] {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
+        return f'(R[{color.accept(self)}] {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
+
+    def visit_Shape(self, x, y, w, h, color):
+        return f'(S[{color.accept(self)}] {x.accept(self)} {y.accept(self)} {w.accept(self)} {h.accept(self)})'
 
     def visit_Seq(self, bmps): return '; '.join([bmp.accept(self) for bmp in bmps])
 
@@ -634,6 +671,8 @@ def deserialize(seq):
             return [Line(t[1], t[2], t[3], t[4], color=t[0])] + t[5:]
         if h == 'R':
             return [Rect(t[1], t[2], t[3], t[4], color=t[0])] + t[5:]
+        if h == 'S':
+            return [Shape(t[1], t[2], t[3], t[4], color=t[0])] + t[5:]
         if h =='H':
             return [HFlip()] + t
         if h =='V':
@@ -682,10 +721,13 @@ class Serialize(Visitor):
     def visit_Point(self, x, y, color): return ['P', color] + x.accept(self) + y.accept(self)
 
     def visit_Line(self, x1, y1, x2, y2, color):
-        return ['L', color] + x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self)
+        return ['L'] + color.accept(self) + x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self)
 
     def visit_Rect(self, x1, y1, x2, y2, color):
-        return ['R', color] + x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self)
+        return ['R'] + color.accept(self) + x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self)
+
+    def visit_Shape(self, x, y, w, h, color):
+        return ['S'] + color.accept(self) + x.accept(self) + y.accept(self) + w.accept(self) +  h.accept(self)
 
     def visit_Seq(self, bmps): 
         l = ['{'];
@@ -734,13 +776,16 @@ class Zs(Visitor):
 
     def visit_If(self, b, x, y): return b.accept(self) | x.accept(self) | y.accept(self)
 
-    def visit_Point(self, x, y, color): return x.accept(self) | y.accept(self)
-
-    def visit_Rect(self, x1, y1, x2, y2, color):
-        return x1.accept(self) | y1.accept(self) | x2.accept(self) | y2.accept(self)
+    def visit_Point(self, x, y, color): return x.accept(self) | y.accept(self) | color.accept(self)
 
     def visit_Line(self, x1, y1, x2, y2, color):
-        return x1.accept(self) | y1.accept(self) | x2.accept(self) | y2.accept(self)
+        return x1.accept(self) | y1.accept(self) | x2.accept(self) | y2.accept(self) | color.accept(self)
+
+    def visit_Rect(self, x1, y1, x2, y2, color):
+        return x1.accept(self) | y1.accept(self) | x2.accept(self) | y2.accept(self) | color.accept(self)
+
+    def visit_Shape(self, x, y, w, h, color):
+        return x.accept(self) | y.accept(self) | w.accept(self) | h.accept(self) | color.accept(self)
 
     def visit_Seq(self, bmps): return set.union(bmp.accept(self) for bmp in bmps)
 
