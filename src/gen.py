@@ -7,7 +7,7 @@ from math import floor, ceil, log2
 from random import choice 
 
 from viz import viz
-from grammar_visitor import *
+from grammar import *
 from bottom_up import bottom_up_generator, eval
 
 def gen_zs(n):

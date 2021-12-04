@@ -2,7 +2,7 @@ import itertools
 import time
 import random
 import torch as T
-from grammar_visitor import *
+from grammar import *
 
 VERBOSE = True
 

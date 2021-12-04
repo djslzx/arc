@@ -18,7 +18,7 @@ import itertools
 import pickle
 
 import util
-from grammar_visitor import *
+from grammar import *
 from bottom_up import *
 from learn import *
 

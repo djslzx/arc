@@ -2,7 +2,7 @@ import torch as T
 import random as R 
 import util
 from viz import viz
-from grammar_visitor import B_W, B_H
+from grammar import B_W, B_H
 
 def make_bitmap(f):
     return T.tensor([[f((x, y))
