@@ -3,6 +3,7 @@ import nltk
 import torch as T
 import torch.nn.functional as F
 import random
+import ant
 from math import log2
 
 # bitmap size constants
@@ -10,16 +11,9 @@ B_W = 8
 B_H = 8
 
 # constants for z_n, z_b
-Z_SIZE = 6  # length of z_n, z_b
+Z_SIZE = 10  # length of z_n, z_b
 Z_LO = 0  # min poss value in z_n
 Z_HI = max(B_W, B_H) - 1  # max poss value in z_n
-
-'''
-Grammar
-
-- Expr: Nil, Num, Z, +, -, *, <, and, not, if, rect, prog
-+ reflect, diagonal/horizontal/vertical line
-'''
 
 
 class Grammar:
@@ -469,10 +463,7 @@ class Eval(Visitor):
         assert all(isinstance(v, int) for v in [x0, y0, w, h, c])
         assert 0 <= x0 < B_W and 0 <= y0 < B_H
         assert 0 <= w < B_W - x0 and 0 <= h < B_H - y0
-        shape = T.rand(h, w).round() * c
-        shape = F.pad(shape, (x0, B_W - (w + x0),
-                              y0, B_H - (h + y0)))
-        return shape
+        return ant.ant(x0, y0, w, h, B_W, B_H)
 
     def visit_Seq(self, bmps):
         bmps = [bmp.accept(self) for bmp in bmps]
