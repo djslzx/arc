@@ -16,10 +16,10 @@ def clean(fname):
     name = name.split('/')[-1]
     return name
 
-def label(ax, grid):
+def label_cells(ax, grid):
     for (y,x), text in np.ndenumerate(grid):
         if text != 0:
-            ax.text(x, y, text, ha='center', va='center', 
+            ax.text(x, y, int(text), ha='center', va='center', 
                     color='white',
                     fontsize='x-small',
                     path_effects=[pe.withStroke(linewidth=2, foreground="black")])
@@ -48,8 +48,8 @@ def viz_task(name, i, x, y):
 
     ax[1, 0].imshow(x_masked, vmin=vmin, vmax=vmax)
     ax[1, 1].imshow(y_masked, vmin=vmin, vmax=vmax)
-    label(ax[1, 0], x)
-    label(ax[1, 1], y)
+    label_cells(ax[1, 0], x)
+    label_cells(ax[1, 1], y)
 
     output()
     # output(f'../tasks/images/{name}-{i}.png', show=False)
@@ -66,9 +66,12 @@ def viz(t, title='', subtitle='', fname=None, show=True):
     f, ax = plt.subplots(2, 1)
     f.suptitle(title)
     plt.figtext(0.5, 0.01, subtitle, wrap=True, horizontalalignment='center', fontsize=9)
-    ax[0].imshow(t)
-    ax[1].imshow(t)
-    label(ax[1], t)
+    t_masked = np.ma.masked_where(t == 0, t)
+    ax[0].imshow(t_masked, vmin=0, vmax=9)
+    ax[1].imshow(t_masked, vmin=0, vmax=9)
+    # ax[0].grid()
+    # ax[1].grid()
+    label_cells(ax[1], t_masked)
     output(fname, show)
 
 if __name__ == '__main__':
