@@ -2,12 +2,11 @@ import torch as T
 import random as R 
 import util
 from viz import viz
-from grammar import B_W, B_H
 
-def make_bitmap(f):
+def make_bitmap(f, W, H):
     return T.tensor([[f((x, y))
-                      for x in range(B_W)]
-                     for y in range(B_H)]).float()
+                      for x in range(W)]
+                     for y in range(H)]).float()
 
 def unzip(l):
     return tuple(list(x) for x in zip(*l))
@@ -32,7 +31,7 @@ def shift(pts, x0, y0):
         ys = [y + (y0 - min_y) for y in ys]
     return list(zip(xs, ys))
 
-def ant(x0, y0, w, h):
+def ant(x0, y0, w, h, W, H):
     x, y = 0, 0
     pts = []
     while in_bounds(pts + [(x,y)], w, h):
@@ -42,46 +41,54 @@ def ant(x0, y0, w, h):
         x += dx
         y += dy
     pts = shift(pts, x0, y0)
-    return make_bitmap(lambda p: p in pts)
-
-# TODO: make sure we have canonical rep - random shape shouldn't be a rectangle, line, or point
+    return make_bitmap(lambda p: p in pts, W, H)
 
 def as_colored_pts(bmp):
+    H, W = bmp.shape
     return [(x,y,c) 
-            for y in range(B_H)
-            for x in range(B_W)
+            for y in range(H)
+            for x in range(W)
             if (c := bmp[y][x]) > 0]
 
+def check(pred, bmp, color):
+    H, W = bmp.shape
+    return all(bmp[y][x] == (color if pred((x, y)) else 0)
+               for y in range(H)
+               for x in range(W))
+
 def is_rect(bmp):
-    xs, ys, cs = unzip(as_colored_pts(bmp))
+    pts = as_colored_pts(bmp)
+    if not pts: return False
+    xs, ys, cs = unzip(pts)
     if not all(c == cs[0] for c in cs[1:]): return False
     min_x, max_x, min_y, max_y = min(xs), max(xs), min(ys), max(ys)
     return (bmp[min_y:max_y+1, 
                 min_x:max_x+1] > 0).all()
 
 def is_line(bmp):
-    xs, ys, cs = unzip(as_colored_pts(bmp))
+    pts = as_colored_pts(bmp)
+    if not pts: return False
+    xs, ys, cs = unzip(pts)
     if not all(c == cs[0] for c in cs[1:]): return False
-    min_x, min_y = min(xs), min(ys)
-    max_x, max_y = max(xs), max(ys)
+    min_x, max_x, min_y, max_y = min(xs), max(xs), min(ys), max(ys)
 
     # vertical
     if min_x == max_x:
-        return bmp.equal(make_bitmap(lambda p: p[0] == min_x and min_y <= p[1] <= max_y))
+        return check(lambda p: p[0] == min_x and min_y <= p[1] <= max_y, bmp, cs[0])
     # horizontal
     if min_y == max_y:
-        return bmp.equal(make_bitmap(lambda p: p[1] == min_y and min_x <= p[0] <= max_x))
+        return check(lambda p: p[1] == min_y and min_x <= p[0] <= max_x, bmp, cs[0])
     # diagonal
-    return bmp.equal(make_bitmap(lambda p: (min_x <= p[0] <= max_x and
-                                            min_y <= p[1] <= max_y and
-                                            p[1] == min_y + (p[0] - min_x)) * cs[0]))
+    return check(lambda p: (min_x <= p[0] <= max_x and
+                            min_y <= p[1] <= max_y and
+                            p[1] == min_y + (p[0] - min_x)), bmp, cs[0])
 
 def is_point(bmp):
-    xs, ys, cs = unzip(as_colored_pts(bmp))
+    pts = as_colored_pts(bmp)
+    if not pts: return False
+    xs, ys, cs = unzip(pts)
     if not all(c == cs[0] for c in cs[1:]): return False
-    min_x, min_y = min(xs), min(ys)
-    max_x, max_y = max(xs), max(ys)
-    return min_x == max_x and min_y == max_y
+    return min(xs) == max(xs) and min(ys) == max(ys) 
 
 def classify(bmp):
     if is_point(bmp): return 'Point'
@@ -89,7 +96,7 @@ def classify(bmp):
     if is_rect(bmp): return 'Rect'
     return 'Shape'
 
-def test_classify():
+def test_classify(W, H):
     tests = [
         (["____",
           "____",
@@ -117,14 +124,14 @@ def test_classify():
           "____"], 'Shape'),
     ]
     for q, a in tests:
-        q = util.img_to_tensor(q, w=B_W, h=B_H)
+        q = util.img_to_tensor(q, w=W, h=H)
         o = classify(q)
         assert o == a, \
             f"Classified {q} as {o}, expected {a}"
     print("[+] passed test_classify")
 
 if __name__ == '__main__':
-    test_classify()
+    test_classify(W=8, H=8)
     # for i in range(B_W):
     #     bmp = ant(i,i,3,3)
     #     viz(bmp, title=classify(bmp))
