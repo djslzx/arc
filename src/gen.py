@@ -37,10 +37,8 @@ def gen_random_expr(zs, n_objs, aexprs):
         # check that e is well-formed and includes at least one random component (avoid constant imgs)
         outs = eval(e, envs)
         ok = len(e.zs()) > 0 and all(out is not None for out in outs)
-        if ok:
-            objs.append(e)
-        else:
-            n_misses += 1    
+        if ok: objs.append(e)
+        else: n_misses += 1    
         print("Misses:", n_misses, end='\r')
 
     print()
@@ -62,7 +60,7 @@ def save_zs(zs):
     with open('../data/zs.dat', 'wb') as f:
         pickle.dump(zs, f)
 
-def visualize(expr, env, i, j):
+def save_viz(expr, env, i, j):
     try:
         viz(expr.eval(env), 
             f'e{i}-{j}', str(expr), 
@@ -89,16 +87,17 @@ if __name__ == '__main__':
     # print(nest_stacks([Num(i) for i in range(10)]))
     # expr = gen_random_expr(zs, n_objs, aexprs, 0.5)
 
-
-    save_zs(zs)
-    open('../data/exprs.dat', 'w').close() # clear prior exprs.dat file contents
+    # save_zs(zs)
+    # open('../data/exprs.dat', 'w').close() # clear prior exprs.dat file contents
 
     gen = gen_random_exprs(zs, n_exprs, n_objs, aexprs)
     for i, expr in enumerate(gen):
-        save_expr(expr)
+        for env in envs[:10]:
+            viz(expr.eval(env))
+        # save_expr(expr)
 
-        # # visualize first 50 f, each with first 10 z's
+        # save_viz first 50 f, each with first 10 z's
         # if i < 50:
         #     for j, env in enumerate(envs[:10]):
-        #         visualize(expr, env, i, j)
+        #         save_viz(expr, env, i, j)
 
