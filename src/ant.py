@@ -22,6 +22,7 @@ def in_bounds(pts, w, h):
     return width <= w and height <= h
 
 def shift(pts, x0, y0):
+    if not pts: return pts
     xs, ys = unzip(pts)
     min_x = min(xs)
     min_y = min(ys)
@@ -36,10 +37,10 @@ def ant(x0, y0, w, h, W, H):
     pts = []
     while in_bounds(pts + [(x,y)], w, h):
         pts.append((x, y))
-        dx = R.randint(-1, 1)
-        dy = R.randint(-1, 1) if dx != 0 else R.choice([-1, 1]) # makes dy depend on dx :(
-        x += dx
-        y += dy
+        if R.randint(0,1):
+            x += R.choice([-1, 1])
+        else:
+            y += R.choice([-1, 1])
     pts = shift(pts, x0, y0)
     return make_bitmap(lambda p: p in pts, W, H)
 
@@ -90,10 +91,14 @@ def is_point(bmp):
     if not all(c == cs[0] for c in cs[1:]): return False
     return min(xs) == max(xs) and min(ys) == max(ys) 
 
+def is_empty(bmp):
+    return (bmp == 0).all()
+
 def classify(bmp):
     if is_point(bmp): return 'Point'
     if is_line(bmp): return 'Line'
     if is_rect(bmp): return 'Rect'
+    if is_empty(bmp): return 'Empty'
     return 'Shape'
 
 def test_classify(W, H):
@@ -122,6 +127,14 @@ def test_classify(W, H):
           "_#__",
           "_##_",
           "____"], 'Shape'),
+        (["_#__",
+          "_#__",
+          "_##_",
+          "____"], 'Shape'),
+        (["_#__",
+          "_##_",
+          "_#__",
+          "____"], 'Shape'),
     ]
     for q, a in tests:
         q = util.img_to_tensor(q, w=W, h=H)
@@ -131,7 +144,12 @@ def test_classify(W, H):
     print("[+] passed test_classify")
 
 if __name__ == '__main__':
-    test_classify(W=8, H=8)
-    # for i in range(B_W):
-    #     bmp = ant(i,i,3,3)
-    #     viz(bmp, title=classify(bmp))
+    W, H = 8, 8
+    w, h = 4, 4
+    test_classify(W, H)
+    cls = None
+    while cls != 'Empty':
+        bmp = ant(R.randint(0,W-w), R.randint(0,H-h),
+                  w, h, W, H)
+        cls = classify(bmp)
+        viz(bmp, title=cls)
