@@ -7,8 +7,8 @@ import ant
 from math import log2
 
 # bitmap size constants
-B_W = 8
-B_H = 8
+B_W = 10
+B_H = 10
 
 # constants for z_n, z_b
 Z_SIZE = 10  # length of z_n, z_b
@@ -465,7 +465,7 @@ class Eval(Visitor):
         assert all(isinstance(v, int) for v in [x0, y0, w, h, c])
         assert 0 <= x0 < B_W and 0 <= y0 < B_H
         assert 1 < w < B_W - x0 and 1 < h < B_H - y0
-        return ant.ant(x0, y0, w, h, B_W, B_H)
+        return ant.ant(x0, y0, w, h, B_W, B_H) * c
 
     def visit_Seq(self, bmps):
         bmps = [bmp.accept(self) for bmp in bmps]
