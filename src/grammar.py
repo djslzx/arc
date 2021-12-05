@@ -438,15 +438,16 @@ class Eval(Visitor):
                           x2.accept(self), y2.accept(self))
         assert all(isinstance(v, int) for v in [x1, y1, x2, y2])
         assert 0 <= x1 <= x2 < B_W and 0 <= y1 <= y2 < B_H
-        assert x1 == x2 or y1 == y2 or abs(x2 - x1) == abs(y2 - y1)
-        if x1 == x2:  # vertical
+        assert abs(x2 - x1) >= 1 or abs(y2 - y1) >= 1
+        if x1 == x2:            # vertical
             return Eval.make_bitmap(lambda p: (x1 == p[0] and y1 <= p[1] <= y2) * c)
-        elif y1 == y2:  # horizontal
+        elif y1 == y2:          # horizontal
             return Eval.make_bitmap(lambda p: (x1 <= p[0] <= x2 and y1 == p[1]) * c)
-        else:  # diagonal
+        elif abs(x2 - x1) == abs(y2 - y1): # diagonal
             return Eval.make_bitmap(lambda p: (x1 <= p[0] <= x2 and
                                                y1 <= p[1] <= y2 and
                                                p[1] == y1 + (p[0] - x1)) * c)
+        assert False, "Line must be vertical, horizontal, or diagonal"
 
     def visit_Rect(self, x1, y1, x2, y2, color):
         c = color.accept(self)
@@ -454,6 +455,7 @@ class Eval(Visitor):
                           x2.accept(self), y2.accept(self))
         assert all(isinstance(v, int) for v in [x1, y1, x2, y2])
         assert 0 <= x1 <= x2 < B_W and 0 <= y1 <= y2 < B_H
+        assert x2 - x1 >= 1 and y2 - y1 >= 1
         return Eval.make_bitmap(lambda p: (x1 <= p[0] <= x2 and y1 <= p[1] <= y2) * c)
 
     def visit_Shape(self, x, y, w, h, color):
@@ -462,7 +464,7 @@ class Eval(Visitor):
         w, h = w.accept(self), h.accept(self)
         assert all(isinstance(v, int) for v in [x0, y0, w, h, c])
         assert 0 <= x0 < B_W and 0 <= y0 < B_H
-        assert 0 <= w < B_W - x0 and 0 <= h < B_H - y0
+        assert 1 < w < B_W - x0 and 1 < h < B_H - y0
         return ant.ant(x0, y0, w, h, B_W, B_H)
 
     def visit_Seq(self, bmps):
@@ -622,7 +624,7 @@ class Print(Visitor):
 
     def visit_Translate(self, x, y): return f'(translate {x.accept(self)} {y.accept(self)})'
     
-    def visit_Apply(self, f, bmp): return f'(apply {f.accept(self)} {bmp.accept(self)})'
+    def visit_Apply(self, f, bmp): return f'({f.accept(self)} {bmp.accept(self)})'
 
     def visit_Repeat(self, f, n): return f'(repeat {f.accept(self)} {n.accept(self)})'
 
