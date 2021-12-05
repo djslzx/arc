@@ -74,6 +74,19 @@ def viz(t, title='', subtitle='', fname=None, show=True):
     label_cells(ax[1], t_masked)
     output(fname, show)
 
+def viz_sample(samples, n, txt=''):
+    '''Visualize an nxn grid of samples'''
+    f, ax = plt.subplots(n, n)
+    plt.figtext(0.5, 0.01, txt, wrap=True, horizontalalignment='center', fontsize=9)    
+    for i, sample in enumerate(samples):
+        x, y = i%n, i//n
+        masked = np.ma.masked_where(sample == 0, sample)
+        ax[y, x].imshow(masked, vmin=0, vmax=9)
+        ax[y, x].axes.xaxis.set_visible(False)
+        ax[y, x].axes.yaxis.set_visible(False)
+        # label_cells(ax[y,x], masked)
+    output()
+
 if __name__ == '__main__':
     if len(sys.argv) != 2:
         print("Usage: viz.py file.json")
