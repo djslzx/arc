@@ -3,18 +3,16 @@ import nltk
 import torch as T
 import torch.nn.functional as F
 import random
-import ant
+from ant import ant
 from math import log2
 
 # bitmap size constants
 B_W = 10
 B_H = 10
 
-# constants for z_n, z_b
-Z_SIZE = 10  # length of z_n, z_b
+LIB_SIZE = 10
 Z_LO = 0  # min poss value in z_n
 Z_HI = max(B_W, B_H) - 1  # max poss value in z_n
-
 
 class Grammar:
     def __init__(self, ops, consts):
@@ -58,6 +56,15 @@ class Expr(Visited):
         '''Edit distance to transform self into other'''
         # TODO: make this better
         return nltk.edit_distance(str(self), str(other))
+
+def seed_zs():
+    return (T.rand(LIB_SIZE) * (Z_HI - Z_LO) - Z_LO).long()
+
+def seed_sprites():
+    return T.stack([ant(0, 0, 
+                        w=random.randint(2, B_W-1), h=random.randint(2, B_H-1), 
+                        W=B_W, H=B_H)
+                    for _ in range(LIB_SIZE)])
 
 
 class Empty(Expr):
@@ -176,7 +183,7 @@ class Line(Expr):
     in_types = ['int', 'int', 'int', 'int', 'int']
     out_type = 'bitmap'
 
-    def __init__(self, x1, y1, x2, y2, color=1):
+    def __init__(self, x1, y1, x2, y2, color=Num(1)):
         self.x1 = x1
         self.y1 = y1
         self.x2 = x2
@@ -190,7 +197,7 @@ class Point(Expr):
     in_types = ['int', 'int', 'int']
     out_type = 'bitmap'
 
-    def __init__(self, x, y, color=1):
+    def __init__(self, x, y, color=Num(1)):
         self.x = x
         self.y = y
         self.color = color
@@ -202,7 +209,7 @@ class Rect(Expr):
     in_types = ['int', 'int', 'int', 'int', 'int']
     out_type = 'bitmap'
 
-    def __init__(self, x1, y1, x2, y2, color=1):
+    def __init__(self, x1, y1, x2, y2, color=Num(1)):
         self.x1 = x1
         self.y1 = y1
         self.x2 = x2
@@ -212,18 +219,15 @@ class Rect(Expr):
     def accept(self, v): return v.visit_Rect(self.x1, self.y1, self.x2, self.y2, self.color)
 
 
-class Shape(Expr):
-    in_types = ['int', 'int', 'int', 'int', 'int']
+class Sprite(Expr):
+    in_types = ['int', 'int']
     out_type = 'bitmap'
 
-    def __init__(self, x, y, w, h, color=1):
-        self.x = x
-        self.y = y
-        self.w = w
-        self.h = h
+    def __init__(self, i, color=Num(1)):
+        self.i = i
         self.color = color
 
-    def accept(self, v): return v.visit_Shape(self.x, self.y, self.w, self.h, self.color)
+    def accept(self, v): return v.visit_Sprite(self.i, self.color)
 
 
 class Seq(Expr):
@@ -339,7 +343,7 @@ class Visitor:
 
     def visit_Rect(self, x1, y1, x2, y2, color): self.fail('Rect')
 
-    def visit_Shape(self, x, y, w, h, color): self.fail('Shape')
+    def visit_Sprite(self, i, color): self.fail('Sprite')
 
     def visit_Join(self, bmp1, bmp2): self.fail('Join')
 
@@ -458,14 +462,9 @@ class Eval(Visitor):
         assert x2 - x1 >= 1 and y2 - y1 >= 1
         return Eval.make_bitmap(lambda p: (x1 <= p[0] <= x2 and y1 <= p[1] <= y2) * c)
 
-    def visit_Shape(self, x, y, w, h, color):
+    def visit_Sprite(self, i, color):
         c = color.accept(self)
-        x0, y0 = x.accept(self), y.accept(self)
-        w, h = w.accept(self), h.accept(self)
-        assert all(isinstance(v, int) for v in [x0, y0, w, h, c])
-        assert 0 <= x0 < B_W and 0 <= y0 < B_H
-        assert 1 < w < B_W - x0 and 1 < h < B_H - y0
-        return ant.ant(x0, y0, w, h, B_W, B_H) * c
+        return self.env['sprites'][i] * c
 
     def visit_Seq(self, bmps):
         bmps = [bmp.accept(self) for bmp in bmps]
@@ -556,8 +555,8 @@ class Size(Visitor):
     def visit_Rect(self, x1, y1, x2, y2, color):
         return x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self) + color.accept(self) + 1
 
-    def visit_Shape(self, x, y, w, h, color):
-        return x.accept(self) + y.accept(self) + w.accept(self) + h.accept(self) + color.accept(self) + 1
+    def visit_Sprite(self, i, color):
+        return color.accept(self) + 1
 
     def visit_Stack(self, bmps): return sum(bmp.accept(self) for bmp in bmps) + 1
 
@@ -609,8 +608,8 @@ class Print(Visitor):
     def visit_Rect(self, x1, y1, x2, y2, color):
         return f'(R[{color.accept(self)}] {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
 
-    def visit_Shape(self, x, y, w, h, color):
-        return f'(S[{color.accept(self)}] {x.accept(self)} {y.accept(self)} {w.accept(self)} {h.accept(self)})'
+    def visit_Sprite(self, i, color):
+        return f'S{i}[{color.accept(self)}]'
 
     def visit_Seq(self, bmps): return '; '.join([bmp.accept(self) for bmp in bmps])
 
@@ -642,8 +641,11 @@ def deserialize(seq):
             return [Nil()] + t
         if isinstance(h, int): 
             return [Num(h)] + t
-        if isinstance(h, str) and h.startswith('z'): 
-            return [Z(int(h[1:]))] + t
+        if isinstance(h, str):
+            if h.startswith('z_'): 
+                return [Z(int(h[2:]))] + t
+            if h.startswith('S_'):
+                return [Sprite(int(h[2:]), color=t[0])] + t[1:]
         if h == '~':
             return [Not(t[0])] + t[1:]
         if h == '+':
@@ -664,8 +666,6 @@ def deserialize(seq):
             return [Line(t[1], t[2], t[3], t[4], color=t[0])] + t[5:]
         if h == 'R':
             return [Rect(t[1], t[2], t[3], t[4], color=t[0])] + t[5:]
-        if h == 'S':
-            return [Shape(t[1], t[2], t[3], t[4], color=t[0])] + t[5:]
         if h =='H':
             return [HFlip()] + t
         if h =='V':
@@ -683,7 +683,8 @@ def deserialize(seq):
         else:
             return seq
 
-    return D(seq)[0]
+    tokens = D(seq)[0]
+    return ' '.join(tokens)
 
 
 class Serialize(Visitor):
@@ -695,7 +696,7 @@ class Serialize(Visitor):
 
     def visit_Num(self, n): return [n]
 
-    def visit_Z(self, i): return [f'z{i}']
+    def visit_Z(self, i): return [f'z_{i}']
 
     def visit_Not(self, b): return ['~'] + b.accept(self)
 
@@ -719,8 +720,8 @@ class Serialize(Visitor):
     def visit_Rect(self, x1, y1, x2, y2, color):
         return ['R'] + color.accept(self) + x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self)
 
-    def visit_Shape(self, x, y, w, h, color):
-        return ['S'] + color.accept(self) + x.accept(self) + y.accept(self) + w.accept(self) +  h.accept(self)
+    def visit_Sprite(self, i, color):
+        return [f'S_{i}'] + color.accept(self)
 
     def visit_Seq(self, bmps): 
         l = ['{'];
@@ -777,8 +778,8 @@ class Zs(Visitor):
     def visit_Rect(self, x1, y1, x2, y2, color):
         return x1.accept(self) | y1.accept(self) | x2.accept(self) | y2.accept(self) | color.accept(self)
 
-    def visit_Shape(self, x, y, w, h, color):
-        return x.accept(self) | y.accept(self) | w.accept(self) | h.accept(self) | color.accept(self)
+    def visit_Sprite(self, i, color):
+        return color.accept(self)
 
     def visit_Seq(self, bmps): return set.union(bmp.accept(self) for bmp in bmps)
 
@@ -934,31 +935,31 @@ def test_eval_bitmap():
 
         # Joining
         (Join(Rect(Num(0), Num(0),
-                   Num(0), Num(0)),
-              Rect(Num(2), Num(3),
+                   Num(1), Num(1)),
+              Line(Num(2), Num(3),
                    Num(3), Num(3))),
-         ["#___",
-          "____",
+         ["##__",
+          "##__",
           "____",
           "__##"]),
         (Apply(HFlip(),
                Join(Rect(Num(0), Num(0),
-                         Num(0), Num(0)),
-                    Rect(Num(2), Num(3),
+                         Num(1), Num(1)),
+                    Rect(Num(2), Num(2),
                          Num(3), Num(3)))),
-         ["_"*(B_W-4) + "___#",
-          "_"*(B_W-4) + "____",
-          "_"*(B_W-4) + "____",
+         ["_"*(B_W-4) + "__##",
+          "_"*(B_W-4) + "__##",
+          "_"*(B_W-4) + "##__",
           "_"*(B_W-4) + "##__"]),
         (Apply(HFlip(),
                Apply(HFlip(), 
                      Join(Rect(Num(0), Num(0),
-                               Num(0), Num(0)),
-                          Rect(Num(2), Num(3),
+                               Num(1), Num(1)),
+                          Rect(Num(2), Num(2),
                                Num(3), Num(3))))),
-        ["#___",
-         "____",
-         "____",
+        ["##__",
+         "##__",
+         "__##",
          "__##"]),
 
         # Translate
@@ -1054,40 +1055,66 @@ def test_eval_bitmap():
     print(" [+] passed test_eval_bitmap")
         
 
+def test_sprite():
+    tests = [
+        ([["2___",
+           "2___",
+           "____",
+           "____"],
+        ],
+         Rect(Num(0), Num(0),
+              Num(1), Num(1), Num(2)),
+         ["22__",
+          "22__",
+          "____",
+          "____"]),
+    ]
+    for sprites, expr, correct_semantics in tests:
+        env = {'z': [],
+               'sprites': [util.img_to_tensor(s, w=B_W, h=B_H) for s in sprites]}
+        out = expr.eval(env)
+        expected = util.img_to_tensor(correct_semantics, w=B_W, h=B_H)
+        assert T.equal(out, expected), \
+            f"failed test:\n" \
+            f" expr=\n{expr}\n" \
+            f" expected=\n{expected}\n" \
+            f" out=\n{out}"
+    print(" [+] passed test_sprite")
+
 def test_eval_color():
     tests = [
         (Rect(Num(0), Num(0),
-              Num(0), Num(1), 2),
-         ["2___",
-          "2___",
+              Num(1), Num(1), Num(2)),
+         ["22__",
+          "22__",
           "____",
           "____"]),
         (Line(Num(1), Num(0),
-              Num(3), Num(2), 3),
+              Num(3), Num(2), Num(3)),
          ["_3__",
           "__3_",
           "___3",
           "____"]),
         (Line(Num(1), Num(0),
-              Num(3), Num(0), 2),
+              Num(3), Num(0), Num(2)),
          ["_222",
           "____",
           "____",
           "____"]),
-        (Join(Join(Point(Num(0), Num(0), 2),
-                   Point(Num(1), Num(3), 3)),
-              Join(Point(Num(2), Num(0), 7),
-                   Point(Num(3), Num(1), 9))),
+        (Join(Join(Point(Num(0), Num(0), Num(2)),
+                   Point(Num(1), Num(3), Num(3))),
+              Join(Point(Num(2), Num(0), Num(7)),
+                   Point(Num(3), Num(1), Num(9)))),
          ["2_7_",
           "___9",
           "____",
           "_3__"]),
         (Join(Rect(Num(0), Num(0),
-                   Num(0), Num(0), 1),
+                   Num(1), Num(1), Num(1)),
               Rect(Num(2), Num(2),
-                   Num(3), Num(3), 6)),
-         ["1___",
-          "____",
+                   Num(3), Num(3), Num(6))),
+         ["11__",
+          "11__",
           "__66",
           "__66"]),
     ]
@@ -1122,4 +1149,5 @@ if __name__ == '__main__':
     test_eval()
     test_eval_bitmap()
     test_eval_color()
+    test_sprite()
     # test_zs()
