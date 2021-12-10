@@ -99,7 +99,7 @@ def classify(bmp):
     if is_line(bmp): return 'Line'
     if is_rect(bmp): return 'Rect'
     if is_empty(bmp): return 'Empty'
-    return 'Shape'
+    return 'Sprite'
 
 def test_classify(W, H):
     tests = [

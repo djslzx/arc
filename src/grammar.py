@@ -3,7 +3,7 @@ import nltk
 import torch as T
 import torch.nn.functional as F
 import random
-from ant import ant
+import ant
 from math import log2
 
 # bitmap size constants
@@ -61,10 +61,16 @@ def seed_zs():
     return (T.rand(LIB_SIZE) * (Z_HI - Z_LO) - Z_LO).long()
 
 def seed_sprites():
-    return T.stack([ant(0, 0, 
-                        w=random.randint(2, B_W-1), h=random.randint(2, B_H-1), 
-                        W=B_W, H=B_H)
-                    for _ in range(LIB_SIZE)])
+    sprites = []
+    while len(sprites) < LIB_SIZE:
+        sprite = ant.ant(x0=0, y0=0, 
+                         w=random.randint(2, B_W-1), 
+                         h=random.randint(2, B_H-1), 
+                         W=B_W, H=B_H)
+        if ant.classify(sprite) == 'Sprite':
+            sprites.append(sprite)
+        
+    return T.stack(sprites)
 
 
 class Empty(Expr):
