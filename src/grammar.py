@@ -556,7 +556,6 @@ class Eval(Visitor):
         n, f = n.accept(self), f.accept(self)
         bmps = []
         def g(bmp):
-            bmps.append(bmp)
             for i in range(n):
                 bmp = f(bmp)
                 bmps.append(bmp)
@@ -565,7 +564,7 @@ class Eval(Visitor):
 
     def visit_Apply(self, f, bmp): 
         f, bmp = f.accept(self), bmp.accept(self)
-        return f(bmp)
+        return Eval.overlay(f(bmp), bmp)
 
 
 class Size(Visitor):
@@ -661,7 +660,7 @@ class Print(Visitor):
     def visit_Sprite(self, i, color):
         return f'S{i}[{color.accept(self)}]'
 
-    def visit_Seq(self, bmps): return '; '.join([bmp.accept(self) for bmp in bmps])
+    def visit_Seq(self, bmps): return '[' + ' '.join([bmp.accept(self) for bmp in bmps]) + ' ]'
 
     def visit_Join(self, bmp1, bmp2): return f'[{bmp1.accept(self)} {bmp2.accept(self)}]'
 
@@ -976,10 +975,10 @@ def test_eval_bitmap():
         (Apply(HFlip(), 
                Line(Num(0), Num(0),
                     Num(3), Num(3))),
-         ["_"*(B_W-4) + "___#",
-          "_"*(B_W-4) + "__#_",
-          "_"*(B_W-4) + "_#__",
-          "_"*(B_W-4) + "#___"]),
+         ["#___" + "_"*(B_W-8) + "___#",
+          "_#__" + "_"*(B_W-8) + "__#_",
+          "__#_" + "_"*(B_W-8) + "_#__",
+          "___#" + "_"*(B_W-8) + "#___"]),
         (Join(Join(Point(Num(0), Num(0)),
                    Point(Num(1), Num(3))),
               Join(Point(Num(2), Num(0)),
@@ -993,7 +992,11 @@ def test_eval_bitmap():
                          Point(Num(1), Num(3))),
                     Join(Point(Num(2), Num(0)),
                          Point(Num(3), Num(1))))),
-         ["____"] * (B_H - 4) +
+         ["#_#_",
+          "___#",
+          "____",
+          "_#__"] +
+         ["____"] * (B_H - 8) +
          ["_#__",
           "____",
           "___#",
@@ -1013,20 +1016,10 @@ def test_eval_bitmap():
                          Num(1), Num(1)),
                     Rect(Num(2), Num(2),
                          Num(3), Num(3)))),
-         ["_"*(B_W-4) + "__##",
-          "_"*(B_W-4) + "__##",
-          "_"*(B_W-4) + "##__",
-          "_"*(B_W-4) + "##__"]),
-        (Apply(HFlip(),
-               Apply(HFlip(), 
-                     Join(Rect(Num(0), Num(0),
-                               Num(1), Num(1)),
-                          Rect(Num(2), Num(2),
-                               Num(3), Num(3))))),
-        ["##__",
-         "##__",
-         "__##",
-         "__##"]),
+         ["##__" + "_"*(B_W-8) + "__##",
+          "##__" + "_"*(B_W-8) + "__##",
+          "__##" + "_"*(B_W-8) + "##__",
+          "__##" + "_"*(B_W-8) + "##__"]),
 
         # Translate
         (Apply(Translate(Num(0), Num(0)),
@@ -1036,64 +1029,68 @@ def test_eval_bitmap():
           "_#__",
           "__#_",
           "___#"]),
-        (Apply(Translate(Num(1), Num(0)),
+        (Apply(Compose(Translate(Num(1), Num(0)), Recolor(Num(2))),
                Line(Num(0), Num(0),
                     Num(3), Num(3))),
-         ["_#___",
-          "__#__",
-          "___#_",
-          "____#"]),
-        (Apply(Translate(Num(-1), Num(0)),
+         ["12___",
+          "_12__",
+          "__12_",
+          "___12"]),
+        (Apply(Compose(Translate(Num(-1), Num(0)), Recolor(Num(2))),
                Line(Num(0), Num(0),
                     Num(3), Num(3))),
-         ["___",
-          "#__",
-          "_#_",
-          "__#"]),
-        (Apply(Translate(Num(0), Num(1)),
+         ["1____",
+          "21___",
+          "_21__",
+          "__21_"]),
+        (Apply(Compose(Translate(Num(0), Num(1)), Recolor(Num(2))),
                Line(Num(0), Num(0),
                     Num(3), Num(3))),
-         ["____",
-          "#___",
-          "_#__",
-          "__#_",
-          "___#"]),
-        (Apply(Translate(Num(0), Num(-1)),
+         ["1___",
+          "21__",
+          "_21_",
+          "__21",
+          "___2"]),
+        (Apply(Compose(Translate(Num(0), Num(-1)), Recolor(Num(2))),
                Line(Num(0), Num(0),
                     Num(3), Num(3))),
-         ["_#__",
-          "__#_",
-          "___#"]),
-        (Apply(Translate(Num(-1), Num(-1)),
+         ["12___",
+          "_12__",
+          "__12_",
+          "___1_"]),
+        (Apply(Compose(Translate(Num(-1), Num(-1)), Recolor(Num(2))),
                Line(Num(0), Num(0),
                     Num(3), Num(3))),
-         ["#__",
-          "_#_",
-          "__#"]),
-        (Apply(Translate(Num(1), Num(1)),
+         ["2___",
+          "_2__",
+          "__2_",
+          "___1"]),
+        (Apply(Compose(Translate(Num(1), Num(1)), Recolor(Num(2))),
                Line(Num(0), Num(0),
                     Num(3), Num(3))),
-         ["_____",
-          "_#___",
-          "__#__",
-          "___#_",
-          "____#"]),
-        (Apply(Translate(Num(2), Num(3)),
+         ["1____",
+          "_2___",
+          "__2__",
+          "___2_",
+          "____2"]),
+        (Apply(Compose(Translate(Num(2), Num(3)), Recolor(Num(2))),
                Line(Num(0), Num(0),
                     Num(3), Num(3))),
-         ["______",
-          "______",
-          "______",
+         ["1_____",
+          "_1____",
+          "__1___",
+          "__21__",
+          "___2__",
+          "____2_",
+          "_____2"]),
+        (Apply(Repeat(Translate(Num(1), Num(1)), Num(5)),
+               Point(Num(0), Num(0))),
+         ["#_____",
+          "_#____",
           "__#___",
           "___#__",
           "____#_",
           "_____#"]),
-        (Apply(Repeat(Translate(Num(1), Num(1)), Num(3)),
-               Point(Num(0), Num(0))),
-         ["#___",
-          "_#__",
-          "__#_",
-          "___#"]),
         (Apply(Repeat(Translate(Num(2), Num(0)), Num(2)),
                Line(Num(0), Num(0),
                     Num(3), Num(3))),
@@ -1158,6 +1155,34 @@ def test_sprite():
          Sprite(1),
          ["11",
           "_1"]),
+        ([
+            ["111",
+             "__1",
+             "_1_"]
+        ],
+         Apply(Compose(HFlip(),
+                       Recolor(Num(2))),
+               Sprite(0)),
+            ["111" + '_' * (B_W - 6) + "222",
+             "__1" + '_' * (B_W - 6) + "2__",
+             "_1_" + '_' * (B_W - 6) + "_2_"]),
+        ([
+            ["111",
+             "__1",
+             "_1_"]
+        ],
+         Apply(Compose(VFlip(),
+                       Recolor(Num(2))),
+               Sprite(0)),
+         ["111",
+          "__1",
+          "_1_"] 
+         +
+         ["___"] * (B_H - 6)
+         +
+         ["_2_",
+          "__2",
+          "222"]),        
     ]
     for sprites, expr, correct_semantics in tests:
         env = {'z': [],
