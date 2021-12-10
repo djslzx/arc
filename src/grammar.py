@@ -316,6 +316,27 @@ class Translate(Expr):
         self.dy = dy
 
     def accept(self, v): return v.visit_Translate(self.dx, self.dy)
+
+
+class Recolor(Expr):
+    in_types = []
+    out_type = 'transform'
+    
+    def __init__(self, c): self.c = c
+    
+    def accept(self, v): return v.visit_Recolor(self.c)
+
+
+class Compose(Expr):
+    in_types = ['transform', 'transform']
+    out_type = 'transform'
+    
+    def __init__(self, f, g): 
+        self.f = f
+        self.g = g
+
+    def accept(self, v): return v.visit_Compose(self.f, self.g)
+
         
 class Visitor:
 
@@ -362,6 +383,10 @@ class Visitor:
     def visit_VFlip(self): self.fail('VFlip')
 
     def visit_Translate(self, bmp, dx, dy): self.fail('Translate')
+
+    def visit_Recolor(self, c): self.fail('Recolor')
+
+    def visit_Compose(self, f, g): self.fail('Compose')
 
     def visit_Apply(self, f, bmp): self.fail('Apply')
 
@@ -515,12 +540,27 @@ class Eval(Visitor):
         
         return lambda bmp: F.pad(bmp[r_lo:r_hi, c_lo:c_hi], (a, b, c, d))
 
+    def visit_Recolor(self, c): 
+        def index(bmp, p):
+            x, y = p
+            return bmp[y][x]
+
+        c = c.accept(self)
+        return lambda bmp: Eval.make_bitmap(lambda p: c if index(bmp, p) > 0 else 0)
+
+    def visit_Compose(self, f, g):
+        f, g = f.accept(self), g.accept(self)
+        return lambda bmp: f(g(bmp))
+
     def visit_Repeat(self, f, n): 
         n, f = n.accept(self), f.accept(self)
+        bmps = []
         def g(bmp):
+            bmps.append(bmp)
             for i in range(n):
                 bmp = f(bmp)
-            return bmp
+                bmps.append(bmp)
+            return Eval.overlay(*bmps)
         return g
 
     def visit_Apply(self, f, bmp): 
@@ -576,6 +616,10 @@ class Size(Visitor):
 
     def visit_Translate(self, x, y): return x.accept(self) + y.accept(self) + 1
 
+    def visit_Recolor(self, c): return c.accept(self) + 1
+
+    def visit_Compose(self, f, g): return f.accept(self) + g.accept(self) + 1
+
     def visit_Apply(self, f, bmp): return f.accept(self) + bmp.accept(self) + 1
 
     def visit_Repeat(self, f, n): return f.accept(self) + n.accept(self) + 1
@@ -628,6 +672,10 @@ class Print(Visitor):
     def visit_VFlip(self): return 'v-flip'
 
     def visit_Translate(self, x, y): return f'(translate {x.accept(self)} {y.accept(self)})'
+
+    def visit_Recolor(self, c): return f'(recolor {c.accept(self)})'
+
+    def visit_Compose(self, f, g): return f'(compose {f.accept(self)} {g.accept(self)})'
     
     def visit_Apply(self, f, bmp): return f'({f.accept(self)} {bmp.accept(self)})'
 
@@ -678,6 +726,10 @@ def deserialize(seq):
             return [VFlip()] + t
         if h =='T':
             return [Translate(t[0], t[1])] + t[2:]
+        if h == 'RC':
+            return [Recolor(t[0])] + t[1:]
+        if h == 'C':
+            return [Compose(t[0], t[1])] + t[2:]
         if h =='A':
             return [Apply(t[0], t[1])] + t[2:]
         if h =='R':
@@ -745,6 +797,10 @@ class Serialize(Visitor):
     def visit_VFlip(self): return ['V']
 
     def visit_Translate(self, x, y): return ['T'] + x.accept(self) + y.accept(self)
+
+    def visit_Recolor(self, c): return ['RC'] + c.accept(self)
+
+    def visit_Compose(self, f, g): return ['C'] + f.accept(self) + g.accept(self)
     
     def visit_Apply(self, f, bmp): return ['A'] + f.accept(self) + bmp.accept(self)
 
@@ -798,6 +854,10 @@ class Zs(Visitor):
     def visit_VFlip(self): return set()
 
     def visit_Translate(self, x, y): return x.accept(self) | y.accept(self)
+
+    def visit_Recolor(self, c): return c.accept(self)
+
+    def visit_Compose(self, f, g): return f.accept(self) | g.accept(self)
 
     def visit_Apply(self, f, bmp): return f.accept(self) | bmp.accept(self)
 
@@ -1028,23 +1088,30 @@ def test_eval_bitmap():
           "___#__",
           "____#_",
           "_____#"]),
-        (Apply(Repeat(Translate(Num(1), Num(0)), Num(3)),
+        (Apply(Repeat(Translate(Num(1), Num(1)), Num(3)),
+               Point(Num(0), Num(0))),
+         ["#___",
+          "_#__",
+          "__#_",
+          "___#"]),
+        (Apply(Repeat(Translate(Num(2), Num(0)), Num(2)),
                Line(Num(0), Num(0),
                     Num(3), Num(3))),
-         ["___#",
-          "____#",
-          "_____#",
-          "______#"]),
-        (Apply(Repeat(Translate(Num(1), Num(0)), Num(2)),
+         ["#_#_#___",
+          "_#_#_#__",
+          "__#_#_#_",
+          "___#_#_#"]),
+        (Apply(Repeat(Compose(Translate(Num(2), Num(0)),
+                              Recolor(Num(2))),
+                      Num(2)),
                Line(Num(0), Num(0),
                     Num(3), Num(3))),
-         ["__#",
-          "___#",
-          "____#",
-          "_____#"]),
+         ["1_2_2___",
+          "_1_2_2__",
+          "__1_2_2_",
+          "___1_2_2"]),
         (Apply(Intersect(Rect(Num(0), Num(0), Num(3), Num(3))),
-               Line(Num(0), Num(0), 
-                    Num(3), Num(3))),
+               Line(Num(0), Num(0), Num(3), Num(3))),
          ["#___",
           "_#__",
           "__#_",
