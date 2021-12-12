@@ -33,6 +33,8 @@ def chunk_pairs(l, k, n):
 
 def img_to_tensor(lines, w=-1, h=-1):
     """Converts a list of strings into a float tensor"""
+    if not lines: return T.Tensor([])
+
     lines_l = len(lines)
     lines_w = max(len(line) for line in lines)
 
@@ -52,6 +54,18 @@ def img_to_tensor(lines, w=-1, h=-1):
 
     return T.tensor([[cell(x, y) for x in range(w)] 
                      for y in range(h)]).float()
+
+def tensor_to_pts(tensor):
+    return [(x,y) for x,y in tensor.nonzero().tolist()]
+
+def unzip(l):
+    return tuple(list(x) for x in zip(*l))
+
+
+def make_bitmap(f, W, H):
+    return T.tensor([[f((x, y))
+                      for x in range(W)]
+                     for y in range(H)]).float()
 
 if __name__ == '__main__':
     print(img_to_tensor(['_#_',
