@@ -226,14 +226,15 @@ class Rect(Expr):
 
 
 class Sprite(Expr):
-    in_types = ['int', 'int']
+    in_types = ['int', 'int', 'int', 'int']
     out_type = 'bitmap'
 
-    def __init__(self, i, color=Num(1)):
+    def __init__(self, i, x=Num(0), y=Num(0)):
         self.i = i
-        self.color = color
+        self.x = x
+        self.y = y
 
-    def accept(self, v): return v.visit_Sprite(self.i, self.color)
+    def accept(self, v): return v.visit_Sprite(self.i, self.x, self.y)
 
 
 class Seq(Expr):
@@ -319,7 +320,7 @@ class Translate(Expr):
 
 
 class Recolor(Expr):
-    in_types = []
+    in_types = ['int']
     out_type = 'transform'
     
     def __init__(self, c): self.c = c
@@ -370,7 +371,7 @@ class Visitor:
 
     def visit_Rect(self, x1, y1, x2, y2, color): self.fail('Rect')
 
-    def visit_Sprite(self, i, color): self.fail('Sprite')
+    def visit_Sprite(self, i, x, y): self.fail('Sprite')
 
     def visit_Join(self, bmp1, bmp2): self.fail('Join')
 
@@ -493,9 +494,9 @@ class Eval(Visitor):
         assert x2 - x1 >= 1 and y2 - y1 >= 1
         return Eval.make_bitmap(lambda p: (x1 <= p[0] <= x2 and y1 <= p[1] <= y2) * c)
 
-    def visit_Sprite(self, i, color):
-        c = color.accept(self)
-        return self.env['sprites'][i] * c
+    def visit_Sprite(self, i, x, y):
+        x, y = x.accept(self), y.accept(self)
+        return Eval.translate(self.env['sprites'][i], x, y)
 
     def visit_Seq(self, bmps):
         bmps = [bmp.accept(self) for bmp in bmps]
@@ -525,8 +526,10 @@ class Eval(Visitor):
     def visit_VFlip(self):
         return lambda bmp: bmp.flip(0)
 
-    def visit_Translate(self, dx, dy): 
-        dx, dy = dx.eval({}), dy.eval({})
+    @staticmethod
+    def translate(bmp, dx, dy):
+        assert isinstance(bmp, T.Tensor) 
+        assert isinstance(dx, int) and isinstance(dy, int)
 
         def slices(delta):
             if delta == 0:  return None, None
@@ -538,7 +541,11 @@ class Eval(Visitor):
         c_lo, c_hi = slices(dx)
         r_lo, r_hi = slices(dy)
         
-        return lambda bmp: F.pad(bmp[r_lo:r_hi, c_lo:c_hi], (a, b, c, d))
+        return F.pad(bmp[r_lo:r_hi, c_lo:c_hi], (a, b, c, d))
+
+    def visit_Translate(self, dx, dy): 
+        dx, dy = dx.eval({}), dy.eval({})
+        return lambda bmp: Eval.translate(bmp, dx, dy)
 
     def visit_Recolor(self, c): 
         def index(bmp, p):
@@ -600,8 +607,8 @@ class Size(Visitor):
     def visit_Rect(self, x1, y1, x2, y2, color):
         return x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self) + color.accept(self) + 1
 
-    def visit_Sprite(self, i, color):
-        return color.accept(self) + 1
+    def visit_Sprite(self, i, x, y):
+        return x.accept(self) + y.accept(self) + 1
 
     def visit_Stack(self, bmps): return sum(bmp.accept(self) for bmp in bmps) + 1
 
@@ -657,8 +664,8 @@ class Print(Visitor):
     def visit_Rect(self, x1, y1, x2, y2, color):
         return f'(R[{color.accept(self)}] {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
 
-    def visit_Sprite(self, i, color):
-        return f'S{i}[{color.accept(self)}]'
+    def visit_Sprite(self, i, x, y):
+        return f'(S{i} {x.accept(self)} {y.accept(self)})'
 
     def visit_Seq(self, bmps): return '[' + ' '.join([bmp.accept(self) for bmp in bmps]) + ' ]'
 
@@ -672,7 +679,7 @@ class Print(Visitor):
 
     def visit_Translate(self, x, y): return f'(translate {x.accept(self)} {y.accept(self)})'
 
-    def visit_Recolor(self, c): return f'(recolor {c.accept(self)})'
+    def visit_Recolor(self, c): return f'recolor[{c.accept(self)}]'
 
     def visit_Compose(self, f, g): return f'(compose {f.accept(self)} {g.accept(self)})'
     
@@ -698,7 +705,7 @@ def deserialize(seq):
             if h.startswith('z_'): 
                 return [Z(int(h[2:]))] + t
             if h.startswith('S_'):
-                return [Sprite(int(h[2:]), color=t[0])] + t[1:]
+                return [Sprite(int(h[2:]), t[0], t[1])] + t[2:]
         if h == '~':
             return [Not(t[0])] + t[1:]
         if h == '+':
@@ -777,8 +784,8 @@ class Serialize(Visitor):
     def visit_Rect(self, x1, y1, x2, y2, color):
         return ['R'] + color.accept(self) + x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self)
 
-    def visit_Sprite(self, i, color):
-        return [f'S_{i}'] + color.accept(self)
+    def visit_Sprite(self, i, x, y):
+        return [f'S_{i}'] + x.accept(self) + y.accept(self)
 
     def visit_Seq(self, bmps): 
         l = ['{'];
@@ -839,8 +846,8 @@ class Zs(Visitor):
     def visit_Rect(self, x1, y1, x2, y2, color):
         return x1.accept(self) | y1.accept(self) | x2.accept(self) | y2.accept(self) | color.accept(self)
 
-    def visit_Sprite(self, i, color):
-        return color.accept(self)
+    def visit_Sprite(self, i, x, y):
+        return x.accept(self) | y.accept(self)
 
     def visit_Seq(self, bmps): return set.union(bmp.accept(self) for bmp in bmps)
 
