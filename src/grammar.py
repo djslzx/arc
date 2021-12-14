@@ -3,16 +3,16 @@ import nltk
 import torch as T
 import torch.nn.functional as F
 import random
-import ant
+from ant import make_sprite
 from math import log2
 
 # bitmap size constants
-B_W = 10
-B_H = 10
+B_W = 24
+B_H = 24
 
 LIB_SIZE = 10
 Z_LO = 0  # min poss value in z_n
-Z_HI = max(B_W, B_H) - 1  # max poss value in z_n
+Z_HI = max(B_W, B_H)-1  # max poss value in z_n
 
 class Grammar:
     def __init__(self, ops, consts):
@@ -61,16 +61,10 @@ def seed_zs():
     return (T.rand(LIB_SIZE) * (Z_HI - Z_LO) - Z_LO).long()
 
 def seed_sprites():
-    sprites = []
-    while len(sprites) < LIB_SIZE:
-        sprite = ant.ant(x0=0, y0=0, 
-                         w=random.randint(2, B_W-1), 
-                         h=random.randint(2, B_H-1), 
-                         W=B_W, H=B_H)
-        if ant.classify(sprite) == 'Sprite':
-            sprites.append(sprite)
-        
-    return T.stack(sprites)
+    return T.stack([make_sprite(w=random.randrange(2, B_W/3), 
+                                h=random.randrange(2, B_H/3), 
+                                W=B_W, H=B_H)
+                    for _ in range(LIB_SIZE)])
 
 
 class Empty(Expr):
@@ -226,7 +220,7 @@ class Rect(Expr):
 
 
 class Sprite(Expr):
-    in_types = ['int', 'int', 'int', 'int']
+    in_types = ['int', 'int', 'int']
     out_type = 'bitmap'
 
     def __init__(self, i, x=Num(0), y=Num(0)):
@@ -544,7 +538,7 @@ class Eval(Visitor):
         return F.pad(bmp[r_lo:r_hi, c_lo:c_hi], (a, b, c, d))
 
     def visit_Translate(self, dx, dy): 
-        dx, dy = dx.eval({}), dy.eval({})
+        dx, dy = dx.accept(self), dy.accept(self)
         return lambda bmp: Eval.translate(bmp, dx, dy)
 
     def visit_Recolor(self, c): 
@@ -667,7 +661,7 @@ class Print(Visitor):
     def visit_Sprite(self, i, x, y):
         return f'(S{i} {x.accept(self)} {y.accept(self)})'
 
-    def visit_Seq(self, bmps): return '[' + ' '.join([bmp.accept(self) for bmp in bmps]) + ' ]'
+    def visit_Seq(self, bmps): return '[' + ' '.join([bmp.accept(self) for bmp in bmps]) + ']'
 
     def visit_Join(self, bmp1, bmp2): return f'[{bmp1.accept(self)} {bmp2.accept(self)}]'
 
@@ -679,7 +673,7 @@ class Print(Visitor):
 
     def visit_Translate(self, x, y): return f'(translate {x.accept(self)} {y.accept(self)})'
 
-    def visit_Recolor(self, c): return f'recolor[{c.accept(self)}]'
+    def visit_Recolor(self, c): return f'[{c.accept(self)}]'
 
     def visit_Compose(self, f, g): return f'(compose {f.accept(self)} {g.accept(self)})'
     

@@ -67,6 +67,17 @@ def make_bitmap(f, W, H):
                       for x in range(W)]
                      for y in range(H)]).float()
 
+def split(l, pred):
+    '''
+    Split l into two lists `a` and `b`, where 
+    all elts of `a` satisfy `pred` and all elts of `b` do not
+    '''
+    sat, unsat = [], []
+    for x in l:
+        if pred(x): sat.append(x)
+        else:    unsat.append(x)
+    return sat, unsat
+
 if __name__ == '__main__':
     print(img_to_tensor(['_#_',
                          '#_#',

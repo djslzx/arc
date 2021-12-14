@@ -18,7 +18,7 @@ def shift(pts, x0, y0):
     Shift pts so that min_x {pts} = x0, min_y {pts} = y0
     '''
     if not pts: return pts
-    xs, ys = util.util.unzip(pts)
+    xs, ys = util.unzip(pts)
     min_x = min(xs)
     min_y = min(ys)
     if min_x < x0:
