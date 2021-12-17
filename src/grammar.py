@@ -24,18 +24,6 @@ class Visited:
     def accept(self, visitor):
         assert False, f"`accept` not implemented for {type(self).__name__}"
 
-    def eval(self, env={}): return self.accept(Eval(env))
-
-    def zs(self): return self.accept(Zs())
-
-    def serialize(self): return self.accept(Serialize())
-
-    def deserialize(self): return deserialize(self)
-
-    def __len__(self): return self.accept(Size())
-
-    def __str__(self): return self.accept(Print())
-
 
 class Expr(Visited):
     def accept(self, visitor): assert False, f"not implemented for {type(self).__name__}"
@@ -51,6 +39,16 @@ class Expr(Visited):
     def __gt__(self, other): return str(self) > str(other)
 
     def __lt__(self, other): return str(self) < str(other)
+
+    def eval(self, env={}): return self.accept(Eval(env))
+
+    def zs(self): return self.accept(Zs())
+
+    def serialize(self): return self.accept(Serialize())
+
+    def __len__(self): return self.accept(Size())
+
+    def __str__(self): return self.accept(Print())
 
     def dist_to(self, other): 
         '''Edit distance to transform self into other'''
@@ -650,7 +648,8 @@ class Print(Visitor):
 
     def visit_If(self, b, x, y): return f'(if {b.accept(self)} {x.accept(self)} {y.accept(self)})'
 
-    def visit_Point(self, x, y, color): return f'(P[{color}] {x.accept(self)} {y.accept(self)})'
+    def visit_Point(self, x, y, color): 
+        return f'(P[{color.accept(self)}] {x.accept(self)} {y.accept(self)})'
 
     def visit_Line(self, x1, y1, x2, y2, color):
         return f'(L[{color.accept(self)}] {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
@@ -661,9 +660,9 @@ class Print(Visitor):
     def visit_Sprite(self, i, x, y):
         return f'(S{i} {x.accept(self)} {y.accept(self)})'
 
-    def visit_Seq(self, bmps): return '[' + ' '.join([bmp.accept(self) for bmp in bmps]) + ']'
+    def visit_Seq(self, bmps): return '(seq ' + ' '.join([bmp.accept(self) for bmp in bmps]) + ')'
 
-    def visit_Join(self, bmp1, bmp2): return f'[{bmp1.accept(self)} {bmp2.accept(self)}]'
+    def visit_Join(self, bmp1, bmp2): return f'(join {bmp1.accept(self)} {bmp2.accept(self)})'
 
     def visit_Intersect(self, bmp): return f'(intersect {bmp.accept(self)})'
 
@@ -682,13 +681,13 @@ class Print(Visitor):
     def visit_Repeat(self, f, n): return f'(repeat {f.accept(self)} {n.accept(self)})'
 
 
-def deserialize(seq):
+def deserialize(tokens):
     '''
     Deserialize a serialized seq into a program.
     '''
-    def D(seq):
-        if not seq: return []
-        h, t = seq[0], D(seq[1:])
+    def D(tokens):
+        if not tokens: return []
+        h, t = tokens[0], D(tokens[1:])
         if h == '': 
             return [Empty()] + t
         if isinstance(h, bool) and h == False: 
@@ -736,13 +735,14 @@ def deserialize(seq):
             return [Apply(t[0], t[1])] + t[2:]
         if h == '{':
             i = t.index('}')
-            print(t[:i])
             return [Seq(*t[:i])] + t[i+1:]
+        if h == '}':
+            return tokens
         else:
-            return seq
+            assert False, f'Failed to classify token: {h} of type {type(h)}'
 
-    tokens = D(seq)[0]
-    return ' '.join(tokens)
+    expr = D(tokens)[0]
+    return expr
 
 
 class Serialize(Visitor):
@@ -770,7 +770,7 @@ class Serialize(Visitor):
 
     def visit_If(self, b, x, y): return ['?'] + b.accept(self) + x.accept(self) + y.accept(self)
 
-    def visit_Point(self, x, y, color): return ['P', color] + x.accept(self) + y.accept(self)
+    def visit_Point(self, x, y, color): return ['P'] + color.accept(self) + x.accept(self) + y.accept(self)
 
     def visit_Line(self, x1, y1, x2, y2, color):
         return ['L'] + color.accept(self) + x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self)
@@ -1259,6 +1259,9 @@ def test_zs():
         out = expr.zs()
         assert out == ans, f"test_zs failed: expected={ans}, actual={out}"
     print(" [+] passed test_zs")
+
+def test_serialize():
+    pass
 
 
 if __name__ == '__main__':

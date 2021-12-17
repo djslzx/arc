@@ -106,6 +106,36 @@ def simplify(sprites, env):
             keep.append(sprite)
     return keep
 
+def save_cmps(params, envs, pool, a_exprs):
+    print('Saving expr components...')
+    data = {'meta': params,
+            'envs': envs,
+            'pool': pool,
+            'a_exprs': a_exprs}
+    with open(CMP_PATH, 'wb') as f:
+        pickle.dump(data, f)
+
+def load_cmps():
+    print('Loading expr components...')
+    with open(CMP_PATH, 'rb') as f:
+        return pickle.load(f)
+
+def save_exprs(exprs):
+    print(f'Saving exprs...')
+    serialized = [expr.serialize() for expr in exprs]
+    with open('../data/exprs.dat', 'wb') as f:
+        pickle.dump(serialized, f)
+
+def load_exprs():
+    print(f'Loading exprs...')
+    with open('../data/exprs.dat', 'rb') as f:
+        return pickle.load(f)
+
+def viz_sprites(envs):
+    k = floor(sqrt(LIB_SIZE))
+    for env in envs:
+        viz_grid(env['sprites'][:k**2], k, txt=f'sprites[:{k**2}]')
+
 def test_simplify():
     tests = [
         ([
@@ -148,35 +178,6 @@ def test_simplify():
         assert out == ans, f"Failed test: expected {ans}, got {out}"
     print("[+] passed test_simplify")
 
-def save_exprs(exprs):
-    print(f'Saving exprs...')
-    with open('../data/exprs.dat', 'wb') as f:
-        pickle.dump(exprs, f)
-
-def load_exprs():
-    print(f'Loading exprs...')
-    with open('../data/exprs.dat', 'rb') as f:
-        return pickle.load(f)
-
-def save_cmps(params, envs, pool, a_exprs):
-    print('Saving expr components...')
-    data = {'meta': params,
-            'envs': envs,
-            'pool': pool,
-            'a_exprs': a_exprs}
-    with open(CMP_PATH, 'wb') as f:
-        pickle.dump(data, f)
-
-def load_cmps():
-    print('Loading expr components...')
-    with open(CMP_PATH, 'rb') as f:
-        return pickle.load(f)
-
-def viz_sprites(envs):
-    k = floor(sqrt(LIB_SIZE))
-    for env in envs:
-        viz_grid(env['sprites'][:k**2], k, txt=f'sprites[:{k**2}]')
-
 
 if __name__ == '__main__':
     n_exprs = 1000
@@ -205,13 +206,19 @@ if __name__ == '__main__':
     #           pool, 
     #           a_exprs)
 
-    # Load saved pool
-    cmps = load_cmps()
-    envs, pool, a_exprs = cmps['envs'], cmps['pool'], cmps['a_exprs']
-    meta = cmps['meta']
-    n_envs, a_bound, pool_size, entities = meta['n_envs'], meta['a_bound'], meta['pool_size'], meta['entities']
+    # # Load saved pool
+    # cmps = load_cmps()
+    # envs, pool, a_exprs = cmps['envs'], cmps['pool'], cmps['a_exprs']
+    # meta = cmps['meta']
+    # n_envs, a_bound, pool_size, entities = meta['n_envs'], meta['a_bound'], meta['pool_size'], meta['entities']
 
-    # Generate and save exprs
-    gen = gen_random_exprs(pool, a_exprs, envs, n_exprs, n_objs)
-    save_exprs(list(gen))
+    # # Generate and save exprs
+    # gen = gen_random_exprs(pool, a_exprs, envs, n_exprs, n_objs)
+    # save_exprs(list(gen))
 
+    # Load saved exprs
+    exprs = load_exprs()
+    for tokens in exprs:
+        print('tokens:', tokens)
+        print('expr:', deserialize(tokens))
+        print()
