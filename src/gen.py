@@ -3,7 +3,7 @@ Make large programs as training data
 """
 
 import pickle
-from math import floor, ceil, log2
+from math import floor, ceil, log2, sqrt
 import random as R
 import numpy as np
 
@@ -11,29 +11,32 @@ from viz import viz, viz_grid, viz_mult
 from grammar import *
 from bottom_up import bottom_up_generator, eval
 
-def gen_shape_pool(entities, aexprs, envs, n):
-    zexprs, cexprs = util.split(aexprs, lambda a: a.zs())
+CMP_PATH = '../data/cmps.dat'
+
+def gen_shape_pool(entities, a_exprs, envs, n):
+    z_exprs, c_exprs = util.split(a_exprs, lambda a: a.zs())
     pool = {}
     for entity in entities:
-        n_misses = 0
+        n_tries = 0
+        n_hits = 0
         pool[entity] = []
         while len(pool[entity]) < n:
             color = rand_color()
             k = R.randrange(1, len(entity.in_types)) # num z's to use
-            args = ([R.choice(zexprs) for _ in entity.in_types[:k]] + 
-                    [R.choice(cexprs) for _ in entity.in_types[k:]])
+            args = ([R.choice(z_exprs) for _ in entity.in_types[:k]] + 
+                    [R.choice(c_exprs) for _ in entity.in_types[k:]])
             R.shuffle(args)
             e = entity(*args[:-1], color)
             outs = eval(e, envs)
             if all(out is not None for out in outs): 
+                n_hits += 1
                 pool[entity].append(e)
-            else:
-                n_misses += 1    
-            print(f'{entity} misses:', n_misses, end='\r')
+            n_tries += 1    
+            print(f'{entity} hits: {n_hits}/{n_tries}', end='\r')
         print()
     return pool
 
-def gen_random_expr(pool, aexprs, envs, n_objs):
+def gen_random_expr(pool, a_exprs, envs, n_objs):
     objs = []
     for _ in range(n_objs):
         n = R.randint(0, 10)
@@ -43,33 +46,31 @@ def gen_random_expr(pool, aexprs, envs, n_objs):
             else:       entity = Rect
             e = R.choice(pool[entity])
         else:
-            i = R.randrange(1, LIB_SIZE)
-            e = rand_sprite(i, rand_color(), envs, aexprs)
+            e = rand_sprite(envs, a_exprs)
         # TODO: transforms
         objs.append(e)
-
-    print()
     return Seq(*objs)
 
-def gen_random_exprs(pool, aexprs, envs, n_exprs, n_objs):
+def gen_random_exprs(pool, a_exprs, envs, n_exprs, n_objs):
     for i in range(n_exprs):
-        expr = gen_random_expr(pool, aexprs, envs, n_objs)
+        expr = gen_random_expr(pool, a_exprs, envs, n_objs)
         print(f'expr generated [{i+1}/{n_exprs}]: {expr}')
         yield expr
 
 def rand_color():
-    return Num(R.randint(1, 9))
+    return Num(R.randrange(1, 10))
 
-def rand_sprite(i, color, envs, aexprs):
+def rand_sprite(envs, a_exprs, i=-1, color=-1):
+    i = i if 0 <= i < LIB_SIZE else R.randrange(1, LIB_SIZE)
+    color = color if isinstance(color, Num) and 1 <= color.n <= 9 else rand_color()
     n_misses = 0
     while True:
-        s = Sprite(i, R.choice(aexprs), R.choice(aexprs))
+        s = Sprite(i, R.choice(a_exprs), R.choice(a_exprs))
         outs = eval(s, envs)
         if all(out is not None for out in outs):
             break
         else: 
             n_misses += 1
-            viz_mult([s.eval(env) for env in envs[:10]])
         print(f'sprite misses:', n_misses, end='\r')
     print()
     if color > 1: return Apply(Recolor(color), s)
@@ -80,9 +81,9 @@ def rand_transform(e):
     Return a random (nontrivial) transformation of e
     '''
     # # Transform
-    # n = R.choice(aexprs)
+    # n = R.choice(a_exprs)
     # t = R.choice(transforms)
-    # t_args = [R.choice(aexprs) for _ in t.in_types]
+    # t_args = [R.choice(a_exprs) for _ in t.in_types]
     # if any(n.eval(env) > 0 for env in envs):
     #     t = Repeat(t(*t_args), n)
     # else:
@@ -90,6 +91,9 @@ def rand_transform(e):
     pass
 
 def simplify(sprites, env):
+    '''
+    Remove any sprites in `sprites` that are occluded by other sprites in `env`
+    '''
     keep = sprites[:1]
     for i, sprite in enumerate(sprites[1:], 1):
         # check that the sprites overlayed on top of `sprite` don't obscure `sprite`
@@ -144,50 +148,70 @@ def test_simplify():
         assert out == ans, f"Failed test: expected {ans}, got {out}"
     print("[+] passed test_simplify")
 
-def save_expr(expr):
-    print(f'Saving expr {expr}...')
-    with open('../data/exprs.dat', 'ab') as f:
-        pickle.dump(expr, f)
+def save_exprs(exprs):
+    print(f'Saving exprs...')
+    with open('../data/exprs.dat', 'wb') as f:
+        pickle.dump(exprs, f)
 
-def save_envs(envs):
-    print('Saving zs...')
-    with open('../data/zs.dat', 'wb') as f:
-        pickle.dump(zs, f)
+def load_exprs():
+    print(f'Loading exprs...')
+    with open('../data/exprs.dat', 'rb') as f:
+        return pickle.load(f)
 
-def save_viz(expr, env, i, j):
-    try:
-        viz(expr.eval(env), 
-            f'e{i}-{j}', str(expr), 
-            fname=f'../data/viz/exprs-2/e{i}-{j}.png', 
-            show=False)
-    except AssertionError:
-        pass
+def save_cmps(params, envs, pool, a_exprs):
+    print('Saving expr components...')
+    data = {'meta': params,
+            'envs': envs,
+            'pool': pool,
+            'a_exprs': a_exprs}
+    with open(CMP_PATH, 'wb') as f:
+        pickle.dump(data, f)
+
+def load_cmps():
+    print('Loading expr components...')
+    with open(CMP_PATH, 'rb') as f:
+        return pickle.load(f)
+
+def viz_sprites(envs):
+    k = floor(sqrt(LIB_SIZE))
+    for env in envs:
+        viz_grid(env['sprites'][:k**2], k, txt=f'sprites[:{k**2}]')
+
 
 if __name__ == '__main__':
     n_exprs = 1000
     n_envs = 100
-    abound = 1
+    a_bound = 1
     n_objs = 4
-    print(f'Parameters used: n_exprs={n_exprs}, n_envs={n_envs}, a_bound={abound}, n_objs={n_objs}')
+    pool_size = 100
+    entities = [Point, Line, Rect]
+    print(f'Parameters used: n_exprs={n_exprs}, n_envs={n_envs}, a_bound={a_bound}, n_objs={n_objs}')
 
     ag = Grammar(ops=[Plus, Minus, Times], 
                  consts=([Z(i) for i in range(LIB_SIZE)] + 
                          [Num(i) for i in range(Z_LO, Z_HI + 1)]))
-    envs = [{'z': seed_zs(), 'sprites':seed_sprites()} for _ in range(n_envs)]
-    aexprs = [e for e, s in bottom_up_generator(abound, ag, envs)]
-    pool = gen_shape_pool([Point, Line, Rect], aexprs, envs, 10)
-    gen = gen_random_exprs(pool, aexprs, envs, n_exprs, n_objs)
 
-    # save_envs(envs)
-    # open('../data/exprs.dat', 'w').close() # clear prior exprs.dat file contents
+    # # Generate and save pool
+    # envs = [{'z': seed_zs(), 
+    #          'sprites':seed_sprites()} 
+    #         for _ in range(n_envs)]
+    # a_exprs = [expr for expr, size in bottom_up_generator(a_bound, ag, envs)]
+    # pool = gen_shape_pool(entities, a_exprs, envs, pool_size)
+    # save_cmps({'n_envs': n_envs,
+    #            'a_bound': a_bound,
+    #            'pool_size': pool_size,
+    #            'entities': entities}, 
+    #           envs, 
+    #           pool, 
+    #           a_exprs)
 
-    k = 5
-    for i, expr in enumerate(gen):
-        viz_grid([expr.eval(env) for env in envs[:k**2]], k, txt=str(expr))
-        # save_expr(expr)
+    # Load saved pool
+    cmps = load_cmps()
+    envs, pool, a_exprs = cmps['envs'], cmps['pool'], cmps['a_exprs']
+    meta = cmps['meta']
+    n_envs, a_bound, pool_size, entities = meta['n_envs'], meta['a_bound'], meta['pool_size'], meta['entities']
 
-        # save_viz first 50 f, each with first 10 z's
-        # if i < 50:
-        #     for j, env in enumerate(envs[:10]):
-        #         save_viz(expr, env, i, j)
+    # Generate and save exprs
+    gen = gen_random_exprs(pool, a_exprs, envs, n_exprs, n_objs)
+    save_exprs(list(gen))
 
