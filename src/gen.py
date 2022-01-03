@@ -71,7 +71,7 @@ def rand_sprite(envs, a_exprs, i=-1, color=-1):
         else: 
             n_misses += 1
         print(f'sprite misses:', n_misses, end='\r')
-    print()
+    if n_misses > 0: print()
     if color > 1: return Apply(Recolor(color), s)
     else:         return s
 
@@ -154,7 +154,7 @@ def test_simplify():
 
 
 if __name__ == '__main__':
-    n_exprs = 1000
+    n_exprs = 100
     n_envs = 100
     a_bound = 1
     n_objs = 4
@@ -166,7 +166,7 @@ if __name__ == '__main__':
                  consts=([Z(i) for i in range(LIB_SIZE)] + 
                          [Num(i) for i in range(Z_LO, Z_HI + 1)]))
 
-    # # Generate and save pool
+    # Generate and save pool
     # envs = [{'z': seed_zs(), 
     #          'sprites':seed_sprites()} 
     #         for _ in range(n_envs)]
@@ -189,17 +189,14 @@ if __name__ == '__main__':
 
     # Generate and save exprs w/ bmp outputs
     # exprs = gen_random_exprs(pool, a_exprs, envs, n_exprs, n_objs)
-    # exprs = [deserialize(tokens) for tokens in util.load('../data/exprs.dat')]
     # data = []
     # for i, expr in enumerate(exprs):
     #     serialized = expr.serialize()
     #     bmps = [expr.eval(env) for env in envs] 
-    #     print(i, serialized, len(bmps))
+    #     print(' ', serialized, len(bmps))
     #     data.append((serialized, bmps))
-    # data = [(expr.serialize(), [expr.eval(env) for env in envs]) 
-    #          for expr in exprs]
     # util.save(data, '../data/exs.dat')
-           
+
     # Load saved exprs and generate bmps
     data = util.load('../data/exs.dat')
     for tokens, bmps in data:
@@ -207,4 +204,3 @@ if __name__ == '__main__':
         d = deserialize(tokens)
         print('expr:', d, len(d))
         print(viz_grid(bmps[:25], 5, d))
-        print()
