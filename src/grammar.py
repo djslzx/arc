@@ -602,7 +602,7 @@ class Size(Visitor):
     def visit_Sprite(self, i, x, y):
         return x.accept(self) + y.accept(self) + 1
 
-    def visit_Stack(self, bmps): return sum(bmp.accept(self) for bmp in bmps) + 1
+    def visit_Seq(self, bmps): return sum(bmp.accept(self) for bmp in bmps) + 1
 
     def visit_Join(self, bmp1, bmp2): return bmp1.accept(self) + bmp2.accept(self) + 1
 
@@ -725,14 +725,14 @@ def deserialize(tokens):
             return [VFlip()] + t
         if h =='T':
             return [Translate(t[0], t[1])] + t[2:]
-        if h == 'RC':
+        if h == '#':
             return [Recolor(t[0])] + t[1:]
-        if h == 'C':
+        if h == 'o':
             return [Compose(t[0], t[1])] + t[2:]
-        if h =='A':
+        if h =='@':
             return [Apply(t[0], t[1])] + t[2:]
-        if h =='R':
-            return [Apply(t[0], t[1])] + t[2:]
+        if h =='!':
+            return [Repeat(t[0], t[1])] + t[2:]
         if h == '{':
             i = t.index('}')
             return [Seq(*t[:i])] + t[i+1:]
@@ -790,7 +790,7 @@ class Serialize(Visitor):
 
     def visit_Join(self, bmp1, bmp2): return [';'] + bmp1.accept(self) + bmp2.accept(self)
 
-    def visit_Intersect(self, bmp): return ['I'] + bmp.accept(self)
+    # def visit_Intersect(self, bmp): return ['I'] + bmp.accept(self)
 
     def visit_HFlip(self): return ['H']
 
@@ -798,13 +798,13 @@ class Serialize(Visitor):
 
     def visit_Translate(self, x, y): return ['T'] + x.accept(self) + y.accept(self)
 
-    def visit_Recolor(self, c): return ['RC'] + c.accept(self)
+    def visit_Recolor(self, c): return ['#'] + c.accept(self)
 
-    def visit_Compose(self, f, g): return ['C'] + f.accept(self) + g.accept(self)
+    def visit_Compose(self, f, g): return ['o'] + f.accept(self) + g.accept(self)
     
-    def visit_Apply(self, f, bmp): return ['A'] + f.accept(self) + bmp.accept(self)
+    def visit_Apply(self, f, bmp): return ['@'] + f.accept(self) + bmp.accept(self)
 
-    def visit_Repeat(self, f, n): return ['R'] + f.accept(self) + n.accept(self)
+    def visit_Repeat(self, f, n): return ['!'] + f.accept(self) + n.accept(self)
 
 
 class Zs(Visitor):

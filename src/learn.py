@@ -16,10 +16,10 @@ from grammar import *
 from bottom_up import *
 
 def gen_zb():
-    return [bool(random.randint(0,1)) for _ in range(Z_SIZE)]
+    return [bool(random.randint(0,1)) for _ in range(LIB_SIZE)]
 
 def gen_zn():
-    return [random.randint(Z_LO, Z_HI) for _ in range(Z_SIZE)]
+    return [random.randint(Z_LO, Z_HI) for _ in range(LIB_SIZE)]
 
 def render(f, envs, cost):
     zns = [env['z_n'] for env in envs]
@@ -47,8 +47,8 @@ def learn(g, exs, max_size, samples):
             env['z_b'] = zb
 
     # Add Zs to grammar
-    g_zns = [Zn(Num(i)) for i in range(Z_SIZE)]
-    # g_zbs = [Zb(Num(i)) for i in range(Z_SIZE)]
+    g_zns = [Zn(Num(i)) for i in range(LIB_SIZE)]
+    # g_zbs = [Zb(Num(i)) for i in range(LIB_SIZE)]
     g = Grammar(g.ops, g.consts + g_zns) # + g_zbs)
 
     # Randomly generate initial Zs
@@ -170,7 +170,7 @@ def opt_zns(f, zs, exs, iters):
     ex: a list of examples (s_i, x_i) where s_i is an environment (including 'zn', 'zb') and x_i is a bitmap
     samples: max samples to randomly generate each z_i
     """
-    mask = [i in f.zs() for i in range(Z_SIZE)]
+    mask = [i in f.zs() for i in range(LIB_SIZE)]
     if not any(mask): # If f uses no components of z, just randomly generate a new z
         print("Empty mask, randomizing...")
         zs = [gen_zn() for _ in range(len(zs))]

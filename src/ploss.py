@@ -119,7 +119,7 @@ class Net(nn.Module):
                 break
 
         T.save(self.state_dict(), PATH)
-        print('Finished Training')
+        print('Finished training')
 
 def make_data(exprs, zs, n_fs, n_reps, subset_size):
     """
