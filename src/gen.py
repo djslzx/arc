@@ -11,7 +11,6 @@ from viz import viz, viz_grid, viz_mult
 from grammar import *
 from bottom_up import bottom_up_generator, eval
 
-CMP_PATH = '../data/cmps.dat'
 
 def gen_shape_pool(entities, a_exprs, envs, n):
     z_exprs, c_exprs = util.split(a_exprs, lambda a: a.zs())
@@ -106,31 +105,6 @@ def simplify(sprites, env):
             keep.append(sprite)
     return keep
 
-def save_cmps(params, envs, pool, a_exprs):
-    print('Saving expr components...')
-    data = {'meta': params,
-            'envs': envs,
-            'pool': pool,
-            'a_exprs': a_exprs}
-    with open(CMP_PATH, 'wb') as f:
-        pickle.dump(data, f)
-
-def load_cmps():
-    print('Loading expr components...')
-    with open(CMP_PATH, 'rb') as f:
-        return pickle.load(f)
-
-def save_exprs(exprs):
-    print(f'Saving exprs...')
-    serialized = [expr.serialize() for expr in exprs]
-    with open('../data/exprs.dat', 'wb') as f:
-        pickle.dump(serialized, f)
-
-def load_exprs():
-    print(f'Loading exprs...')
-    with open('../data/exprs.dat', 'rb') as f:
-        return pickle.load(f)
-
 def viz_sprites(envs):
     k = floor(sqrt(LIB_SIZE))
     for env in envs:
@@ -198,27 +172,39 @@ if __name__ == '__main__':
     #         for _ in range(n_envs)]
     # a_exprs = [expr for expr, size in bottom_up_generator(a_bound, ag, envs)]
     # pool = gen_shape_pool(entities, a_exprs, envs, pool_size)
-    # save_cmps({'n_envs': n_envs,
-    #            'a_bound': a_bound,
-    #            'pool_size': pool_size,
-    #            'entities': entities}, 
-    #           envs, 
-    #           pool, 
-    #           a_exprs)
+    # util.save({'meta': {'n_envs': n_envs,
+    #                     'a_bound': a_bound,
+    #                     'pool_size': pool_size,
+    #                     'entities': entities}, 
+    #            'envs': envs, 
+    #            'pool': pool, 
+    #            'a_exprs': a_exprs},
+    #           '../data/cmps.dat')
 
-    # # Load saved pool
-    # cmps = load_cmps()
+    # Load saved pool
+    # cmps = util.load('../data/cmps.dat')
     # envs, pool, a_exprs = cmps['envs'], cmps['pool'], cmps['a_exprs']
     # meta = cmps['meta']
     # n_envs, a_bound, pool_size, entities = meta['n_envs'], meta['a_bound'], meta['pool_size'], meta['entities']
 
-    # # Generate and save exprs
-    # gen = gen_random_exprs(pool, a_exprs, envs, n_exprs, n_objs)
-    # save_exprs(list(gen))
-
-    # Load saved exprs
-    exprs = load_exprs()
-    for tokens in exprs:
+    # Generate and save exprs w/ bmp outputs
+    # exprs = gen_random_exprs(pool, a_exprs, envs, n_exprs, n_objs)
+    # exprs = [deserialize(tokens) for tokens in util.load('../data/exprs.dat')]
+    # data = []
+    # for i, expr in enumerate(exprs):
+    #     serialized = expr.serialize()
+    #     bmps = [expr.eval(env) for env in envs] 
+    #     print(i, serialized, len(bmps))
+    #     data.append((serialized, bmps))
+    # data = [(expr.serialize(), [expr.eval(env) for env in envs]) 
+    #          for expr in exprs]
+    # util.save(data, '../data/exs.dat')
+           
+    # Load saved exprs and generate bmps
+    data = util.load('../data/exs.dat')
+    for tokens, bmps in data:
         print('tokens:', tokens)
-        print('expr:', deserialize(tokens))
+        d = deserialize(tokens)
+        print('expr:', d, len(d))
+        print(viz_grid(bmps[:25], 5, d))
         print()

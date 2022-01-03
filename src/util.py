@@ -1,4 +1,5 @@
 import torch as T
+import pickle
 
 def avg(it):
     s = 0
@@ -75,8 +76,19 @@ def split(l, pred):
     sat, unsat = [], []
     for x in l:
         if pred(x): sat.append(x)
-        else:    unsat.append(x)
+        else:       unsat.append(x)
     return sat, unsat
+
+def save(data, fname):
+    print(f'Saving to {fname}...')
+    with open(fname, 'wb') as f:
+        pickle.dump(data, f)
+
+def load(fname):
+    print(f'Loading from {fname}...')
+    with open(fname, 'rb') as f:
+        return pickle.load(f)
+
 
 if __name__ == '__main__':
     print(img_to_tensor(['_#_',
