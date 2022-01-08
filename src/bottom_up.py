@@ -118,7 +118,7 @@ def integer_partitions(target_value, number_of_arguments):
 def test_bottom_up():
     grammar = Grammar(
         ops=[Join, Rect, Line, Point, Plus, Minus, Times, If, And, Not],
-        consts=[Num(i) for i in range(Z_SIZE)] + [Z(i) for i in range(Z_SIZE)],
+        consts=[Num(i) for i in range(LIB_SIZE)] + [Z(i) for i in range(LIB_SIZE)],
     )
 
     # collection of input-output specifications
@@ -172,7 +172,7 @@ def test_bottom_up():
 def test_bottom_up_tensor():
     grammar = Grammar(
         ops=[Join, Rect, Plus, Minus, Times, Apply, HFlip, VFlip, Translate],
-        consts= [Z(i) for i in range(Z_SIZE)] # [Num(i) for i in range(5)]
+        consts= [Z(i) for i in range(LIB_SIZE)] # [Num(i) for i in range(5)]
     )
 
     test_cases = [
@@ -193,7 +193,7 @@ def test_bottom_up_tensor():
         envs = [env for env,_ in test_case]
         for env in envs:
             if 'z' not in env:
-                env['z'] = T.rand(Z_SIZE)
+                env['z'] = T.rand(LIB_SIZE)
 
         start_time = time.time()
         print(f"\nTesting {test_case}...")

@@ -194,7 +194,7 @@ if __name__ == '__main__':
     #     serialized = expr.serialize()
     #     bmps = [expr.eval(env) for env in envs] 
     #     print(' ', serialized, len(bmps))
-    #     data.append((serialized, bmps))
+    #     data.append((bmps, serialized))
     # util.save(data, '../data/exs.dat')
 
     # Load saved exprs and generate bmps
