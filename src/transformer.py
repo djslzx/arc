@@ -12,8 +12,7 @@ import torch.utils.tensorboard as tb
 
 from grammar import *
 
-# device = T.device('cuda:0' if T.cuda.is_available() else 'cpu')
-device=T.device('cpu')
+device = T.device('cuda:0' if T.cuda.is_available() else 'cpu')
 print('Using ' + ('GPU' if T.cuda.is_available() else 'CPU'))
 
 PATH='./transformer_model.pt'
@@ -112,19 +111,19 @@ class ArcTransformer(nn.Module):
         """
         # compute bitmap embedddings
         batch_size = B.shape[0]
-        src = B
+        src = B.to(device)
         src = src.reshape(-1, 1, self.H, self.W)
         src = self.conv(src)
         src = src.reshape(batch_size, self.N, self.d_model)
         src = src.transpose(0,1)
 
         # compute program embeddings w/ positional encoding
-        tgt = P
+        tgt = P.to(device)
         tgt = T.stack([self.p_embedding(p) for p in tgt])
         tgt = tgt.transpose(0, 1)
         tgt = self.pos_encoder(tgt)
-        tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt.shape[0]) # FIXME?
-        tgt_padding_mask = self.padding_mask(P)
+        tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt.shape[0]).to(device)
+        tgt_padding_mask = self.padding_mask(P).to(device)
 
         out = self.transformer(src=src, tgt=tgt, tgt_mask=tgt_mask,
                                tgt_key_padding_mask=tgt_padding_mask)
@@ -150,30 +149,31 @@ class ArcTransformer(nn.Module):
         return dataloader
 
     def train_epoch(self, dataloader, criterion, optimizer):
-        loss = 0
+        epoch_loss = 0
         for B, P in dataloader:
             B.to(device)
             P.to(device)
-            P_input    = P[:, :-1]
-            P_expected = F.one_hot(P[:, 1:]).float().transpose(0, 1)
-            # print('P_input shape:', P_input.shape, 'P_expected shape:', P_expected.shape)
+            P_input    = P[:, :-1].to(device)
+            P_expected = F.one_hot(P[:, 1:], num_classes=self.n_tokens).float().transpose(0, 1).to(device)
             out = self(B, P_input)
+            # print('P_input shape:', P_input.shape, 
+            #       'P_expected shape:', P_expected.shape, 
+            #       'output shape:', out.shape)
             loss = criterion(out, P_expected)
             print(f" minibatch loss: {loss}")
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            loss += loss.detach().item()
+            epoch_loss += loss.detach().item()
+        return epoch_loss/len(dataloader)
 
-        return loss/len(dataloader)
-
-    def train_model(self, dataloader, epochs=1000):
+    def train_model(self, dataloader, epochs=10000):
         criterion = nn.CrossEntropyLoss() # TODO: check that this plays nice with LogSoftmax
         optimizer = T.optim.Adam(self.parameters(), lr=0.001)
         self.to(device)
         self.train()            # mark as train mode
-        start_time = time.time()
+        start_t = time.time()
         writer = tb.SummaryWriter()
         
         for i in range(1, epochs+1):
@@ -181,13 +181,14 @@ class ArcTransformer(nn.Module):
             loss = self.train_epoch(dataloader, criterion, optimizer)
             epoch_end_t = time.time()
 
-            print(f'[{i}/{epochs}] loss: {loss.item():.5f}, took {epoch_end_t - epoch_start_t:.2f}s', end='\r')
-            writer.add_scalar('training loss', loss.item(), i)
-            if loss.item() == 0: break
+            print(f'[{i}/{epochs}] loss: {loss:.5f},',
+                  f'epoch took {epoch_end_t - epoch_start_t:.2f}s,', 
+                  f'{epoch_end_t -start_t:.2f}s total')
+            writer.add_scalar('training loss', loss, i)
+            if loss == 0: break
 
-        print(f'[{i}/{epochs}] loss: {loss.item():.5f}', end='\r')
-        time_taken = time.time() - start_time
-        print(f'Took {time_taken:.2f}s.')
+        end_t = time.time()
+        # print(f'[{i}/{epochs}] loss: {loss.item():.5f}, took {end_t - start_t:.2f}s')
         T.save(model.state_dict(), PATH)
         print('Finished training')
 
@@ -203,7 +204,7 @@ if __name__ == '__main__':
     data = util.load('../data/exs.dat')
     # print('max program length:', max_p_len)
 
-    model = ArcTransformer(N=100, H=B_H, W=B_W, lexicon=lexicon).to(device)
+    model = ArcTransformer(N=100, H=B_H, W=B_W, lexicon=lexicon, batch_size=32).to(device)
     dataloader = model.make_dataloader(data)
-    model.train_model(dataloader, epochs=1)
+    model.train_model(dataloader)
     
