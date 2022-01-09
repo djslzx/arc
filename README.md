@@ -2,15 +2,15 @@
 
 ## Sanity check
 ### TODO
-- [X] enforce invariants about rectangles 
-  - can't enforce with `assert`s in generation stage as this will halt the program, but this needs to be addressed before reaching the learning stage, or we'll end up with invalid candidate solutions
-  - enforced via `satisfies_invariants` fn
-- [X] swap between optimizing `f` and optimizing `z`
-- [ ] think about..
-  - [ ] witness functions
-  - [ ] probabilistic programs
-- [ ] better error fns
-- [ ] instance complexity
+- [ ] perceptual loss
+  - [ ] example generator
+    - [x] make generation approach scalable
+    - [ ] add support for new grammar elements (loops, translations)
+      - [ ] add support for new grammar elts in bottom-up generator
+    - [ ] 
+- [ ] grammar
+  - [ ] add support for functions on bitmaps
+    - make a primitive that maps integer functions (int -> int -> int) to bitmap functions (bitmap -> bitmap -> bitmap)
 
 ### Grammar
 Given `z = (z_b, z_n)`, a tuple of random vectors over booleans and integers;
