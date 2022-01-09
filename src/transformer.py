@@ -17,6 +17,11 @@ print('Using ' + ('GPU' if T.cuda.is_available() else 'CPU'))
 
 PATH='./transformer_model.pt'
 
+import os
+dirname = os.path.dirname(__file__)
+
+def rel_to_abspath(relpath):
+    return os.path.join(dirname, relpath)
 
 # TODO: pay attention to batch dim/sequence length dim
 class PositionalEncoding(nn.Module):
@@ -122,7 +127,7 @@ class ArcTransformer(nn.Module):
         tgt = T.stack([self.p_embedding(p) for p in tgt])
         tgt = tgt.transpose(0, 1)
         tgt = self.pos_encoder(tgt)
-        tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt.shape[0]).to(device)
+        tgt_mask = self.transformer.generate_square_subsequent_mask(tgt.shape[0]).to(device)
         tgt_padding_mask = self.padding_mask(P).to(device)
 
         out = self.transformer(src=src, tgt=tgt, tgt_mask=tgt_mask,
@@ -160,7 +165,7 @@ class ArcTransformer(nn.Module):
             #       'P_expected shape:', P_expected.shape, 
             #       'output shape:', out.shape)
             loss = criterion(out, P_expected)
-            print(f" minibatch loss: {loss}")
+            # print(f" minibatch loss: {loss}")
 
             optimizer.zero_grad()
             loss.backward()
@@ -169,7 +174,7 @@ class ArcTransformer(nn.Module):
         return epoch_loss/len(dataloader)
 
     def train_model(self, dataloader, epochs=10000):
-        criterion = nn.CrossEntropyLoss() # TODO: check that this plays nice with LogSoftmax
+        criterion = nn.CrossEntropyLoss()
         optimizer = T.optim.Adam(self.parameters(), lr=0.001)
         self.to(device)
         self.train()            # mark as train mode
@@ -201,7 +206,7 @@ if __name__ == '__main__':
                'P', 'L', 'R', 
                'H', 'V', 'T', '#', 'o', '@', '!', '{', '}',]
 
-    data = util.load('../data/exs.dat')
+    data = util.load(rel_to_abspath('../data/exs.dat'))
     # print('max program length:', max_p_len)
 
     model = ArcTransformer(N=100, H=B_H, W=B_W, lexicon=lexicon, batch_size=32).to(device)
