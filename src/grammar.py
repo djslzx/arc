@@ -44,6 +44,13 @@ class Expr(Visited):
 
     def zs(self): return self.accept(Zs())
 
+    def sprites(self): return self.accept(Sprites())
+
+    def replace_indices(self): 
+        zs = self.zs()
+        sprites = self.sprites()
+        return self.accept(ReplaceIndices(zs, sprites))
+
     def serialize(self): return self.accept(Serialize())
 
     def __len__(self): return self.accept(Size())
@@ -843,7 +850,7 @@ class Zs(Visitor):
     def visit_Sprite(self, i, x, y):
         return x.accept(self) | y.accept(self)
 
-    def visit_Seq(self, bmps): return set.union(bmp.accept(self) for bmp in bmps)
+    def visit_Seq(self, bmps): return set.union(*[bmp.accept(self) for bmp in bmps])
 
     def visit_Join(self, bmp1, bmp2): return bmp1.accept(self) | bmp2.accept(self)
 
@@ -863,6 +870,127 @@ class Zs(Visitor):
 
     def visit_Repeat(self, f, n): return f.accept(self) | n.accept(self)
 
+
+class Sprites(Visitor):
+    def __init__(self): pass
+
+    def visit_Empty(self): return set()
+
+    def visit_Nil(self): return set()
+
+    def visit_Num(self, n): return set()
+
+    def visit_Z(self, i): return set()
+
+    def visit_Not(self, b): return b.accept(self)
+
+    def visit_Plus(self, x, y): return x.accept(self) | y.accept(self)
+
+    def visit_Minus(self, x, y): return x.accept(self) | y.accept(self)
+
+    def visit_Times(self, x, y): return x.accept(self) | y.accept(self)
+
+    def visit_Lt(self, x, y): return x.accept(self) | y.accept(self)
+
+    def visit_And(self, x, y): return x.accept(self) | y.accept(self)
+
+    def visit_If(self, b, x, y): return b.accept(self) | x.accept(self) | y.accept(self)
+
+    def visit_Point(self, x, y, color): return x.accept(self) | y.accept(self) | color.accept(self)
+
+    def visit_Line(self, x1, y1, x2, y2, color):
+        return x1.accept(self) | y1.accept(self) | x2.accept(self) | y2.accept(self) | color.accept(self)
+
+    def visit_Rect(self, x1, y1, x2, y2, color):
+        return x1.accept(self) | y1.accept(self) | x2.accept(self) | y2.accept(self) | color.accept(self)
+
+    def visit_Sprite(self, i, x, y):
+        return {i} | x.accept(self) | y.accept(self)
+
+    def visit_Seq(self, bmps): return set.union(*[bmp.accept(self) for bmp in bmps])
+
+    def visit_Join(self, bmp1, bmp2): return bmp1.accept(self) | bmp2.accept(self)
+
+    def visit_Intersect(self, bmp): return bmp.accept(self)
+
+    def visit_HFlip(self): return set()
+
+    def visit_VFlip(self): return set()
+
+    def visit_Translate(self, x, y): return x.accept(self) | y.accept(self)
+
+    def visit_Recolor(self, c): return c.accept(self)
+
+    def visit_Compose(self, f, g): return f.accept(self) | g.accept(self)
+
+    def visit_Apply(self, f, bmp): return f.accept(self) | bmp.accept(self)
+
+    def visit_Repeat(self, f, n): return f.accept(self) | n.accept(self)
+
+
+class ReplaceIndices(Visitor):
+    def __init__(self, zs, sprites): 
+        '''
+        zs: the indices of zs in the whole expression
+        sprites: the indices of sprites in the whole expression
+        '''
+        self.z_mapping = {z:i for i,z in enumerate(sorted(zs))}
+        self.sprite_mapping = {sprite:i for i,sprite in enumerate(sorted(sprites))}
+
+    def visit_Empty(self): return Empty()
+
+    def visit_Nil(self): return Nil()
+
+    def visit_Num(self, n): return Num(n)
+
+    def visit_Z(self, i): return Z(self.z_mapping[i])
+
+    def visit_Not(self, b): return Not(b.accept(self))
+
+    def visit_Plus(self, x, y): return Plus(x.accept(self), y.accept(self))
+
+    def visit_Minus(self, x, y): return Minus(x.accept(self), y.accept(self))
+
+    def visit_Times(self, x, y): return Times(x.accept(self), y.accept(self))
+
+    def visit_Lt(self, x, y): return Lt(x.accept(self), y.accept(self))
+
+    def visit_And(self, x, y): return And(x.accept(self), y.accept(self))
+
+    def visit_If(self, b, x, y): return If(b.accept(self), x.accept(self), y.accept(self))
+
+    def visit_Point(self, x, y, color): return Point(x.accept(self), y.accept(self), color.accept(self))
+
+    def visit_Line(self, x1, y1, x2, y2, color): return Line(x1.accept(self), y1.accept(self), 
+                                                             x2.accept(self), y2.accept(self),
+                                                             color.accept(self))
+
+    def visit_Rect(self, x1, y1, x2, y2, color): return Rect(x1.accept(self), y1.accept(self), 
+                                                             x2.accept(self), y2.accept(self),
+                                                             color.accept(self))
+
+    def visit_Sprite(self, i, x, y): return Sprite(self.sprite_mapping[i], x.accept(self), y.accept(self))
+
+    def visit_Seq(self, bmps): return Seq(*[bmp.accept(self) for bmp in bmps])
+
+    def visit_Join(self, bmp1, bmp2): return Join(bmp1.accept(self), bmp2.accept(self))
+
+    def visit_Intersect(self, bmp): return Intersect(bmp.accept(self))
+
+    def visit_HFlip(self): return HFlip()
+
+    def visit_VFlip(self): return VFlip()
+
+    def visit_Translate(self, x, y): return TranslatE(x.accept(self), y.accept(self))
+
+    def visit_Recolor(self, c): return Recolor(c.accept(self))
+
+    def visit_Compose(self, f, g): return Compose(f.accept(self), g.accept(self))
+
+    def visit_Apply(self, f, bmp): return Apply(f.accept(self), bmp.accept(self))
+
+    def visit_Repeat(self, f, n): return Repeat(f.accept(self), n.accept(self))
+        
 
 def test_eval():
     tests = [
@@ -1260,6 +1388,20 @@ def test_zs():
         assert out == ans, f"test_zs failed: expected={ans}, actual={out}"
     print(" [+] passed test_zs")
 
+def test_replace_indices():
+    test_cases = [
+        (Seq(Z(0), Z(1), Z(3)),
+         Seq(Z(0), Z(1), Z(2))),
+        (Rect(Z(0), Z(1), Num(3), Num(3)),
+         Rect(Z(0), Z(1), Num(3), Num(3))),
+        (Seq(Sprite(0), Sprite(1), Z(3), Z(3)),
+         Seq(Sprite(0), Sprite(1), Z(0), Z(0))),
+    ]
+    for expr, ans in test_cases:
+        out = expr.replace_indices()
+        assert out == ans, f"test_replace_indices failed: expected={ans}, actual={out}"
+    print(" [+] passed test_replace_indices")
+
 def test_serialize():
     pass
 
@@ -1269,4 +1411,5 @@ if __name__ == '__main__':
     test_eval_bitmap()
     test_eval_color()
     test_sprite()
+    test_replace_indices()
     # test_zs()
