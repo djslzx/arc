@@ -163,38 +163,9 @@ def test_simplify():
     print("[+] passed test_simplify")
 
 
-def make_small_test_exprs():
-    n_exprs = 10
-    n_envs = 10
-    a_bound = 1
-    n_objs = 2
-    pool_size = 50
-    entities = [Point, Line, Rect]
-    a_grammar = Grammar(ops=[Plus, Minus, Times], 
-                        consts=([Z(i) for i in range(LIB_SIZE)] + 
-                                [Num(i) for i in range(Z_LO, Z_HI + 1)]))
-    envs = [{'z': seed_zs(), 'sprites':seed_sprites()} 
-            for _ in range(n_envs)]
-    a_exprs = [expr for expr, size in bottom_up_generator(a_bound, a_grammar, envs)]
-    pool = gen_shape_pool(entities, a_exprs, envs, pool_size)
-
-    util.save({'meta': {'n_envs': n_envs,
-                        'a_bound': a_bound,
-                        'pool_size': pool_size,
-                        'entities': entities}, 
-               'envs': envs, 
-               'pool': pool, 
-               'a_exprs': a_exprs},
-              '../data/small-cmps.dat')
-
-    exprs = gen_random_exprs(pool, a_exprs, envs, n_exprs, n_objs)
-    data = []
-    for i, expr in enumerate(exprs):
-        serialized = expr.serialize()
-        bmps = [expr.eval(env) for env in envs] 
-        print(' ', serialized, len(bmps))
-        data.append((bmps, serialized))
-    util.save(data, '../data/small-exs.dat')
+def make_test_exprs(n_exprs, n_envs, a_bound, n_objs, pool_size, entities):
+    # TODO
+    pass
     
 def make_big_test_exprs():
     n_exprs = 100
@@ -240,6 +211,36 @@ def make_big_test_exprs():
         data.append((bmps, serialized))
     util.save(data, '../data/exs.dat')
 
+def make_small_test_exprs():
+    n_exprs = 16
+    n_envs = 16
+    a_bound = 1
+    n_objs = 3
+    pool_size = 64
+    entities = [Point, Line, Rect]
+    a_grammar = Grammar(ops=[Plus, Minus, Times], 
+                        consts=([Z(i) for i in range(LIB_SIZE)] + 
+                                [Num(i) for i in range(Z_LO, Z_HI + 1)]))
+    envs = [{'z': seed_zs(), 'sprites':seed_sprites()} 
+            for _ in range(n_envs)]
+    a_exprs = [expr for expr, size in bottom_up_generator(a_bound, a_grammar, envs)]
+    pool = gen_shape_pool(entities, a_exprs, envs, pool_size)
+    util.save({'meta': {'n_envs': n_envs,
+                        'a_bound': a_bound,
+                        'pool_size': pool_size,
+                        'entities': entities}, 
+               'envs': envs, 
+               'pool': pool, 
+               'a_exprs': a_exprs},
+              '../data/small-cmps.dat')
+    exprs = gen_random_exprs(pool, a_exprs, envs, n_exprs, n_objs)
+    data = []
+    for i, expr in enumerate(exprs):
+        serialized = expr.serialize()
+        bmps = [expr.eval(env) for env in envs] 
+        print(' ', serialized, len(bmps))
+        data.append((bmps, serialized))
+    util.save(data, '../data/small-exs.dat')
 
 def viz_small_exs():
     for bmps, tokens in util.load('../data/small-exs.dat'):
