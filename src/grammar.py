@@ -46,10 +46,10 @@ class Expr(Visited):
 
     def sprites(self): return self.accept(Sprites())
 
-    def replace_indices(self): 
+    def simplify_indices(self): 
         zs = self.zs()
         sprites = self.sprites()
-        return self.accept(ReplaceIndices(zs, sprites))
+        return self.accept(SimplifyIndices(zs, sprites))
 
     def serialize(self): return self.accept(Serialize())
 
@@ -928,7 +928,7 @@ class Sprites(Visitor):
     def visit_Repeat(self, f, n): return f.accept(self) | n.accept(self)
 
 
-class ReplaceIndices(Visitor):
+class SimplifyIndices(Visitor):
     def __init__(self, zs, sprites): 
         '''
         zs: the indices of zs in the whole expression
@@ -1388,7 +1388,7 @@ def test_zs():
         assert out == ans, f"test_zs failed: expected={ans}, actual={out}"
     print(" [+] passed test_zs")
 
-def test_replace_indices():
+def test_simplify_indices():
     test_cases = [
         (Seq(Z(0), Z(1), Z(3)),
          Seq(Z(0), Z(1), Z(2))),
@@ -1398,9 +1398,9 @@ def test_replace_indices():
          Seq(Sprite(0), Sprite(1), Z(0), Z(0))),
     ]
     for expr, ans in test_cases:
-        out = expr.replace_indices()
-        assert out == ans, f"test_replace_indices failed: expected={ans}, actual={out}"
-    print(" [+] passed test_replace_indices")
+        out = expr.simplify_indices()
+        assert out == ans, f"test_simplify_indices failed: expected={ans}, actual={out}"
+    print(" [+] passed test_simplify_indices")
 
 def test_serialize():
     pass
@@ -1411,5 +1411,5 @@ if __name__ == '__main__':
     test_eval_bitmap()
     test_eval_color()
     test_sprite()
-    test_replace_indices()
+    test_simplify_indices()
     # test_zs()

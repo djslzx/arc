@@ -1,5 +1,7 @@
 import torch as T
 import pickle
+import os
+dirname = os.path.dirname(__file__)
 
 def avg(it):
     s = 0
@@ -79,14 +81,22 @@ def split(l, pred):
         else:       unsat.append(x)
     return sat, unsat
 
+def to_abspath(path):
+    if os.path.isabs(path):
+        return path
+    else:
+        return os.path.join(dirname, path)
+
 def save(data, fname):
-    print(f'Saving to {fname}...')
-    with open(fname, 'wb') as f:
+    path = to_abspath(fname)
+    print(f'Saving to {path}...')
+    with open(path, 'wb') as f:
         pickle.dump(data, f)
 
 def load(fname):
-    print(f'Loading from {fname}...')
-    with open(fname, 'rb') as f:
+    path = to_abspath(fname)
+    print(f'Loading from {path}...')
+    with open(path, 'rb') as f:
         return pickle.load(f)
 
 

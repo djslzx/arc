@@ -12,14 +12,15 @@ from grammar import *
 from bottom_up import bottom_up_generator, eval
 
 
-def gen_shape_pool(entities, a_exprs, envs, n):
+def gen_shape_pool(entities, a_exprs, envs, pool_size):
     z_exprs, c_exprs = util.split(a_exprs, lambda a: a.zs())
     pool = {}
+    outs = {}
     for entity in entities:
         n_tries = 0
         n_hits = 0
         pool[entity] = []
-        while len(pool[entity]) < n:
+        while len(pool[entity]) < pool_size:
             color = rand_color()
             k = R.randrange(1, len(entity.in_types)) # num z's to use
             args = ([R.choice(z_exprs) for _ in entity.in_types[:k]] + 
@@ -38,7 +39,7 @@ def gen_shape_pool(entities, a_exprs, envs, n):
 def gen_random_expr(pool, a_exprs, envs, n_objs):
     objs = []
     for _ in range(n_objs):
-        n = R.randint(0, 10)
+        n = R.randint(0, 12)
         if n < 8:
             if n < 1:   entity = Point
             elif n < 4: entity = Line
@@ -48,7 +49,16 @@ def gen_random_expr(pool, a_exprs, envs, n_objs):
             e = rand_sprite(envs, a_exprs)
         # TODO: transforms
         objs.append(e)
-    return Seq(*objs)
+    expr = Seq(*objs)
+    return clean(expr)
+
+def clean(expr):
+    # 1. replace z indices
+    # 2. canonical forms?
+    # cleaned = expr.simplify_indices()
+    # print(f'expr: {expr}, cleaned: {cleaned}')
+    # return cleaned
+    return expr
 
 def gen_random_exprs(pool, a_exprs, envs, n_exprs, n_objs):
     for i in range(n_exprs):
@@ -153,7 +163,40 @@ def test_simplify():
     print("[+] passed test_simplify")
 
 
-if __name__ == '__main__':
+def make_small_test_exprs():
+    n_exprs = 10
+    n_envs = 10
+    a_bound = 1
+    n_objs = 2
+    pool_size = 50
+    entities = [Point, Line, Rect]
+    a_grammar = Grammar(ops=[Plus, Minus, Times], 
+                        consts=([Z(i) for i in range(LIB_SIZE)] + 
+                                [Num(i) for i in range(Z_LO, Z_HI + 1)]))
+    envs = [{'z': seed_zs(), 'sprites':seed_sprites()} 
+            for _ in range(n_envs)]
+    a_exprs = [expr for expr, size in bottom_up_generator(a_bound, a_grammar, envs)]
+    pool = gen_shape_pool(entities, a_exprs, envs, pool_size)
+
+    util.save({'meta': {'n_envs': n_envs,
+                        'a_bound': a_bound,
+                        'pool_size': pool_size,
+                        'entities': entities}, 
+               'envs': envs, 
+               'pool': pool, 
+               'a_exprs': a_exprs},
+              '../data/small-cmps.dat')
+
+    exprs = gen_random_exprs(pool, a_exprs, envs, n_exprs, n_objs)
+    data = []
+    for i, expr in enumerate(exprs):
+        serialized = expr.serialize()
+        bmps = [expr.eval(env) for env in envs] 
+        print(' ', serialized, len(bmps))
+        data.append((bmps, serialized))
+    util.save(data, '../data/small-exs.dat')
+    
+def make_big_test_exprs():
     n_exprs = 100
     n_envs = 100
     a_bound = 1
@@ -162,11 +205,11 @@ if __name__ == '__main__':
     entities = [Point, Line, Rect]
     print(f'Parameters used: n_exprs={n_exprs}, n_envs={n_envs}, a_bound={a_bound}, n_objs={n_objs}')
 
-    ag = Grammar(ops=[Plus, Minus, Times], 
-                 consts=([Z(i) for i in range(LIB_SIZE)] + 
-                         [Num(i) for i in range(Z_LO, Z_HI + 1)]))
+    # ag = Grammar(ops=[Plus, Minus, Times], 
+    #              consts=([Z(i) for i in range(LIB_SIZE)] + 
+    #                      [Num(i) for i in range(Z_LO, Z_HI + 1)]))
 
-    # Generate and save pool
+    # # Generate and save pool
     # envs = [{'z': seed_zs(), 
     #          'sprites':seed_sprites()} 
     #         for _ in range(n_envs)]
@@ -182,25 +225,37 @@ if __name__ == '__main__':
     #           '../data/cmps.dat')
 
     # Load saved pool
-    # cmps = util.load('../data/cmps.dat')
-    # envs, pool, a_exprs = cmps['envs'], cmps['pool'], cmps['a_exprs']
-    # meta = cmps['meta']
-    # n_envs, a_bound, pool_size, entities = meta['n_envs'], meta['a_bound'], meta['pool_size'], meta['entities']
+    cmps = util.load('../data/cmps.dat')
+    envs, pool, a_exprs = cmps['envs'], cmps['pool'], cmps['a_exprs']
+    meta = cmps['meta']
+    n_envs, a_bound, pool_size, entities = meta['n_envs'], meta['a_bound'], meta['pool_size'], meta['entities']
 
     # Generate and save exprs w/ bmp outputs
-    # exprs = gen_random_exprs(pool, a_exprs, envs, n_exprs, n_objs)
-    # data = []
-    # for i, expr in enumerate(exprs):
-    #     serialized = expr.serialize()
-    #     bmps = [expr.eval(env) for env in envs] 
-    #     print(' ', serialized, len(bmps))
-    #     data.append((bmps, serialized))
-    # util.save(data, '../data/exs.dat')
+    exprs = gen_random_exprs(pool, a_exprs, envs, n_exprs, n_objs)
+    data = []
+    for i, expr in enumerate(exprs):
+        serialized = expr.serialize()
+        bmps = [expr.eval(env) for env in envs] 
+        print(' ', serialized, len(bmps))
+        data.append((bmps, serialized))
+    util.save(data, '../data/exs.dat')
 
-    # Load saved exprs and generate bmps
-    data = util.load('../data/exs.dat')
-    for tokens, bmps in data:
+
+def viz_small_exs():
+    for bmps, tokens in util.load('../data/small-exs.dat'):
         print('tokens:', tokens)
-        d = deserialize(tokens)
-        print('expr:', d, len(d))
-        print(viz_grid(bmps[:25], 5, d))
+        expr = deserialize(tokens)
+        print(viz_grid(bmps[:9], 3, expr))
+
+if __name__ == '__main__':
+
+    # # Load saved exprs and generate bmps
+    # data = util.load('../data/exs.dat')
+    # for bmps, tokens in data:
+    #     print('tokens:', tokens)
+    #     d = deserialize(tokens)
+    #     print('expr:', d, len(d))
+    #     print(viz_grid(bmps[:25], 5, d))
+
+    make_small_test_exprs()    
+    viz_small_exs()

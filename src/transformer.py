@@ -17,12 +17,6 @@ print('Using ' + ('GPU' if T.cuda.is_available() else 'CPU'))
 
 PATH='./transformer_model.pt'
 
-import os
-dirname = os.path.dirname(__file__)
-
-def rel_to_abspath(relpath):
-    return os.path.join(dirname, relpath)
-
 # TODO: pay attention to batch dim/sequence length dim
 class PositionalEncoding(nn.Module):
     """
@@ -206,7 +200,7 @@ if __name__ == '__main__':
                'P', 'L', 'R', 
                'H', 'V', 'T', '#', 'o', '@', '!', '{', '}',]
 
-    data = util.load(rel_to_abspath('../data/exs.dat'))
+    data = util.load('../data/exs.dat')
     # print('max program length:', max_p_len)
 
     model = ArcTransformer(N=100, H=B_H, W=B_W, lexicon=lexicon, batch_size=32).to(device)
