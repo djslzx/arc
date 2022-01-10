@@ -192,6 +192,21 @@ class ArcTransformer(nn.Module):
         print('Finished training')
 
 
+def train_transformer(datafile, lexicon, model):
+    data = util.load(datafile)
+    dataloader = model.make_dataloader(data)
+    model.train_model(dataloader)
+
+def train_full(lex):
+    datafile = '../data/exs.dat'
+    model = ArcTransformer(N=100, H=B_H, W=B_W, lexicon=lexicon, batch_size=32).to(device)
+    train_transformer(datafile, lex, model)
+
+def train_small(lex):
+    datafile = '../data/small-exs.dat'
+    model = ArcTransformer(N=16, H=B_H, W=B_W, lexicon=lexicon, batch_size=16).to(device)
+    train_transformer(datafile, lex, model)
+
 if __name__ == '__main__':
     lexicon = [f'z_{i}' for i in range(LIB_SIZE)] + \
               [f'S_{i}' for i in range(LIB_SIZE)] + \
@@ -200,10 +215,5 @@ if __name__ == '__main__':
                'P', 'L', 'R', 
                'H', 'V', 'T', '#', 'o', '@', '!', '{', '}',]
 
-    data = util.load('../data/exs.dat')
-    # print('max program length:', max_p_len)
-
-    model = ArcTransformer(N=100, H=B_H, W=B_W, lexicon=lexicon, batch_size=32).to(device)
-    dataloader = model.make_dataloader(data)
-    model.train_model(dataloader)
+    train_small(lexicon)
     
