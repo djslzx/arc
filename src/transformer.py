@@ -46,7 +46,7 @@ class ArcTransformer(nn.Module):
                  lexicon,        # list of program grammar components
                  d_model=512,
                  n_conv_layers=6, 
-                 n_conv_channels=6,
+                 n_conv_channels=32,
                  batch_size=16):
 
         super().__init__()
@@ -76,9 +76,9 @@ class ArcTransformer(nn.Module):
                 nn.ReLU(),
             ])
         k = n_conv_channels * H * W
-        self.conv = nn.Sequential(
-            *conv_stack,
-            nn.Flatten(),
+        self.conv = nn.Sequential(*conv_stack)
+        self.linear = nn.Sequential(
+            # nn.Flatten(),
             nn.Linear(k, k),
             nn.ReLU(),
             nn.Linear(k, k),
@@ -113,6 +113,8 @@ class ArcTransformer(nn.Module):
         src = B.to(device)
         src = src.reshape(-1, 1, self.H, self.W)
         src = self.conv(src)
+        src = src.flatten(start_dim=1)
+        src = self.linear(src)
         src = src.reshape(batch_size, self.N, self.d_model)
         src = src.transpose(0,1)
 
