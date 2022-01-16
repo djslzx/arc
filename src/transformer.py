@@ -46,7 +46,7 @@ class ArcTransformer(nn.Module):
                  lexicon,        # list of program grammar components
                  d_model=512,
                  n_conv_layers=6, 
-                 n_conv_channels=6,
+                 n_conv_channels=32,
                  batch_size=16):
 
         super().__init__()
@@ -190,24 +190,24 @@ class ArcTransformer(nn.Module):
 
         end_t = time.time()
         # print(f'[{i}/{epochs}] loss: {loss.item():.5f}, took {end_t - start_t:.2f}s')
-        T.save(model.state_dict(), PATH)
+        T.save(self.state_dict(), PATH)
         print('Finished training')
 
 
-def train_transformer(datafile, lexicon, model):
+def train_transformer(datafile, lexicon, model, epochs):
     data = util.load(datafile)
     dataloader = model.make_dataloader(data)
-    model.train_model(dataloader)
+    model.train_model(dataloader, epochs)
 
 def train_full(lex):
     datafile = '../data/exs.dat'
     model = ArcTransformer(N=100, H=B_H, W=B_W, lexicon=lexicon, batch_size=32).to(device)
-    train_transformer(datafile, lex, model)
+    train_transformer(datafile, lex, model, epochs=100000)
 
 def train_small(lex):
     datafile = '../data/small-exs.dat'
-    model = ArcTransformer(N=16, H=B_H, W=B_W, lexicon=lexicon, batch_size=3).to(device)
-    train_transformer(datafile, lex, model)
+    model = ArcTransformer(N=16, H=B_H, W=B_W, lexicon=lexicon, batch_size=16).to(device)
+    train_transformer(datafile, lex, model, epochs=100000)
 
 if __name__ == '__main__':
     lexicon = [f'z_{i}' for i in range(LIB_SIZE)] + \
