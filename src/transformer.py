@@ -76,9 +76,9 @@ class ArcTransformer(nn.Module):
                 nn.ReLU(),
             ])
         k = n_conv_channels * H * W
-        self.conv = nn.Sequential(
-            *conv_stack,
-            nn.Flatten(),
+        self.conv = nn.Sequential(*conv_stack)
+        self.linear = nn.Sequential(
+            # nn.Flatten(),
             nn.Linear(k, k),
             nn.ReLU(),
             nn.Linear(k, k),
@@ -113,6 +113,8 @@ class ArcTransformer(nn.Module):
         src = B.to(device)
         src = src.reshape(-1, 1, self.H, self.W)
         src = self.conv(src)
+        src = src.flatten(start_dim=1)
+        src = self.linear(src)
         src = src.reshape(batch_size, self.N, self.d_model)
         src = src.transpose(0,1)
 
@@ -204,7 +206,7 @@ def train_full(lex):
 
 def train_small(lex):
     datafile = '../data/small-exs.dat'
-    model = ArcTransformer(N=16, H=B_H, W=B_W, lexicon=lexicon, batch_size=16).to(device)
+    model = ArcTransformer(N=16, H=B_H, W=B_W, lexicon=lexicon, batch_size=3).to(device)
     train_transformer(datafile, lex, model)
 
 if __name__ == '__main__':
