@@ -214,14 +214,14 @@ class Rect(Expr):
     in_types = ['int', 'int', 'int', 'int', 'int']
     out_type = 'bitmap'
 
-    def __init__(self, x1, y1, x2, y2, color=Num(1)):
-        self.x1 = x1
-        self.y1 = y1
-        self.x2 = x2
-        self.y2 = y2
+    def __init__(self, x, y, w, h, color=Num(1)):
+        self.x = x
+        self.y = y
+        self.w = w
+        self.h = h
         self.color = color
 
-    def accept(self, v): return v.visit_Rect(self.x1, self.y1, self.x2, self.y2, self.color)
+    def accept(self, v): return v.visit_Rect(self.x, self.y, self.w, self.h, self.color)
 
 
 class Sprite(Expr):
@@ -368,7 +368,7 @@ class Visitor:
 
     def visit_Line(self, x1, y1, x2, y2, color): self.fail('Line')
 
-    def visit_Rect(self, x1, y1, x2, y2, color): self.fail('Rect')
+    def visit_Rect(self, x, y, w, h, color): self.fail('Rect')
 
     def visit_Sprite(self, i, x, y): self.fail('Sprite')
 
@@ -484,14 +484,14 @@ class Eval(Visitor):
                                                p[1] == y1 + (p[0] - x1)) * c)
         assert False, "Line must be vertical, horizontal, or diagonal"
 
-    def visit_Rect(self, x1, y1, x2, y2, color):
+    def visit_Rect(self, x, y, w, h, color):
         c = color.accept(self)
-        x1, y1, x2, y2 = (x1.accept(self), y1.accept(self),
-                          x2.accept(self), y2.accept(self))
-        assert all(isinstance(v, int) for v in [x1, y1, x2, y2])
-        assert 0 <= x1 <= x2 < B_W and 0 <= y1 <= y2 < B_H
-        assert x2 - x1 >= 1 and y2 - y1 >= 1
-        return Eval.make_bitmap(lambda p: (x1 <= p[0] <= x2 and y1 <= p[1] <= y2) * c)
+        x, y, w, h = (x.accept(self), y.accept(self),
+                      w.accept(self), h.accept(self))
+        assert all(isinstance(v, int) for v in [x, y, w, h])
+        assert w > 0 and h > 0
+        assert 0 <= x < B_W - w and 0 <= y < B_H - h
+        return Eval.make_bitmap(lambda p: (x <= p[0] < x + w and y <= p[1] < y + h) * c)
 
     def visit_Sprite(self, i, x, y):
         x, y = x.accept(self), y.accept(self)
@@ -509,15 +509,15 @@ class Eval(Visitor):
         return Eval.overlay(bmp1, bmp2)
 
     def visit_Intersect(self, bmp1):
-        bmp1 = bmp1.accept(self)
-        assert isinstance(bmp1, T.FloatTensor), \
-            f"Intersect needs a float tensor, found bmp={bmp}"
-        def intersect(pt, bmp2):
-            x, y = pt
-            c1, c2 = bmp1[y][x], bmp2[y][x]
-            return (c1 and c2) * c1
-
-        return lambda bmp: Eval.make_bitmap(lambda p: intersect(p, bmp))
+        assert False, "not implemented"
+        # bmp1 = bmp1.accept(self)
+        # assert isinstance(bmp1, T.FloatTensor), f"Intersect needs a float tensor, found bmp={bmp1}"
+        # def intersect(pt, bmp2):
+        #     print(bmp1, bmp2)
+        #     x, y = pt
+        #     c1, c2 = bmp1[y][x], bmp2[y][x]
+        #     return int(c1 > 0 and c2 > 0)
+        # return lambda bmp: Eval.make_bitmap(lambda p: intersect(p, bmp))
 
     def visit_HFlip(self):
         return lambda bmp: bmp.flip(1)
@@ -603,8 +603,8 @@ class Size(Visitor):
     def visit_Line(self, x1, y1, x2, y2, color): 
         return x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self) + color.accept(self) + 1
 
-    def visit_Rect(self, x1, y1, x2, y2, color):
-        return x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self) + color.accept(self) + 1
+    def visit_Rect(self, x, y, w, h, color):
+        return x.accept(self) + y.accept(self) + w.accept(self) + h.accept(self) + color.accept(self) + 1
 
     def visit_Sprite(self, i, x, y):
         return x.accept(self) + y.accept(self) + 1
@@ -639,7 +639,7 @@ class Print(Visitor):
 
     def visit_Num(self, n): return f'{n}'
 
-    def visit_Z(self, i): return f'z{i}'
+    def visit_Z(self, i): return f'z_{i}'
 
     def visit_Not(self, b): return f'(not {b.accept(self)})'
 
@@ -656,16 +656,16 @@ class Print(Visitor):
     def visit_If(self, b, x, y): return f'(if {b.accept(self)} {x.accept(self)} {y.accept(self)})'
 
     def visit_Point(self, x, y, color): 
-        return f'(P[{color.accept(self)}] {x.accept(self)} {y.accept(self)})'
+        return f'(Point[{color.accept(self)}] {x.accept(self)} {y.accept(self)})'
 
     def visit_Line(self, x1, y1, x2, y2, color):
-        return f'(L[{color.accept(self)}] {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
+        return f'(Line[{color.accept(self)}] {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
 
-    def visit_Rect(self, x1, y1, x2, y2, color):
-        return f'(R[{color.accept(self)}] {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
+    def visit_Rect(self, x, y, w, h, color):
+        return f'(Rect[{color.accept(self)}] {x.accept(self)} {y.accept(self)} {w.accept(self)} {h.accept(self)})'
 
     def visit_Sprite(self, i, x, y):
-        return f'(S{i} {x.accept(self)} {y.accept(self)})'
+        return f'(Sprite_{i} {x.accept(self)} {y.accept(self)})'
 
     def visit_Seq(self, bmps): return '(seq ' + ' '.join([bmp.accept(self) for bmp in bmps]) + ')'
 
@@ -782,8 +782,8 @@ class Serialize(Visitor):
     def visit_Line(self, x1, y1, x2, y2, color):
         return ['L'] + color.accept(self) + x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self)
 
-    def visit_Rect(self, x1, y1, x2, y2, color):
-        return ['R'] + color.accept(self) + x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self)
+    def visit_Rect(self, x, y, w, h, color):
+        return ['R'] + color.accept(self) + x.accept(self) + y.accept(self) + w.accept(self) + h.accept(self)
 
     def visit_Sprite(self, i, x, y):
         return [f'S_{i}'] + x.accept(self) + y.accept(self)
@@ -844,8 +844,8 @@ class Zs(Visitor):
     def visit_Line(self, x1, y1, x2, y2, color):
         return x1.accept(self) | y1.accept(self) | x2.accept(self) | y2.accept(self) | color.accept(self)
 
-    def visit_Rect(self, x1, y1, x2, y2, color):
-        return x1.accept(self) | y1.accept(self) | x2.accept(self) | y2.accept(self) | color.accept(self)
+    def visit_Rect(self, x, y, w, h, color):
+        return x.accept(self) | y.accept(self) | w.accept(self) | h.accept(self) | color.accept(self)
 
     def visit_Sprite(self, i, x, y):
         return x.accept(self) | y.accept(self)
@@ -901,8 +901,8 @@ class Sprites(Visitor):
     def visit_Line(self, x1, y1, x2, y2, color):
         return x1.accept(self) | y1.accept(self) | x2.accept(self) | y2.accept(self) | color.accept(self)
 
-    def visit_Rect(self, x1, y1, x2, y2, color):
-        return x1.accept(self) | y1.accept(self) | x2.accept(self) | y2.accept(self) | color.accept(self)
+    def visit_Rect(self, x, y, w, h, color):
+        return x.accept(self) | y.accept(self) | w.accept(self) | h.accept(self) | color.accept(self)
 
     def visit_Sprite(self, i, x, y):
         return {i} | x.accept(self) | y.accept(self)
@@ -965,9 +965,9 @@ class SimplifyIndices(Visitor):
                                                              x2.accept(self), y2.accept(self),
                                                              color.accept(self))
 
-    def visit_Rect(self, x1, y1, x2, y2, color): return Rect(x1.accept(self), y1.accept(self), 
-                                                             x2.accept(self), y2.accept(self),
-                                                             color.accept(self))
+    def visit_Rect(self, x, y, w, h, color): return Rect(x.accept(self), y.accept(self), 
+                                                         w.accept(self), h.accept(self),
+                                                         color.accept(self))
 
     def visit_Sprite(self, i, x, y): return Sprite(self.sprite_mapping[i], x.accept(self), y.accept(self))
 
@@ -1011,7 +1011,7 @@ def test_eval():
             Plus(Z(0), Z(1))),
          lambda z: z[0] * z[1] if not (z[0] < z[1]) else z[0] + z[1]),
         (Rect(Num(0), Num(0),
-              Num(1), Num(2)),
+              Num(2), Num(3)),
          lambda z: util.img_to_tensor(["##__",
                                        "##__",
                                        "##__",
@@ -1039,7 +1039,7 @@ def test_eval():
 
     # (0,0), (1,1)
     expr = Rect(Num(0), Num(0),
-                Num(1), Num(1))
+                Num(2), Num(2))
     out = expr.eval({'z': []})
     expected = util.img_to_tensor(["##__",
                                    "##__",
@@ -1048,10 +1048,8 @@ def test_eval():
     assert T.equal(expected, out), f"test_render failed:\n expected={expected},\n out={out}"
 
     # (1,0), (3,3)
-    expr = Rect(Z(0),
-                Num(0),
-                Plus(Num(2), Num(1)),
-                Num(3))
+    expr = Rect(Z(0), Num(0),
+                Plus(Num(2), Num(1)), Num(4))
     out = expr.eval({'z': [1, 2, 3]})
     expected = util.img_to_tensor(["_###",
                                    "_###",
@@ -1133,7 +1131,7 @@ def test_eval_bitmap():
 
         # Joining
         (Join(Rect(Num(0), Num(0),
-                   Num(1), Num(1)),
+                   Num(2), Num(2)),
               Line(Num(2), Num(3),
                    Num(3), Num(3))),
          ["##__",
@@ -1142,9 +1140,9 @@ def test_eval_bitmap():
           "__##"]),
         (Apply(HFlip(),
                Join(Rect(Num(0), Num(0),
-                         Num(1), Num(1)),
+                         Num(2), Num(2)),
                     Rect(Num(2), Num(2),
-                         Num(3), Num(3)))),
+                         Num(2), Num(2)))),
          ["##__" + "_"*(B_W-8) + "__##",
           "##__" + "_"*(B_W-8) + "__##",
           "__##" + "_"*(B_W-8) + "##__",
@@ -1236,12 +1234,21 @@ def test_eval_bitmap():
           "_1_2_2__",
           "__1_2_2_",
           "___1_2_2"]),
-        (Apply(Intersect(Rect(Num(0), Num(0), Num(3), Num(3))),
-               Line(Num(0), Num(0), Num(3), Num(3))),
-         ["#___",
-          "_#__",
-          "__#_",
-          "___#"]),
+        # (Rect(Num(0), Num(0), Num(3), Num(3)),
+        #  ["###_",
+        #   "###_",
+        #   "###_",
+        #   "____"]),
+        # (Line(Num(0), Num(0), Num(3), Num(3)),
+        #  ["#___",
+        #   "_#__",
+        #   "__#_",
+        #   "___#"]),
+        # (Apply(Intersect(Rect(Num(0), Num(0), Num(3), Num(3))),
+        #        Line(Num(0), Num(0), Num(3), Num(3))),
+        #  ["#__",
+        #   "_#_",
+        #   "__#"]),
     ]
     for expr, correct_semantics in tests:
         out = expr.eval({"z": []})
@@ -1328,7 +1335,7 @@ def test_sprite():
 def test_eval_color():
     tests = [
         (Rect(Num(0), Num(0),
-              Num(1), Num(1), Num(2)),
+              Num(2), Num(2), Num(2)),
          ["22__",
           "22__",
           "____",
@@ -1354,9 +1361,9 @@ def test_eval_color():
           "____",
           "_3__"]),
         (Join(Rect(Num(0), Num(0),
-                   Num(1), Num(1), Num(1)),
+                   Num(2), Num(2), Num(1)),
               Rect(Num(2), Num(2),
-                   Num(3), Num(3), Num(6))),
+                   Num(2), Num(2), Num(6))),
          ["11__",
           "11__",
           "__66",
