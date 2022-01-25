@@ -5,6 +5,7 @@ import torch as T
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patheffects as pe
+from math import sqrt, floor
 
 WIDTH=8
 HEIGHT=10
@@ -77,11 +78,12 @@ def viz(t, title='', subtitle='', fname=None, label=False):
     show(ax, t, label=label)
     output(fname, show=True)
 
-def viz_grid(samples, n, txt=''):
+def viz_grid(samples, txt=''):
     '''Visualize an nxn grid of samples'''
+    n = floor(sqrt(len(samples)))
     f, ax = plt.subplots(n, n)
     plt.figtext(0.5, 0.01, txt, wrap=True, horizontalalignment='center', fontsize=9)    
-    for i, sample in enumerate(samples):
+    for i, sample in enumerate(samples[:n**2]):
         x, y = i%n, i//n
         show(ax[y, x], sample)
 
