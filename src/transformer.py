@@ -1,3 +1,5 @@
+import pdb
+
 import math
 import numpy as np
 import time
@@ -16,6 +18,8 @@ device = T.device('cuda:0' if T.cuda.is_available() else 'cpu')
 print('Using ' + ('GPU' if T.cuda.is_available() else 'CPU'))
 
 PATH='./transformer_model.pt'
+
+T.set_printoptions(threshold=10_000)
 
 # TODO: pay attention to batch dim/sequence length dim
 class PositionalEncoding(nn.Module):
@@ -44,9 +48,9 @@ class ArcTransformer(nn.Module):
     def __init__(self, 
                  N, H, W,        # bitmap count, height, width
                  lexicon,        # list of program grammar components
-                 d_model=512,
+                 d_model=16,
                  n_conv_layers=6, 
-                 n_conv_channels=32,
+                 n_conv_channels=2,
                  batch_size=16):
 
         super().__init__()
@@ -109,10 +113,12 @@ class ArcTransformer(nn.Module):
         progs: a batch of programs represented as tensors of indices
         """
         # compute bitmap embedddings
+
         batch_size = B.shape[0]
         src = B.to(device)
         src = src.reshape(-1, 1, self.H, self.W)
         src = self.conv(src)
+        # pdb.set_trace()
         src = src.flatten(start_dim=1)
         src = self.linear(src)
         src = src.reshape(batch_size, self.N, self.d_model)
@@ -156,11 +162,15 @@ class ArcTransformer(nn.Module):
             P.to(device)
             P_input    = P[:, :-1].to(device)
             P_expected = F.one_hot(P[:, 1:], num_classes=self.n_tokens).float().transpose(0, 1).to(device)
+            # pdb.set_trace()
             out = self(B, P_input)
             # print('P_input shape:', P_input.shape, 
             #       'P_expected shape:', P_expected.shape, 
             #       'output shape:', out.shape)
-            loss = criterion(out, P_expected)
+
+            # TODO: Manually compute loss with logsoftmax
+            loss = -T.mean(T.sum(F.log_softmax(out,-1) * P_expected,-1))
+            # loss = criterion(out, P_expected)
             # print(f" minibatch loss: {loss}")
 
             optimizer.zero_grad()
@@ -206,7 +216,7 @@ def train_full(lex):
 
 def train_small(lex):
     datafile = '../data/small-exs.dat'
-    model = ArcTransformer(N=16, H=B_H, W=B_W, lexicon=lexicon, batch_size=16).to(device)
+    model = ArcTransformer(N=7, H=B_H, W=B_W, lexicon=lexicon, batch_size=2).to(device)
     train_transformer(datafile, lex, model, epochs=100000)
 
 if __name__ == '__main__':
