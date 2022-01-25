@@ -118,7 +118,7 @@ def simplify(sprites, env):
 def viz_sprites(envs):
     k = floor(sqrt(LIB_SIZE))
     for env in envs:
-        viz_grid(env['sprites'][:k**2], k, txt=f'sprites[:{k**2}]')
+        viz_grid(env['sprites'][:k**2], txt=f'sprites[:{k**2}]')
 
 def test_simplify():
     tests = [
@@ -246,7 +246,7 @@ def viz_exs(fname):
     for bmps, tokens in util.load('../data/small-exs.dat'):
         print('tokens:', tokens)
         expr = deserialize(tokens)
-        print(viz_grid(bmps[:9], 3, expr))
+        print(viz_grid(bmps[:9], expr))
 
 if __name__ == '__main__':
 
@@ -256,10 +256,10 @@ if __name__ == '__main__':
     #     print('tokens:', tokens)
     #     d = deserialize(tokens)
     #     print('expr:', d, len(d))
-    #     print(viz_grid(bmps[:25], 5, d))
+    #     print(viz_grid(bmps[:25], d))
 
     # make_full_test_exprs()
     # viz_exs('../data/exs.dat')
 
-    make_small_test_exprs()    
-    # viz_exs('../data/small-exs.dat')
+    # make_small_test_exprs()    
+    viz_exs('../data/small-exs.dat')

@@ -21,14 +21,12 @@ class MLP(nn.Module):
     def __init__(self, 
                  N, H, W,       # bitmap count, height, width
                  lexicon,       # list of program grammar components
-                 hidden_k=1,    # size of hidden layers
-                 max_program_size=50,
+                 max_program_size=30,
                  batch_size=16,
                  path='./mlp.pt'):
 
         super().__init__()
         self.N, self.H, self.W = N, H, W
-        self.hidden_k = hidden_k
         self.max_program_size = max_program_size
         self.batch_size = batch_size
         self.path = path
@@ -41,23 +39,22 @@ class MLP(nn.Module):
         self.pad_token      = self.token_to_index["PAD"]
 
         # MLP
-        k = self.N * self.H * self.W * self.hidden_k
-        self.mlp = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(self.N * self.H * self.W, k),
-            nn.ReLU(),
-            nn.Linear(k, k),
-            nn.ReLU(),
-            nn.Linear(k, k),
-            nn.ReLU(),
-            nn.Linear(k, k),
-            nn.ReLU(),
-            nn.Linear(k, self.n_tokens * self.max_program_size),
-        )
+        k = self.N * self.H * self.W
+        self.models = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(k, k),
+                nn.ReLU(),
+                nn.Linear(k, k),
+                nn.ReLU(),
+                nn.Linear(k, k),
+                nn.ReLU(),
+                nn.Linear(k, self.n_tokens),
+            )
+            for i in range(self.max_program_size)
+        ])
 
     def tokens_to_indices(self, tokens):
         def lookup(key):
-            # k = key if not isinstance(key, T.Tensor) else key.item()
             return self.token_to_index[key]
 
         return T.tensor([lookup("START")] + 
@@ -65,11 +62,19 @@ class MLP(nn.Module):
                         [lookup("END")])
 
     def forward(self, x):
-        batch_size = x.shape[0]
         x = x.to(device)
-        # print('x shape:', x.shape)
-        out = self.mlp(x)
-        # print('out shape:', out.shape)
+        x = x.flatten(start_dim=1)
+        print('x shape:', x.shape)
+
+        chunk_size = x.shape[0]//self.max_program_size
+        print('chunk size:', chunk_size)
+
+        chunks = x.split(chunk_size, dim=1)
+        print('chunks shape:', chunks.shape)
+
+        out = T.stack([model(x) for model, chunk in zip(self.models, chunks)])
+        print('out shape:', out.shape)
+
         return out
 
     def make_dataloader(self, data):
@@ -129,7 +134,7 @@ class MLP(nn.Module):
         print('Finished training')
 
 
-def train(lex, datafile, N=7, batch_size=2, epochs=1000000):
+def train(lex, datafile, N=7, batch_size=1, epochs=1000000):
     data = util.load(datafile)
     model = MLP(N=N, H=B_H, W=B_W, lexicon=lexicon, batch_size=batch_size).to(device)
     dataloader = model.make_dataloader(data)
