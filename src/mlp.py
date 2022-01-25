@@ -21,14 +21,14 @@ class MLP(nn.Module):
     def __init__(self, 
                  N, H, W,       # bitmap count, height, width
                  lexicon,       # list of program grammar components
-                 hidden=512,    # size of hidden layers
+                 hidden_k=1,    # size of hidden layers
                  max_program_size=50,
                  batch_size=16,
                  path='./mlp.pt'):
 
         super().__init__()
         self.N, self.H, self.W = N, H, W
-        self.hidden = hidden
+        self.hidden_k = hidden_k
         self.max_program_size = max_program_size
         self.batch_size = batch_size
         self.path = path
@@ -41,17 +41,18 @@ class MLP(nn.Module):
         self.pad_token      = self.token_to_index["PAD"]
 
         # MLP
+        k = self.N * self.H * self.W * self.hidden_k
         self.mlp = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(self.N * self.H * self.W, self.hidden),
+            nn.Linear(self.N * self.H * self.W, k),
             nn.ReLU(),
-            nn.Linear(self.hidden, self.hidden),
+            nn.Linear(k, k),
             nn.ReLU(),
-            nn.Linear(self.hidden, self.hidden),
+            nn.Linear(k, k),
             nn.ReLU(),
-            nn.Linear(self.hidden, self.hidden),
+            nn.Linear(k, k),
             nn.ReLU(),
-            nn.Linear(self.hidden, self.n_tokens * self.max_program_size),
+            nn.Linear(k, self.n_tokens * self.max_program_size),
         )
 
     def tokens_to_indices(self, tokens):
