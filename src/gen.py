@@ -168,11 +168,11 @@ def make_test_exprs(n_exprs, n_envs, a_bound, n_objs, pool_size, entities):
     pass
     
 def make_full_test_exprs():
-    n_exprs = 100
-    n_envs = 100
+    n_exprs = 1000
+    n_envs = 9
     a_bound = 1
     n_objs = 4
-    pool_size = 100
+    pool_size = n_exprs * n_objs
     entities = [Point, Line, Rect]
     print(f'Parameters used: n_exprs={n_exprs}, n_envs={n_envs}, a_bound={a_bound}, n_objs={n_objs}')
 
@@ -195,11 +195,11 @@ def make_full_test_exprs():
                'a_exprs': a_exprs},
               '../data/cmps.dat')
 
-    # Load saved pool
-    cmps = util.load('../data/cmps.dat')
-    envs, pool, a_exprs = cmps['envs'], cmps['pool'], cmps['a_exprs']
-    meta = cmps['meta']
-    n_envs, a_bound, pool_size, entities = meta['n_envs'], meta['a_bound'], meta['pool_size'], meta['entities']
+    # # Load saved pool
+    # cmps = util.load('../data/cmps.dat')
+    # envs, pool, a_exprs = cmps['envs'], cmps['pool'], cmps['a_exprs']
+    # meta = cmps['meta']
+    # n_envs, a_bound, pool_size, entities = meta['n_envs'], meta['a_bound'], meta['pool_size'], meta['entities']
 
     # Generate and save exprs w/ bmp outputs
     exprs = gen_random_exprs(pool, a_exprs, envs, n_exprs, n_objs)
@@ -258,8 +258,8 @@ if __name__ == '__main__':
     #     print('expr:', d, len(d))
     #     print(viz_grid(bmps[:25], d))
 
-    # make_full_test_exprs()
+    make_full_test_exprs()
     # viz_exs('../data/exs.dat')
 
-    make_small_test_exprs()    
-    viz_exs('../data/small-exs.dat')
+    # make_small_test_exprs()    
+    # viz_exs('../data/small-exs.dat')
