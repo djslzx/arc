@@ -66,6 +66,8 @@ class ArcTransformer(nn.Module):
         self.n_tokens       = len(lexicon)
         self.token_to_index = {s: i for i, s in enumerate(lexicon)}
         self.pad_token      = self.token_to_index["PAD"]
+        self.start_token    = self.token_to_index["START"]
+        self.end_token      = self.token_to_index["END"]
         self.p_embedding    = nn.Embedding(self.n_tokens, self.d_model)
         
         # positional encoding (for program embedding)
@@ -229,6 +231,20 @@ class ArcTransformer(nn.Module):
         T.save(self.state_dict(), PATH)
         print('Finished training')
 
+    def infer(self, bitmaps, max_length=100):
+        self.eval()
+        prompt = T.tensor([[self.start_token]]).long().to(device)
+        for _ in range(max_length):
+            out = self(bitmaps, prompt)
+            print(l)
+            index = out.topk(1).indices.item()
+            letter = T.tensor([[index]]).float.to(device)
+            prompt = T.cat((prompt, letter), dim=1)
+            
+            if index == self.end_token:
+                break
+        return prompt
+
 def train_transformer(datafile, lexicon, model, epochs):
     data = util.load(datafile)
     tloader, vloader = model.make_dataloaders(data)
@@ -252,6 +268,6 @@ if __name__ == '__main__':
                'P', 'L', 'R', 
                'H', 'V', 'T', '#', 'o', '@', '!', '{', '}',]
 
-    train_small(lexicon)
+    train_small(lexicon) 
     # train_full(lexicon)
     
