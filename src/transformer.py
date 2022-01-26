@@ -50,7 +50,7 @@ class ArcTransformer(nn.Module):
                  lexicon,        # list of program grammar components
                  d_model=16,
                  n_conv_layers=6, 
-                 n_conv_channels=32,
+                 n_conv_channels=16,
                  batch_size=16):
 
         super().__init__()
@@ -224,7 +224,7 @@ class ArcTransformer(nn.Module):
             writer.add_scalar('training loss', tloss, i)
             writer.add_scalar('validation loss', vloss, i)
 
-            if vloss <= 10 ** -3: break
+            if vloss <= 0.001 or tloss <= 0.001: break
 
         end_t = time.time()
         # print(f'[{i}/{epochs}] loss: {loss.item():.5f}, took {end_t - start_t:.2f}s')
@@ -252,8 +252,8 @@ def train_transformer(datafile, lexicon, model, epochs):
 
 def train_full(lex):
     datafile = '../data/exs.dat'
-    model = ArcTransformer(N=100, H=B_H, W=B_W, lexicon=lexicon, batch_size=32).to(device)
-    train_transformer(datafile, lex, model, epochs=100000)
+    model = ArcTransformer(N=9, H=B_H, W=B_W, lexicon=lexicon, batch_size=16).to(device)
+    train_transformer(datafile, lex, model, epochs=10_000_000)
 
 def train_small(lex):
     datafile = '../data/small-exs.dat'
