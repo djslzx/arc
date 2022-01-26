@@ -50,7 +50,7 @@ class ArcTransformer(nn.Module):
                  lexicon,        # list of program grammar components
                  d_model=16,
                  n_conv_layers=6, 
-                 n_conv_channels=2,
+                 n_conv_channels=32,
                  batch_size=16):
 
         super().__init__()
@@ -82,7 +82,7 @@ class ArcTransformer(nn.Module):
         k = n_conv_channels * H * W
         self.conv = nn.Sequential(*conv_stack)
         self.linear = nn.Sequential(
-            # nn.Flatten(),
+            nn.Flatten(),
             nn.Linear(k, k),
             nn.ReLU(),
             nn.Linear(k, k),
@@ -106,6 +106,9 @@ class ArcTransformer(nn.Module):
                         [self.token_to_index[token] for token in tokens] + 
                         [self.token_to_index["END"]])
 
+    def indices_to_tokens(self, indices):
+        return [self.lexicon[i] for i in indices]
+
     def forward(self, B, P):
         """
         bmp_sets: a batch of bitmap sets each represented as tensors w/ shape (b, N, c, H, W) 
@@ -118,8 +121,6 @@ class ArcTransformer(nn.Module):
         src = B.to(device)
         src = src.reshape(-1, 1, self.H, self.W)
         src = self.conv(src)
-        # pdb.set_trace()
-        src = src.flatten(start_dim=1)
         src = self.linear(src)
         src = src.reshape(batch_size, self.N, self.d_model)
         src = src.transpose(0,1)
@@ -137,77 +138,101 @@ class ArcTransformer(nn.Module):
         out = self.out(out)
         return out
 
-    def make_dataloader(self, data):
+    def make_dataloaders(self, data):
         B, P = [], []
         max_p_len = max(len(p) for bmps, p in data)
         for bmps, p in data:
             # process bitmaps: add channel dimension and turn list of bmps into tensor
             bmps = T.stack(bmps).unsqueeze(1)
-
             # process progs: turn into indices and add padding
             p = self.tokens_to_indices(p)
-            p = F.pad(p, pad=(0, max_p_len - len(p) + 1), value=self.pad_token) # add 1 to compensate for truncation later
+            p = F.pad(p, pad=(0, max_p_len - len(p)), value=self.pad_token) # add 1 to compensate for truncation later
 
             B.append(bmps)
             P.append(p)
 
-        dataset = T.utils.data.TensorDataset(T.stack(B), T.stack(P))
-        dataloader = T.utils.data.DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
-        return dataloader
+        B = T.stack(B)
+        P = T.stack(P)
+        tB, vB = B.split(B.shape[0]//2)
+        tP, vP = P.split(P.shape[0]//2)
 
-    def train_epoch(self, dataloader, criterion, optimizer):
+        tloader = T.utils.data.DataLoader(T.utils.data.TensorDataset(tB, tP),
+                                          batch_size=self.batch_size, shuffle=True)
+        vloader = T.utils.data.DataLoader(T.utils.data.TensorDataset(vB, vP),
+                                          batch_size=self.batch_size, shuffle=True)
+        # pdb.set_trace()
+        return tloader, vloader
+
+    @staticmethod
+    def loss(expected, actual):
+        return -T.mean(T.sum(F.log_softmax(actual, dim=-1) * expected, dim=-1))
+        
+    def train_epoch(self, dataloader, optimizer):
+        self.train()
         epoch_loss = 0
         for B, P in dataloader:
             B.to(device)
             P.to(device)
             P_input    = P[:, :-1].to(device)
             P_expected = F.one_hot(P[:, 1:], num_classes=self.n_tokens).float().transpose(0, 1).to(device)
-            # pdb.set_trace()
             out = self(B, P_input)
-            # print('P_input shape:', P_input.shape, 
-            #       'P_expected shape:', P_expected.shape, 
-            #       'output shape:', out.shape)
 
-            # TODO: Manually compute loss with logsoftmax
-            loss = -T.mean(T.sum(F.log_softmax(out,-1) * P_expected,-1))
-            # loss = criterion(out, P_expected)
-            # print(f" minibatch loss: {loss}")
-
+            """
+            log_softmax: get probabilities
+            sum at dim=-1: pull out nonzero components
+            mean: avg diff
+            negation: max the mean (a score) by minning -mean (a loss)
+            """
+            loss = ArcTransformer.loss(P_expected, out)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             epoch_loss += loss.detach().item()
         return epoch_loss/len(dataloader)
 
-    def train_model(self, dataloader, epochs=10000):
-        criterion = nn.CrossEntropyLoss()
-        optimizer = T.optim.Adam(self.parameters(), lr=0.001)
+    def validate_epoch(self, dataloader, optimizer):
+        self.eval()
+        epoch_loss = 0
+        with T.no_grad():
+            for B, P in dataloader:
+                B.to(device)
+                P.to(device)
+                P_input    = P[:, :-1].to(device)
+                P_expected = F.one_hot(P[:, 1:], num_classes=self.n_tokens).float().transpose(0, 1).to(device)
+                out = self(B, P_input)
+                loss = ArcTransformer.loss(P_expected, out)
+                epoch_loss += loss.detach().item()
+        return epoch_loss / len(dataloader)
+
+    def learn(self, tloader, vloader, epochs):
         self.to(device)
-        self.train()            # mark as train mode
-        start_t = time.time()
+        optimizer = T.optim.Adam(self.parameters(), lr=0.001)
         writer = tb.SummaryWriter()
+        start_t = time.time()
         
         for i in range(1, epochs+1):
             epoch_start_t = time.time()
-            loss = self.train_epoch(dataloader, criterion, optimizer)
+            tloss = self.train_epoch(tloader, optimizer)
             epoch_end_t = time.time()
+            vloss = self.validate_epoch(vloader, optimizer)
 
-            print(f'[{i}/{epochs}] loss: {loss:.5f},',
-                  f'epoch took {epoch_end_t - epoch_start_t:.2f}s,', 
-                  f'{epoch_end_t -start_t:.2f}s total')
-            writer.add_scalar('training loss', loss, i)
-            if loss == 0: break
+            print(f'[{i}/{epochs}] training loss: {tloss:.3f}, validation loss: {vloss:.3f};',
+                  f'epoch took {epoch_end_t - epoch_start_t:.3f}s,', 
+                  f'{epoch_end_t -start_t:.3f}s total')
+            writer.add_scalar('training loss', tloss, i)
+            writer.add_scalar('validation loss', vloss, i)
+
+            if vloss <= 10 ** -3: break
 
         end_t = time.time()
         # print(f'[{i}/{epochs}] loss: {loss.item():.5f}, took {end_t - start_t:.2f}s')
         T.save(self.state_dict(), PATH)
         print('Finished training')
 
-
 def train_transformer(datafile, lexicon, model, epochs):
     data = util.load(datafile)
-    dataloader = model.make_dataloader(data)
-    model.train_model(dataloader, epochs)
+    tloader, vloader = model.make_dataloaders(data)
+    model.learn(tloader, vloader, epochs)
 
 def train_full(lex):
     datafile = '../data/exs.dat'
@@ -216,7 +241,7 @@ def train_full(lex):
 
 def train_small(lex):
     datafile = '../data/small-exs.dat'
-    model = ArcTransformer(N=7, H=B_H, W=B_W, lexicon=lexicon, batch_size=2).to(device)
+    model = ArcTransformer(N=11, H=B_H, W=B_W, lexicon=lexicon, batch_size=4).to(device)
     train_transformer(datafile, lex, model, epochs=100000)
 
 if __name__ == '__main__':
@@ -228,4 +253,5 @@ if __name__ == '__main__':
                'H', 'V', 'T', '#', 'o', '@', '!', '{', '}',]
 
     train_small(lexicon)
+    # train_full(lexicon)
     

@@ -212,11 +212,11 @@ def make_full_test_exprs():
     util.save(data, '../data/exs.dat')
 
 def make_small_test_exprs():
-    n_exprs = 2
-    n_envs = 7
+    n_exprs = 100
+    n_envs = 11
     a_bound = 1
     n_objs = 3
-    pool_size = 64
+    pool_size = n_exprs * n_objs
     entities = [Point, Line, Rect]
     a_grammar = Grammar(ops=[Plus, Minus, Times], 
                         consts=([Z(i) for i in range(LIB_SIZE)] + 
@@ -246,7 +246,7 @@ def viz_exs(fname):
     for bmps, tokens in util.load('../data/small-exs.dat'):
         print('tokens:', tokens)
         expr = deserialize(tokens)
-        print(viz_grid(bmps[:9], expr))
+        viz_grid(bmps[:9], expr)
 
 if __name__ == '__main__':
 
@@ -261,5 +261,5 @@ if __name__ == '__main__':
     # make_full_test_exprs()
     # viz_exs('../data/exs.dat')
 
-    # make_small_test_exprs()    
+    make_small_test_exprs()    
     viz_exs('../data/small-exs.dat')
