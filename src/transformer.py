@@ -224,7 +224,7 @@ class ArcTransformer(nn.Module):
             writer.add_scalar('training loss', tloss, i)
             writer.add_scalar('validation loss', vloss, i)
 
-            if vloss <= 0.001 or tloss <= 0.001: break
+            if vloss <= 0.5 or tloss <= 0.5: break
 
         end_t = time.time()
         # print(f'[{i}/{epochs}] loss: {loss.item():.5f}, took {end_t - start_t:.2f}s')
@@ -258,7 +258,7 @@ def train_full(lex):
 def train_small(lex):
     datafile = '../data/small-exs.dat'
     model = ArcTransformer(N=11, H=B_H, W=B_W, lexicon=lexicon, batch_size=4).to(device)
-    train_transformer(datafile, lex, model, epochs=100000)
+    train_transformer(datafile, lex, model, epochs=1_000_000)
 
 if __name__ == '__main__':
     lexicon = [f'z_{i}' for i in range(LIB_SIZE)] + \
@@ -268,6 +268,6 @@ if __name__ == '__main__':
                'P', 'L', 'R', 
                'H', 'V', 'T', '#', 'o', '@', '!', '{', '}',]
 
-    train_small(lexicon) 
-    # train_full(lexicon)
+    # train_small(lexicon) 
+    train_full(lexicon)
     
