@@ -113,12 +113,11 @@ class ArcTransformer(nn.Module):
 
     def forward(self, B, P):
         """
-        bmp_sets: a batch of bitmap sets each represented as tensors w/ shape (b, N, c, H, W) 
+        B: a batch of bitmap sets each represented as tensors w/ shape (b, N, c, H, W) 
                   where b is the batch size and c is the number of channels
-        progs: a batch of programs represented as tensors of indices
+        P: a batch of programs represented as tensors of indices
         """
         # compute bitmap embedddings
-
         batch_size = B.shape[0]
         src = B.to(device)
         src = src.reshape(-1, 1, self.H, self.W)
@@ -132,6 +131,7 @@ class ArcTransformer(nn.Module):
         tgt = T.stack([self.p_embedding(p) for p in tgt])
         tgt = tgt.transpose(0, 1)
         tgt = self.pos_encoder(tgt)
+        # compute masks
         tgt_mask = self.transformer.generate_square_subsequent_mask(tgt.shape[0]).to(device)
         tgt_padding_mask = self.padding_mask(P).to(device)
 
@@ -142,27 +142,27 @@ class ArcTransformer(nn.Module):
 
     def make_dataloaders(self, data):
         B, P = [], []
-        max_p_len = max(len(p) for bmps, p in data)
+        max_p_len = max(len(p) for bmps, p in data) + 2 # compensate for added START/END tokens
         for bmps, p in data:
             # process bitmaps: add channel dimension and turn list of bmps into tensor
             bmps = T.stack(bmps).unsqueeze(1)
             # process progs: turn into indices and add padding
             p = self.tokens_to_indices(p)
-            p = F.pad(p, pad=(0, max_p_len - len(p)), value=self.pad_token) # add 1 to compensate for truncation later
+            p = F.pad(p, pad=(0, max_p_len - len(p)), value=self.pad_token)
 
             B.append(bmps)
             P.append(p)
 
         B = T.stack(B)
         P = T.stack(P)
-        tB, vB = B.split(B.shape[0]//2)
-        tP, vP = P.split(P.shape[0]//2)
+        # 80/20 split
+        tB, vB = B.split((B.shape[0]*4)//5)
+        tP, vP = P.split((P.shape[0]*4)//5)
 
         tloader = T.utils.data.DataLoader(T.utils.data.TensorDataset(tB, tP),
                                           batch_size=self.batch_size, shuffle=True)
         vloader = T.utils.data.DataLoader(T.utils.data.TensorDataset(vB, vP),
                                           batch_size=self.batch_size, shuffle=True)
-        # pdb.set_trace()
         return tloader, vloader
 
     @staticmethod
@@ -175,10 +175,10 @@ class ArcTransformer(nn.Module):
         for B, P in dataloader:
             B.to(device)
             P.to(device)
+            # pdb.set_trace()
             P_input    = P[:, :-1].to(device)
             P_expected = F.one_hot(P[:, 1:], num_classes=self.n_tokens).float().transpose(0, 1).to(device)
             out = self(B, P_input)
-
             """
             log_softmax: get probabilities
             sum at dim=-1: pull out nonzero components
@@ -224,25 +224,21 @@ class ArcTransformer(nn.Module):
             writer.add_scalar('training loss', tloss, i)
             writer.add_scalar('validation loss', vloss, i)
 
-            if vloss <= 0.5 or tloss <= 0.5: break
+            if vloss <= 1 or tloss <= 1: break
 
         end_t = time.time()
         # print(f'[{i}/{epochs}] loss: {loss.item():.5f}, took {end_t - start_t:.2f}s')
         T.save(self.state_dict(), PATH)
         print('Finished training')
 
-    def infer(self, bitmaps, max_length=100):
+    def infer(self, bitmaps, max_length):
         self.eval()
         prompt = T.tensor([[self.start_token]]).long().to(device)
         for _ in range(max_length):
-            out = self(bitmaps, prompt)
-            print(l)
-            index = out.topk(1).indices.item()
-            letter = T.tensor([[index]]).float.to(device)
-            prompt = T.cat((prompt, letter), dim=1)
-            
-            if index == self.end_token:
-                break
+            # pdb.set_trace()
+            out = self(bitmaps.unsqueeze(0), prompt)
+            indices = out.topk(1).indices
+            prompt = T.cat((prompt, indices[-1]), dim=1)
         return prompt
 
 def train_transformer(datafile, lexicon, model, epochs):
@@ -260,6 +256,18 @@ def train_small(lex):
     model = ArcTransformer(N=11, H=B_H, W=B_W, lexicon=lexicon, batch_size=4).to(device)
     train_transformer(datafile, lex, model, epochs=1_000_000)
 
+def test_inference(model_state_loc, data_loc):
+    model = ArcTransformer(N=9, H=B_H, W=B_W, lexicon=lexicon, batch_size=16).to(device)
+    model.load_state_dict(T.load(model_state_loc))
+    data = util.load(data_loc)
+    tloader, vloader = model.make_dataloaders(data)
+    for B, P in tloader:
+        for bitmaps, program in zip(B, P):
+            out = model.infer(bitmaps, max_length=30)
+            out = model.indices_to_tokens(out[0])
+            print(f'target program: {model.indices_to_tokens(program)}',
+                  f'\ngot: {out}')
+
 if __name__ == '__main__':
     lexicon = [f'z_{i}' for i in range(LIB_SIZE)] + \
               [f'S_{i}' for i in range(LIB_SIZE)] + \
@@ -268,6 +276,7 @@ if __name__ == '__main__':
                'P', 'L', 'R', 
                'H', 'V', 'T', '#', 'o', '@', '!', '{', '}',]
 
+    # TODO: make N flexible - adapt to datasets with variable-size bitmap example sets
     # train_small(lexicon) 
     train_full(lexicon)
     

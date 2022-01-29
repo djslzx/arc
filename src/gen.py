@@ -213,7 +213,7 @@ def make_full_test_exprs():
 
 def make_small_test_exprs():
     n_exprs = 100
-    n_envs = 11
+    n_envs = 9
     a_bound = 1
     n_objs = 3
     pool_size = n_exprs * n_objs
@@ -258,8 +258,8 @@ if __name__ == '__main__':
     #     print('expr:', d, len(d))
     #     print(viz_grid(bmps[:25], d))
 
-    make_full_test_exprs()
+    # make_full_test_exprs()
     # viz_exs('../data/exs.dat')
 
-    # make_small_test_exprs()    
-    # viz_exs('../data/small-exs.dat')
+    make_small_test_exprs()    
+    viz_exs('../data/small-exs.dat')
