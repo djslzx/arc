@@ -87,18 +87,22 @@ def to_abspath(path):
     else:
         return os.path.join(dirname, path)
 
-def save(data, fname):
+def save(data, fname, append=False):
     path = to_abspath(fname)
     print(f'Saving to {path}...')
-    with open(path, 'wb') as f:
+    mode = 'ab' if append else 'wb'
+    with open(path, mode) as f:
         pickle.dump(data, f)
 
 def load(fname):
     path = to_abspath(fname)
     print(f'Loading from {path}...')
     with open(path, 'rb') as f:
-        return pickle.load(f)
-
+        while True:
+            try:
+                yield pickle.load(f)
+            except EOFError:
+                break
 
 if __name__ == '__main__':
     print(img_to_tensor(['_#_',

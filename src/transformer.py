@@ -241,20 +241,10 @@ class ArcTransformer(nn.Module):
             prompt = T.cat((prompt, indices[-1]), dim=1)
         return prompt
 
-def train_transformer(datafile, lexicon, model, epochs):
-    data = util.load(datafile)
-    tloader, vloader = model.make_dataloaders(data)
+def train_tf(datafile, lexicon, epochs, batch_size):
+    model = ArcTransformer(N=9, H=B_H, W=B_W, lexicon=lexicon, batch_size=batch_size).to(device)
+    tloader, vloader = model.make_dataloaders(util.load(datafile))
     model.learn(tloader, vloader, epochs)
-
-def train_full(lex):
-    datafile = '../data/exs.dat'
-    model = ArcTransformer(N=9, H=B_H, W=B_W, lexicon=lexicon, batch_size=16).to(device)
-    train_transformer(datafile, lex, model, epochs=10_000_000)
-
-def train_small(lex):
-    datafile = '../data/small-exs.dat'
-    model = ArcTransformer(N=11, H=B_H, W=B_W, lexicon=lexicon, batch_size=4).to(device)
-    train_transformer(datafile, lex, model, epochs=1_000_000)
 
 def test_inference(model_state_loc, data_loc):
     model = ArcTransformer(N=9, H=B_H, W=B_W, lexicon=lexicon, batch_size=16).to(device)
@@ -277,6 +267,5 @@ if __name__ == '__main__':
                'H', 'V', 'T', '#', 'o', '@', '!', '{', '}',]
 
     # TODO: make N flexible - adapt to datasets with variable-size bitmap example sets
-    # train_small(lexicon) 
-    train_full(lexicon)
+    train_tf('../data/full-exs.dat', lexicon, epochs=1_000_000, batch_size=16)
     
