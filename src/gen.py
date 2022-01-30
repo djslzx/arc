@@ -1,5 +1,7 @@
 """
 Make large programs as training data
+
+TODO: generate up to n objs, not always exactly n objs
 """
 
 import pickle
@@ -202,7 +204,9 @@ def make_full_test_exprs():
     # n_envs, a_bound, pool_size, entities = meta['n_envs'], meta['a_bound'], meta['pool_size'], meta['entities']
 
     # Generate and save exprs w/ bmp outputs
-    exprs = gen_random_exprs(pool, a_exprs, envs, n_exprs, n_objs)
+    exprs = []
+    for i in range(1, n_objs+1):
+        exprs.extend(gen_random_exprs(pool, a_exprs, envs, n_exprs, i))
     data = []
     for i, expr in enumerate(exprs):
         serialized = expr.serialize()
@@ -233,7 +237,9 @@ def make_small_test_exprs():
                'pool': pool, 
                'a_exprs': a_exprs},
               '../data/small-cmps.dat')
-    exprs = gen_random_exprs(pool, a_exprs, envs, n_exprs, n_objs)
+    exprs = []
+    for i in range(1, n_objs+1):
+        exprs.extend(gen_random_exprs(pool, a_exprs, envs, n_exprs, i))
     data = []
     for i, expr in enumerate(exprs):
         bmps = [expr.eval(env) for env in envs] 
