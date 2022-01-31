@@ -34,8 +34,7 @@ def gen_shape_pool(entities, a_exprs, envs, pool_size):
                 n_hits += 1
                 pool[entity].append(e)
             n_tries += 1    
-            print(f'{entity} hits: {n_hits}/{n_tries}', end='\r')
-        print()
+        print(f'{entity} hits: {n_hits}/{n_tries}')
     return pool
 
 def gen_random_expr(pool, a_exprs, envs, n_objs):
@@ -82,8 +81,7 @@ def rand_sprite(envs, a_exprs, i=-1, color=-1):
             break
         else: 
             n_misses += 1
-        print(f'sprite misses:', n_misses, end='\r')
-    if n_misses > 0: print()
+    print(f'sprite misses:', n_misses)
     if color > 1: return Apply(Recolor(color), s)
     else:         return s
 
@@ -195,13 +193,13 @@ def make_exprs(n_exprs,         # number of total programs to make
                    'envs': envs, 
                    'pool': pool, 
                    'a_exprs': a_exprs},
-                  '../data/cmps.dat')
+                  cmps_loc)
 
     # Generate and save exprs w/ bmp outputs
     for n_objs in range(1, max_n_objs+1):
         for expr in gen_random_exprs(pool, a_exprs, envs, n_exprs_per_size, n_objs):
             bmps = [expr.eval(env) for env in envs] 
-            p = expr.serialize()
+            p = expr.simplify_indices().serialize()
             util.save((bmps, p), exprs_loc, append=True)
 
 def viz_exs(fname):
@@ -225,11 +223,11 @@ if __name__ == '__main__':
     #     print(viz_grid(bmps[:25], d))
 
     # full
-    make_exprs(n_exprs=1_000_000, n_envs=9, max_n_objs=4, a_bound=1,
+    make_exprs(n_exprs=100_000, n_envs=9, max_n_objs=4, a_bound=1,
                entities=[Point, Line, Rect],
-               cmps_loc='../data/full-cmps.dat',
-               exprs_loc='../data/full-exs.dat',
-               load_pool=True)
+               cmps_loc='../data/med-cmps.dat',
+               exprs_loc='../data/med-exs.dat',
+               load_pool=False)
 
     # # small
     # make_exprs(n_exprs=1_000, n_envs=9, max_n_objs=3, a_bound=1,
