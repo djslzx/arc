@@ -4,6 +4,7 @@ Make large programs as training data
 TODO: generate up to n objs, not always exactly n objs
 """
 
+import pdb
 import pickle
 from math import floor, ceil, log2, sqrt
 import random as R
@@ -177,6 +178,7 @@ def make_exprs(n_exprs,         # number of total programs to make
     print(f'Parameters: n_exprs={n_exprs}, n_envs={n_envs}, max_n_objs={max_n_objs}, a_bound={a_bound}, entities={entities}')
 
     if load_pool:
+        pdb.set_trace()
         cmps = util.load(cmps_loc)
         envs, pool, a_exprs = cmps['envs'], cmps['pool'], cmps['a_exprs']
         meta = cmps['meta']
@@ -202,16 +204,16 @@ def make_exprs(n_exprs,         # number of total programs to make
         for expr in gen_random_exprs(pool, a_exprs, envs, n_exprs_per_size, n_objs):
             bmps = [expr.eval(env) for env in envs] 
             p = expr.serialize()
-            util.save((bmps, p), exprs_loc, append=True)
+            util.save((bmps, p), exprs_loc, append=True, verbose=False)
 
 def viz_exs(fname):
-    for bmps, tokens in util.load(fname):
+    for bmps, tokens in util.load_incremental(fname):
         print('tokens:', tokens)
         expr = deserialize(tokens)
         viz_grid(bmps[:9], expr)
 
 def list_exs(fname):
-    for bmps, tokens in util.load(fname):
+    for bmps, tokens in util.load_incremental(fname):
         print(deserialize(tokens))
 
 if __name__ == '__main__':
@@ -224,19 +226,11 @@ if __name__ == '__main__':
     #     print('expr:', d, len(d))
     #     print(viz_grid(bmps[:25], d))
 
-    # full
-    make_exprs(n_exprs=1_000_000, n_envs=9, max_n_objs=4, a_bound=1,
+    make_exprs(n_exprs=100, n_envs=9, max_n_objs=4, a_bound=1,
                entities=[Point, Line, Rect],
-               cmps_loc='../data/full-cmps.dat',
-               exprs_loc='../data/full-exs.dat',
+               cmps_loc='../data/small-cmps.dat',
+               exprs_loc='../data/small-exs.dat',
                load_pool=True)
-
-    # # small
-    # make_exprs(n_exprs=1_000, n_envs=9, max_n_objs=3, a_bound=1,
-    #            entities=[Point, Line, Rect],
-    #            cmps_loc='../data/small-cmps.dat'
-    #            exprs_loc='../data/small-exs.dat',
-    #            load_pool=False)
 
     # list_exs('../data/full-exs.dat')
     # make_small_test_exprs()    

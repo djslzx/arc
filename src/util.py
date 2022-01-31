@@ -87,16 +87,22 @@ def to_abspath(path):
     else:
         return os.path.join(dirname, path)
 
-def save(data, fname, append=False):
+def save(data, fname, append=False, verbose=True):
     path = to_abspath(fname)
-    print(f'Saving to {path}...')
+    if verbose: print(f'Saving to {path}...')
     mode = 'ab' if append else 'wb'
     with open(path, mode) as f:
         pickle.dump(data, f)
 
-def load(fname):
+def load(fname, verbose=True):
     path = to_abspath(fname)
-    print(f'Loading from {path}...')
+    if verbose: print(f'Loading from {path}...')
+    with open(path, 'rb') as f:
+        return pickle.load(f)
+
+def load_incremental(fname, verbose=True):
+    path = to_abspath(fname)
+    if verbose: print(f'Loading from {path}...')
     with open(path, 'rb') as f:
         while True:
             try:
