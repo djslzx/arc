@@ -17,7 +17,7 @@ from grammar import *
 device = T.device('cuda:0' if T.cuda.is_available() else 'cpu')
 print('Using ' + ('GPU' if T.cuda.is_available() else 'CPU'))
 
-PATH='./transformer_model.pt'
+PATH='./tf_model.pt'
 
 T.set_printoptions(threshold=10_000)
 
@@ -266,6 +266,11 @@ if __name__ == '__main__':
                'P', 'L', 'R', 
                'H', 'V', 'T', '#', 'o', '@', '!', '{', '}',]
 
+    # TODO: update/improve model state save loc 
+    # TODO: command line args; would enable running multiple models in tandem without editing source files
     # TODO: make N flexible - adapt to datasets with variable-size bitmap example sets
-    train_tf('../data/full-exs.dat', lexicon, epochs=1_000_000, batch_size=16)
+
+    # train_tf('../data/full-exs.dat', lexicon, epochs=1_000_000, batch_size=16)
+    test_inference(model_state_loc='../models/tf_med.pt', 
+                   data_loc='small-exs.dat')
     
