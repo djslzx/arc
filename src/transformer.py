@@ -60,6 +60,7 @@ class ArcTransformer(nn.Module):
         self.n_conv_layers = n_conv_layers
         self.n_conv_channels = n_conv_channels
         self.batch_size = batch_size
+        self.run = int(time.time())
 
         # program embedding
         lexicon             = lexicon + ["START", "END", "PAD"] # add start/end tokens to lex
@@ -111,6 +112,9 @@ class ArcTransformer(nn.Module):
 
     def indices_to_tokens(self, indices):
         return [self.lexicon[i] for i in indices]
+    
+    def model_path(self, epoch):
+        return f'tf_model_{self.run}_{epoch}.pt'
 
     def forward(self, B, P):
         """
@@ -232,7 +236,7 @@ class ArcTransformer(nn.Module):
                     'optimizer_state_dict': optimizer.state_dict(),
                     'training_loss': tloss,
                     'validation loss': vloss,
-                }, PATH)
+                }, self.model_path(epoch))
                 current_hour += 1
 
             if vloss <= threshold or tloss <= threshold: break
@@ -243,7 +247,7 @@ class ArcTransformer(nn.Module):
             'optimizer_state_dict': optimizer.state_dict(),
             'training loss': tloss,
             'validation loss': vloss,
-        }, PATH)
+        }, self.model_path(epoch))
         print('Finished training')
 
     def infer(self, bitmaps, max_length):
