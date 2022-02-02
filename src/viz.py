@@ -52,23 +52,21 @@ def viz_json(fname, save=False):
     ys = [d['output'] for d in data['train']]
     viz_sample(xs, ys, title=f'pdfs/{name}.pdf')
 
-def viz_sample(xs, ys, title='', txt='', save=False):
+def viz_sample(xs, ys, title='', text='', save=False):
     '''Visualize an nx2 grid of input/output pairs'''
     f, ax = plt.subplots(len(xs), 2)
-    # f.suptitle(title)
-    plt.figtext(0.5, 0.01, txt, wrap=True, horizontalalignment='center', fontsize=9)    
+    plt.figtext(0.5, 0.01, text, wrap=True, horizontalalignment='center', fontsize=9)
     for i, (x, y) in enumerate(zip(xs, ys)):
         show(ax[i, 0], x)
         show(ax[i, 1], y)
-    # output()
-    output(title, show=False)
+    output()
 
 def viz_mult(ts, text=''):
     f, ax = plt.subplots(len(ts), 1)
     plt.figtext(0.5, 0.01, text, wrap=True, horizontalalignment='center', fontsize=9)
     for i, t in enumerate(ts):
         show(ax[i], t)
-    output(show=True)
+    output()
 
 def viz(t, title='', subtitle='', fname=None, label=False):
     # f, ax = plt.plot() # subplots(2, 1)
@@ -86,7 +84,6 @@ def viz_grid(samples, txt=''):
     for i, sample in enumerate(samples[:n**2]):
         x, y = i%n, i//n
         show(ax[y, x], sample)
-
     output()
 
 if __name__ == '__main__':

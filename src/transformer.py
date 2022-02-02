@@ -13,6 +13,7 @@ import torch.optim as optim
 import torch.utils.tensorboard as tb
 
 from grammar import *
+import viz
 
 device = T.device('cuda:0' if T.cuda.is_available() else 'cpu')
 print('Using ' + ('GPU' if T.cuda.is_available() else 'CPU'))
@@ -205,29 +206,44 @@ class ArcTransformer(nn.Module):
                 epoch_loss += loss.detach().item()
         return epoch_loss / len(dataloader)
 
-    def learn(self, tloader, vloader, epochs, threshold=0.5):
+    def learn(self, tloader, vloader, epochs, threshold=0):
         self.to(device)
         optimizer = T.optim.Adam(self.parameters(), lr=0.001)
         writer = tb.SummaryWriter()
         start_t = time.time()
-        
-        for i in range(1, epochs+1):
+        current_hour = 0
+
+        for epoch in range(1, epochs+1):
             epoch_start_t = time.time()
             tloss = self.train_epoch(tloader, optimizer)
             epoch_end_t = time.time()
             vloss = self.validate_epoch(vloader, optimizer)
 
-            print(f'[{i}/{epochs}] training loss: {tloss:.3f}, validation loss: {vloss:.3f};',
+            print(f'[{epoch}/{epochs}] training loss: {tloss:.3f}, validation loss: {vloss:.3f};',
                   f'epoch took {epoch_end_t - epoch_start_t:.3f}s,', 
                   f'{epoch_end_t -start_t:.3f}s total')
             writer.add_scalar('training loss', tloss, i)
             writer.add_scalar('validation loss', vloss, i)
 
+            if (epoch_end_t - start_t)//3600 > current_hour:
+                T.save({
+                    'epoch': epoch,
+                    'model_state_dict': self.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'training_loss': tloss,
+                    'validation loss': vloss,
+                }, PATH)
+                current_hour += 1
+
             if vloss <= threshold or tloss <= threshold: break
 
-        end_t = time.time()
-        # print(f'[{i}/{epochs}] loss: {loss.item():.5f}, took {end_t - start_t:.2f}s')
-        T.save(self.state_dict(), PATH)
+        T.save({
+            'epoch': epoch,
+            'model_state_dict': self.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'training loss': tloss,
+            'validation loss': vloss,
+        }, PATH)
         print('Finished training')
 
     def infer(self, bitmaps, max_length):
@@ -237,7 +253,10 @@ class ArcTransformer(nn.Module):
             # pdb.set_trace()
             out = self(bitmaps.unsqueeze(0), prompt)
             indices = out.topk(1).indices
-            prompt = T.cat((prompt, indices[-1]), dim=1)
+            next_index = indices[-1]
+            prompt = T.cat((prompt, next_index), dim=1)
+            if next_index == self.end_token:
+                break
         return prompt
 
 def train_tf(data_loc, lexicon, epochs, batch_size):
@@ -246,15 +265,37 @@ def train_tf(data_loc, lexicon, epochs, batch_size):
     model.learn(tloader, vloader, epochs)
 
 def test_inference(model_state_loc, data_loc):
+    def strip(tokens):
+        return [t for t in tokens if t not in ['START', 'END', 'PAD']]
+
     model = ArcTransformer(N=9, H=B_H, W=B_W, lexicon=lexicon, batch_size=16).to(device)
     model.load_state_dict(T.load(model_state_loc))
     tloader, vloader = model.make_dataloaders(data_loc)
+
+    n_envs = 7
     for B, P in tloader:
         for bitmaps, program in zip(B, P):
             out = model.infer(bitmaps, max_length=30)
             out = model.indices_to_tokens(out[0])
-            print(f'target program: {model.indices_to_tokens(program)}',
-                  f'\ngot: {out}')
+            out = strip(out)
+            out = deserialize(out)
+            ans = strip(model.indices_to_tokens(program))
+            ans = deserialize(ans)
+
+            text = f'wanted: {ans}\ngot: {out}\n'
+            print(text)
+
+            bmps = []
+            while len(bmps) < n_envs:
+                env = {'z': seed_zs(), 'sprites': seed_sprites()}
+                try:
+                    bmps.append((ans.eval(env), out.eval(env)))
+                except:
+                    pass
+
+            x, y = util.unzip(bmps)
+            viz.viz_sample(x, y, text=text)
+
 
 if __name__ == '__main__':
     lexicon = [f'z_{i}' for i in range(LIB_SIZE)] + \
@@ -268,8 +309,8 @@ if __name__ == '__main__':
     # TODO: command line args; would enable running multiple models in tandem without editing source files
     # TODO: make N flexible - adapt to datasets with variable-size bitmap example sets
 
-    data_loc = '../data/med-exs.dat'
-    # train_tf(data_loc, lexicon, epochs=1_000_000, batch_size=16)
-    test_inference(model_state_loc='../models/tf_med.pt', 
-                   data_loc='small-exs.dat')
+    data_loc = '../data/tiny-exs.dat'
+    train_tf(data_loc, lexicon, epochs=1_000_000, batch_size=16)
+    # test_inference(model_state_loc='../models/tf_med.pt', 
+    #                data_loc='../data/tiny-exs.dat')
     

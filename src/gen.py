@@ -63,10 +63,10 @@ def clean(expr):
     # return cleaned
     return expr
 
-def gen_random_exprs(pool, a_exprs, envs, n_exprs, n_objs):
+def gen_random_exprs(pool, a_exprs, envs, n_exprs, n_objs, verbose=True):
     for i in range(n_exprs):
         expr = gen_random_expr(pool, a_exprs, envs, n_objs)
-        print(f'expr generated [{i+1}/{n_exprs}]: {expr}')
+        if verbose: print(f'expr generated [{i+1}/{n_exprs}]: {expr}')
         yield expr
 
 def rand_color():
@@ -235,4 +235,3 @@ if __name__ == '__main__':
                load_pool=False)
 
     # list_exs('../data/full-exs.dat')
-    # make_small_test_exprs()    
