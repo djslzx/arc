@@ -140,17 +140,16 @@ class ArcTransformer(nn.Module):
         out = self.out(out)
         return out
 
-    def make_dataloaders(self, data):
+    def make_dataloaders(self, data_loc):
         B, P = [], []
-        max_p_len = max(len(p) for bmps, p in data) + 2 # compensate for added START/END tokens
-        for bmps, p in data:
+        max_p_len = max(len(p) for bmps, p in util.load_incremental(data_loc))
+        for bmps, p in util.load_incremental(data_loc):
             # process bitmaps: add channel dimension and turn list of bmps into tensor
             bmps = T.stack(bmps).unsqueeze(1)
+            B.append(bmps)
             # process progs: turn into indices and add padding
             p = self.tokens_to_indices(p)
-            p = F.pad(p, pad=(0, max_p_len - len(p)), value=self.pad_token)
-
-            B.append(bmps)
+            p = F.pad(p, pad=(0, max_p_len + 2 - len(p)), value=self.pad_token) # add 2 to compensate for START/END tokens
             P.append(p)
 
         B = T.stack(B)
@@ -206,7 +205,7 @@ class ArcTransformer(nn.Module):
                 epoch_loss += loss.detach().item()
         return epoch_loss / len(dataloader)
 
-    def learn(self, tloader, vloader, epochs):
+    def learn(self, tloader, vloader, epochs, threshold=0.5):
         self.to(device)
         optimizer = T.optim.Adam(self.parameters(), lr=0.001)
         writer = tb.SummaryWriter()
@@ -224,7 +223,7 @@ class ArcTransformer(nn.Module):
             writer.add_scalar('training loss', tloss, i)
             writer.add_scalar('validation loss', vloss, i)
 
-            if vloss <= 1 or tloss <= 1: break
+            if vloss <= threshold or tloss <= threshold: break
 
         end_t = time.time()
         # print(f'[{i}/{epochs}] loss: {loss.item():.5f}, took {end_t - start_t:.2f}s')
@@ -241,16 +240,15 @@ class ArcTransformer(nn.Module):
             prompt = T.cat((prompt, indices[-1]), dim=1)
         return prompt
 
-def train_tf(datafile, lexicon, epochs, batch_size):
+def train_tf(data_loc, lexicon, epochs, batch_size):
     model = ArcTransformer(N=9, H=B_H, W=B_W, lexicon=lexicon, batch_size=batch_size).to(device)
-    tloader, vloader = model.make_dataloaders(util.load(datafile))
+    tloader, vloader = model.make_dataloaders(data_loc)
     model.learn(tloader, vloader, epochs)
 
 def test_inference(model_state_loc, data_loc):
     model = ArcTransformer(N=9, H=B_H, W=B_W, lexicon=lexicon, batch_size=16).to(device)
     model.load_state_dict(T.load(model_state_loc))
-    data = util.load(data_loc)
-    tloader, vloader = model.make_dataloaders(data)
+    tloader, vloader = model.make_dataloaders(data_loc)
     for B, P in tloader:
         for bitmaps, program in zip(B, P):
             out = model.infer(bitmaps, max_length=30)
@@ -267,5 +265,6 @@ if __name__ == '__main__':
                'H', 'V', 'T', '#', 'o', '@', '!', '{', '}',]
 
     # TODO: make N flexible - adapt to datasets with variable-size bitmap example sets
-    train_tf('../data/full-exs.dat', lexicon, epochs=1_000_000, batch_size=16)
+    data_loc = '../data/med-exs.dat'
+    train_tf(data_loc, lexicon, epochs=1_000_000, batch_size=16)
     
