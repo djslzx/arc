@@ -40,7 +40,7 @@ def gen_shape_pool(entities, a_exprs, envs, pool_size):
 
 def gen_random_expr(pool, a_exprs, envs, n_objs):
     objs = []
-    for _ in range(n_objs):
+    while len(objs) < n_objs:
         n = R.randint(0, 8)
         # if n < 8:
         if n < 1:   entity = Point
@@ -50,7 +50,8 @@ def gen_random_expr(pool, a_exprs, envs, n_objs):
         # else:
         #     e = rand_sprite(envs, a_exprs)
         # TODO: transforms
-        objs.append(e)
+        if e not in objs:
+            objs.append(e)
     expr = Seq(*objs)
     return clean(expr)
 
@@ -172,11 +173,10 @@ def make_exprs(n_exprs,         # number of total programs to make
                exprs_loc,       # where to save generated programs
                load_pool=True): # whether to load cmps from cmps_loc or not (gen from scratch)
     n_exprs_per_size = n_exprs//max_n_objs
-    pool_size = n_exprs_per_size * max_n_objs
+    pool_size = n_exprs * max_n_objs
     print(f'Parameters: n_exprs={n_exprs}, n_envs={n_envs}, max_n_objs={max_n_objs}, a_bound={a_bound}, entities={entities}')
 
     if load_pool:
-        pdb.set_trace()
         cmps = util.load(cmps_loc)
         envs, pool, a_exprs = cmps['envs'], cmps['pool'], cmps['a_exprs']
         meta = cmps['meta']
@@ -188,6 +188,10 @@ def make_exprs(n_exprs,         # number of total programs to make
         envs = [{'z': seed_zs(), 'sprites': seed_sprites()} for _ in range(n_envs)]
         a_exprs = [a_expr for a_expr, size in bottom_up_generator(a_bound, a_grammar, envs)]
         pool = gen_shape_pool(entities, a_exprs, envs, pool_size)
+        try:
+            open(cmps_loc, 'wb').close() # clear file
+        except FileNotFoundError:
+            pass
         util.save({'meta': {'n_envs': n_envs,
                             'a_bound': a_bound,
                             'pool_size': pool_size,
@@ -202,7 +206,7 @@ def make_exprs(n_exprs,         # number of total programs to make
         for expr in gen_random_exprs(pool, a_exprs, envs, n_exprs_per_size, n_objs):
             bmps = [expr.eval(env) for env in envs] 
             p = expr.simplify_indices().serialize()
-            util.save((bmps, p), exprs_loc, append=True, verbose=False)
+            util.save((bmps, p), fname=exprs_loc, append=True, verbose=False)
 
 def viz_exs(fname):
     for bmps, tokens in util.load_incremental(fname):
@@ -224,10 +228,10 @@ if __name__ == '__main__':
     #     print('expr:', d, len(d))
     #     print(viz_grid(bmps[:25], d))
 
-    make_exprs(n_exprs=100_000, n_envs=9, max_n_objs=4, a_bound=1,
+    make_exprs(n_exprs=5, n_envs=9, max_n_objs=5, a_bound=1,
                entities=[Point, Line, Rect],
-               cmps_loc='../data/med-cmps.dat',
-               exprs_loc='../data/med-exs.dat',
+               cmps_loc='../data/tiny-cmps.dat',
+               exprs_loc='../data/tiny-exs.dat',
                load_pool=False)
 
     # list_exs('../data/full-exs.dat')
