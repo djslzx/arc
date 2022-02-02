@@ -62,10 +62,10 @@ def clean(expr):
     # return cleaned
     return expr
 
-def gen_random_exprs(pool, a_exprs, envs, n_exprs, n_objs):
+def gen_random_exprs(pool, a_exprs, envs, n_exprs, n_objs, verbose=True):
     for i in range(n_exprs):
         expr = gen_random_expr(pool, a_exprs, envs, n_objs)
-        print(f'expr generated [{i+1}/{n_exprs}]: {expr}')
+        if verbose: print(f'expr generated [{i+1}/{n_exprs}]: {expr}')
         yield expr
 
 def rand_color():
@@ -224,11 +224,10 @@ if __name__ == '__main__':
     #     print('expr:', d, len(d))
     #     print(viz_grid(bmps[:25], d))
 
-    make_exprs(n_exprs=100_000, n_envs=9, max_n_objs=4, a_bound=1,
+    make_exprs(n_exprs=10, n_envs=9, max_n_objs=4, a_bound=1,
                entities=[Point, Line, Rect],
-               cmps_loc='../data/med-cmps.dat',
-               exprs_loc='../data/med-exs.dat',
+               cmps_loc='../data/tiny-cmps.dat',
+               exprs_loc='../data/tiny-exs.dat',
                load_pool=False)
 
     # list_exs('../data/full-exs.dat')
-    # make_small_test_exprs()    
