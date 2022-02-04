@@ -1,5 +1,5 @@
 import pdb
-
+import sys
 import math
 import numpy as np
 import time
@@ -226,15 +226,15 @@ class ArcTransformer(nn.Module):
             print(f'[{epoch}/{epochs}] training loss: {tloss:.3f}, validation loss: {vloss:.3f};',
                   f'epoch took {epoch_end_t - epoch_start_t:.3f}s,', 
                   f'{epoch_end_t -start_t:.3f}s total')
-            writer.add_scalar('training loss', tloss, i)
-            writer.add_scalar('validation loss', vloss, i)
+            writer.add_scalar('training loss', tloss, epoch)
+            writer.add_scalar('validation loss', vloss, epoch)
 
             if (epoch_end_t - start_t)//3600 > current_hour:
                 T.save({
                     'epoch': epoch,
                     'model_state_dict': self.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
-                    'training_loss': tloss,
+                    'training loss': tloss,
                     'validation loss': vloss,
                 }, self.model_path(epoch))
                 current_hour += 1
@@ -268,37 +268,53 @@ def train_tf(data_loc, lexicon, epochs, batch_size):
     tloader, vloader = model.make_dataloaders(data_loc)
     model.learn(tloader, vloader, epochs)
 
-def test_inference(model_state_loc, data_loc):
+def test_inference(checkpoint_loc, data_loc):
     def strip(tokens):
         return [t for t in tokens if t not in ['START', 'END', 'PAD']]
 
     model = ArcTransformer(N=9, H=B_H, W=B_W, lexicon=lexicon, batch_size=16).to(device)
-    model.load_state_dict(T.load(model_state_loc))
+    checkpoint = T.load(checkpoint_loc)
+    try:
+        # backwards compatibility
+        tloss = checkpoint['training_loss']
+    except:
+        tloss = checkpoint ['training loss']
+    vloss = checkpoint['validation loss']
+    print(f"Training loss: {tloss}, validation loss: {vloss}")
+    model.load_state_dict(checkpoint['model_state_dict'])
     tloader, vloader = model.make_dataloaders(data_loc)
 
     n_envs = 7
     for B, P in tloader:
         for bitmaps, program in zip(B, P):
+            ans_tokens = model.indices_to_tokens(program)
+            ans_expr = deserialize(strip(ans_tokens))
+
             out = model.infer(bitmaps, max_length=30)
-            out = model.indices_to_tokens(out[0])
-            out = strip(out)
-            out = deserialize(out)
-            ans = strip(model.indices_to_tokens(program))
-            ans = deserialize(ans)
+            out_tokens = model.indices_to_tokens(out[0])
+            try:
+                # Expr might be ill-formed
+                out_expr = deserialize(strip(out_tokens))
+            except:
+                out_expr = "Ill-formed"
 
-            text = f'wanted: {ans}\ngot: {out}\n'
-            print(text)
+            # text = f'wanted: {ans}\ngot: {out}\n'
+            print(f'expected tokens : {ans_tokens}')
+            print(f'expected expr: {ans_expr}')
+            print('-----')
+            print(f'actual tokens: {out_tokens}')
+            print(f'actual expr: {out_expr}')
+            print()
 
-            bmps = []
-            while len(bmps) < n_envs:
-                env = {'z': seed_zs(), 'sprites': seed_sprites()}
-                try:
-                    bmps.append((ans.eval(env), out.eval(env)))
-                except:
-                    pass
-
-            x, y = util.unzip(bmps)
-            viz.viz_sample(x, y, text=text)
+            # bmps = []
+            # while len(bmps) < n_envs:
+            #     env = {'z': seed_zs(), 'sprites': seed_sprites()}
+            #     try:
+            #         bmps.append((ans.eval(env), out.eval(env)))
+            #     except:
+            #         pass
+            # x, y = util.unzip(bmps)
+            # viz.viz_sample(x, y, text=text)
 
 
 if __name__ == '__main__':
@@ -313,8 +329,20 @@ if __name__ == '__main__':
     # TODO: command line args; would enable running multiple models in tandem without editing source files
     # TODO: make N flexible - adapt to datasets with variable-size bitmap example sets
 
-    data_loc = '../data/tiny-exs.dat'
-    train_tf(data_loc, lexicon, epochs=1_000_000, batch_size=16)
-    # test_inference(model_state_loc='../models/tf_med.pt', 
-    #                data_loc='../data/tiny-exs.dat')
+    if sys.argv[1] == 'sample':
+        if len(sys.argv) != 4:
+            print("Usage: transformer.py sample checkpoint_loc data_loc")
+            exit(1)
+        checkpoint_loc, data_loc = sys.argv[2:]
+        test_inference(checkpoint_loc, data_loc)        
+
+    elif sys.argv[1] == 'train':
+        if len(sys.argv) != 3:
+            print("Usage: transformer.py train data_loc")
+        data_loc = sys.argv[2]
+        train_tf(data_loc, lexicon,
+                 epochs=1_000_000, batch_size=16)        
+    else:
+        print("Usage: transformer.py train | sample")
+
     
