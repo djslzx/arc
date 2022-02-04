@@ -329,20 +329,27 @@ if __name__ == '__main__':
     # TODO: command line args; would enable running multiple models in tandem without editing source files
     # TODO: make N flexible - adapt to datasets with variable-size bitmap example sets
 
+    if len(sys.argv) < 2:
+        print("Usage: transformer.py train | sample")
+        exit(1)
+
     if sys.argv[1] == 'sample':
         if len(sys.argv) != 4:
             print("Usage: transformer.py sample checkpoint_loc data_loc")
             exit(1)
+
         checkpoint_loc, data_loc = sys.argv[2:]
         test_inference(checkpoint_loc, data_loc)        
 
     elif sys.argv[1] == 'train':
         if len(sys.argv) != 3:
             print("Usage: transformer.py train data_loc")
+            exit(1)
+
         data_loc = sys.argv[2]
         train_tf(data_loc, lexicon,
                  epochs=1_000_000, batch_size=16)        
     else:
         print("Usage: transformer.py train | sample")
-
+        exit(1)
     
