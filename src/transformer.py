@@ -7,15 +7,14 @@ import time
 import torch as T
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn.utils.rnn import pad_sequence
-
 import torch.optim as optim
 import torch.utils.tensorboard as tb
+import matplotlib.pyplot as plt
 
 from grammar import *
-import viz
 
-device = T.device('cuda:0' if T.cuda.is_available() else 'cpu')
+# device = T.device('cuda:0' if T.cuda.is_available() else 'cpu')
+device = T.device('cpu')
 print('Using ' + ('GPU' if T.cuda.is_available() else 'CPU'))
 
 PATH='./tf_model.pt'
@@ -250,17 +249,22 @@ class ArcTransformer(nn.Module):
         }, self.model_path(epoch))
         print('Finished training')
 
-    def infer(self, bitmaps, max_length):
+    def sample(self, B, max_length):
+        # B: [b, N, 1, H, W]
+        # max length: cap length of generated seq
+
         self.eval()
-        prompt = T.tensor([[self.start_token]]).long().to(device)
+        batch_size = B.shape[0]
+        prompt = T.tensor([[self.start_token]] * batch_size).long().to(device) # [b, 1]
+
         for _ in range(max_length):
             # pdb.set_trace()
-            out = self(bitmaps.unsqueeze(0), prompt)
-            indices = out.topk(1).indices
+            # TODO: don't run CNN repeatedly
+            out = self(B, prompt)   # [i, b, L] where L is size of alphabet
+            out = T.softmax(out, 2) # softmax across L dim
+            indices = [T.multinomial(o, 1) for o in out] # sample from distribution of predictions
             next_index = indices[-1]
             prompt = T.cat((prompt, next_index), dim=1)
-            if next_index == self.end_token:
-                break
         return prompt
 
 def train_tf(data_loc, lexicon, epochs, batch_size):
@@ -268,7 +272,7 @@ def train_tf(data_loc, lexicon, epochs, batch_size):
     tloader, vloader = model.make_dataloaders(data_loc)
     model.learn(tloader, vloader, epochs)
 
-def test_inference(checkpoint_loc, data_loc):
+def test_sampling(checkpoint_loc, data_loc):
     def strip(tokens):
         return [t for t in tokens if t not in ['START', 'END', 'PAD']]
 
@@ -277,44 +281,65 @@ def test_inference(checkpoint_loc, data_loc):
     try:
         # backwards compatibility
         tloss = checkpoint['training_loss']
-    except:
-        tloss = checkpoint ['training loss']
-    vloss = checkpoint['validation loss']
-    print(f"Training loss: {tloss}, validation loss: {vloss}")
-    model.load_state_dict(checkpoint['model_state_dict'])
+    except KeyError:
+        try:
+            tloss = checkpoint['training loss']
+        except:
+            tloss = None
+
+    if tloss is not None:
+        vloss = checkpoint['validation loss']
+        print(f"Training loss: {tloss}, validation loss: {vloss}")
+        model.load_state_dict(checkpoint['model_state_dict'])
+    else:
+        model.load_state_dict(checkpoint)
+
     tloader, vloader = model.make_dataloaders(data_loc)
 
     n_envs = 7
     for B, P in tloader:
-        for bitmaps, program in zip(B, P):
-            ans_tokens = model.indices_to_tokens(program)
-            ans_expr = deserialize(strip(ans_tokens))
+        # for bitmaps, program in zip(B, P):
+        expected_tokens = [model.indices_to_tokens(p) for p in P]
+        expected_exprs = [deserialize(strip(ts)) for ts in expected_tokens]
 
-            out = model.infer(bitmaps, max_length=30)
-            out_tokens = model.indices_to_tokens(out[0])
+        out = model.sample(B, max_length=50)
+        out_tokens = [model.indices_to_tokens(o) for o in out]
+        # pdb.set_trace()
+
+        out_exprs = []
+        for ts in out_tokens:
             try:
-                # Expr might be ill-formed
-                out_expr = deserialize(strip(out_tokens))
+                out_exprs.append(deserialize(strip(ts)))
             except:
-                out_expr = "Ill-formed"
+                out_exprs.append("Ill-formed")
 
-            # text = f'wanted: {ans}\ngot: {out}\n'
-            print(f'expected tokens : {ans_tokens}')
-            print(f'expected expr: {ans_expr}')
+        # text = f'wanted: {ans}\ngot: {out}\n'
+        n_matches = 0
+        n_compares = len(P)
+        for x_tok, x_expr, y_tok, y_expr in zip(expected_tokens, expected_exprs, 
+                                                out_tokens, out_exprs):
+            print(f'expected tokens : {x_tok}')
+            print(f'expected exprs: {x_expr}')
             print('-----')
-            print(f'actual tokens: {out_tokens}')
-            print(f'actual expr: {out_expr}')
+            print(f'actual tokens: {y_tok}')
+            print(f'actual exprs: {y_expr}')
+            print('-----')
+            print(f'matching? {x_expr == y_expr}')
+            n_matches += x_expr == y_expr
             print()
 
-            # bmps = []
-            # while len(bmps) < n_envs:
-            #     env = {'z': seed_zs(), 'sprites': seed_sprites()}
-            #     try:
-            #         bmps.append((ans.eval(env), out.eval(env)))
-            #     except:
-            #         pass
-            # x, y = util.unzip(bmps)
-            # viz.viz_sample(x, y, text=text)
+        # TODO: show first mismatch, edit distance?
+        print(f'matches: {n_matches}/{n_compares} [{n_matches/n_compares}]')
+
+        # bmps = []
+        # while len(bmps) < n_envs:
+        #     env = {'z': seed_zs(), 'sprites': seed_sprites()}
+        #     try:
+        #         bmps.append((ans.eval(env), out.eval(env)))
+        #     except:
+        #         pass
+        # x, y = util.unzip(bmps)
+        # viz.viz_sample(x, y, text=text)
 
 
 if __name__ == '__main__':
@@ -339,7 +364,7 @@ if __name__ == '__main__':
             exit(1)
 
         checkpoint_loc, data_loc = sys.argv[2:]
-        test_inference(checkpoint_loc, data_loc)        
+        test_sampling(checkpoint_loc, data_loc)        
 
     elif sys.argv[1] == 'train':
         if len(sys.argv) != 3:
