@@ -249,20 +249,35 @@ class ArcTransformer(nn.Module):
         }, self.model_path(epoch))
         print('Finished training')
 
-    def sample(self, B, max_length):
+    def sample(self, B, max_length, p=0.95):
         # B: [b, N, 1, H, W]
         # max length: cap length of generated seq
 
         self.eval()
         batch_size = B.shape[0]
+
+        def filter_top_p(v):
+            assert v.shape[0] == batch_size
+
+            values, indices = T.sort(v, descending=True)
+            sums = T.cumsum(values, dim=-1)
+
+            mask = sums >= p
+            mask[..., 1:] = mask[..., :-1].clone() # right-shift indices to keep first sum >= p
+            mask[..., 0] = False
+
+            for b in range(batch_size):
+                v[b, indices[b, mask[b]]] = 0
+            return v
+
         prompt = T.tensor([[self.start_token]] * batch_size).long().to(device) # [b, 1]
 
-        for _ in range(max_length):
+        for i in range(max_length):
             # pdb.set_trace()
             # TODO: don't run CNN repeatedly
-            out = self(B, prompt)   # [i, b, L] where L is size of alphabet
-            out = T.softmax(out, 2) # softmax across L dim
-            indices = [T.multinomial(o, 1) for o in out] # sample from distribution of predictions
+            outs = self(B, prompt)   # [i, b, L] where L is size of alphabet
+            outs = T.softmax(outs, 2) # softmax across L dim
+            indices = [T.multinomial(filter_top_p(out.clone()), 1) for out in outs] # sample from distribution of predictions
             next_index = indices[-1]
             prompt = T.cat((prompt, next_index), dim=1)
         return prompt
@@ -316,20 +331,27 @@ def test_sampling(checkpoint_loc, data_loc):
         # text = f'wanted: {ans}\ngot: {out}\n'
         n_matches = 0
         n_compares = len(P)
-        for x_tok, x_expr, y_tok, y_expr in zip(expected_tokens, expected_exprs, 
-                                                out_tokens, out_exprs):
-            print(f'expected tokens : {x_tok}')
+        for x_toks, x_expr, y_toks, y_expr in zip(expected_tokens, expected_exprs, 
+                                                  out_tokens, out_exprs):
+            print(f'expected tokens : {x_toks}')
             print(f'expected exprs: {x_expr}')
             print('-----')
-            print(f'actual tokens: {y_tok}')
+            print(f'actual tokens: {y_toks}')
             print(f'actual exprs: {y_expr}')
             print('-----')
-            print(f'matching? {x_expr == y_expr}')
-            n_matches += x_expr == y_expr
+            matching = x_expr == y_expr
+            print(f'matching? {matching}')
+            n_matches += matching
+            if not matching:
+                m = max(len(strip(x_toks)), len(strip(y_toks)))
+                tok_matches = 0
+                for x, y in zip(x_toks[:m], y_toks[:m]):
+                    tok_matches += x == y and x not in ['PAD', 'START', 'END']
+                print(f'token matches: {tok_matches}/{m}')
             print()
 
         # TODO: show first mismatch, edit distance?
-        print(f'matches: {n_matches}/{n_compares} [{n_matches/n_compares}]')
+        print(f'matches: {n_matches}/{n_compares} [{n_matches/n_compares * 100}%]')
 
         # bmps = []
         # while len(bmps) < n_envs:
