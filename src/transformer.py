@@ -48,7 +48,7 @@ class ArcTransformer(nn.Module):
     def __init__(self, 
                  N, H, W,        # bitmap count, height, width
                  lexicon,        # list of program grammar components
-                 d_model=16,
+                 d_model=512,
                  n_conv_layers=6, 
                  n_conv_channels=16,
                  batch_size=16):
@@ -86,17 +86,13 @@ class ArcTransformer(nn.Module):
         self.conv = nn.Sequential(*conv_stack)
         self.linear = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(k, k),
-            nn.ReLU(),
-            nn.Linear(k, k),
-            nn.ReLU(),
-            nn.Linear(k, k),
-            nn.ReLU(),
             nn.Linear(k, d_model),
         )
 
         # transformer
-        self.transformer = nn.Transformer(self.d_model, num_encoder_layers=1)
+        self.transformer = nn.Transformer(self.d_model,
+                                          num_encoder_layers=6,
+                                          num_decoder_layers=6)
 
         # output linear+softmax
         self.out = nn.Linear(self.d_model, self.n_tokens)
@@ -258,22 +254,19 @@ class ArcTransformer(nn.Module):
 
         def filter_top_p(v):
             assert v.shape[0] == batch_size
-
             values, indices = T.sort(v, descending=True)
             sums = T.cumsum(values, dim=-1)
-
             mask = sums >= p
-            mask[..., 1:] = mask[..., :-1].clone() # right-shift indices to keep first sum >= p
+            # right-shift indices to keep first sum >= p
+            mask[..., 1:] = mask[..., :-1].clone() 
             mask[..., 0] = False
-
+            # filter out elements in v
             for b in range(batch_size):
                 v[b, indices[b, mask[b]]] = 0
             return v
 
         prompt = T.tensor([[self.start_token]] * batch_size).long().to(device) # [b, 1]
-
         for i in range(max_length):
-            # pdb.set_trace()
             # TODO: don't run CNN repeatedly
             outs = self(B, prompt)   # [i, b, L] where L is size of alphabet
             outs = T.softmax(outs, 2) # softmax across L dim
