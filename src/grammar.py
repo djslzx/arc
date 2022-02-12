@@ -2,9 +2,8 @@ import util
 import nltk
 import torch as T
 import torch.nn.functional as F
-import random
+from random import randrange
 from ant import make_sprite
-from math import log2
 
 # bitmap size constants
 B_W = 24
@@ -27,36 +26,23 @@ class Visited:
 
 class Expr(Visited):
     def accept(self, visitor): assert False, f"not implemented for {type(self).__name__}"
-
     def __repr__(self): return str(self)
-
     def __eq__(self, other): return str(self) == str(other)
-
     def __hash__(self): return hash(str(self))
-
     def __ne__(self, other): return str(self) != str(other)
-
     def __gt__(self, other): return str(self) > str(other)
-
     def __lt__(self, other): return str(self) < str(other)
-
     def eval(self, env={}): return self.accept(Eval(env))
-
     def zs(self): return self.accept(Zs())
-
     def sprites(self): return self.accept(Sprites())
-
     def simplify_indices(self): 
         zs = self.zs()
         sprites = self.sprites()
         return self.accept(SimplifyIndices(zs, sprites))
-
     def serialize(self): return self.accept(Serialize())
-
+    def range(self, envs): return self.accept(Range(envs))
     def __len__(self): return self.accept(Size())
-
     def __str__(self): return self.accept(Print())
-
     def dist_to(self, other): 
         '''Edit distance to transform self into other'''
         # TODO: make this better
@@ -66,193 +52,152 @@ def seed_zs():
     return (T.rand(LIB_SIZE) * (Z_HI - Z_LO) - Z_LO).long()
 
 def seed_sprites():
-    return T.stack([make_sprite(w=random.randrange(2, B_W/3), 
-                                h=random.randrange(2, B_H/3), 
+    return T.stack([make_sprite(w=randrange(2, B_W/3), 
+                                h=randrange(2, B_H/3), 
                                 W=B_W, H=B_H)
                     for _ in range(LIB_SIZE)])
-
-
-class Empty(Expr):
-    in_types = []
-    out_type = 'None'
-
-    def __init__(self): pass
-
-    def accept(self, v): return v.visit_Empty()
 
 
 class Nil(Expr):
     in_types = []
     out_type = 'bool'
-
     def __init__(self): pass
-
     def accept(self, v): return v.visit_Nil()
 
 
 class Num(Expr):
     in_types = []
     out_type = 'int'
-
     def __init__(self, n): self.n = n
-
     def accept(self, v): return v.visit_Num(self.n)
 
 
 class Z(Expr):
     in_types = []
     out_type = 'int'
-
     def __init__(self, i): self.i = i
-
     def accept(self, v): return v.visit_Z(self.i)
 
 
 class Not(Expr):
     in_types = ['bool']
     out_type = 'bool'
-
     def __init__(self, b): self.b = b
-
     def accept(self, v): return v.visit_Not(self.b)
 
 
 class Plus(Expr):
     in_types = ['int', 'int']
     out_type = 'int'
-
     def __init__(self, x, y):
         self.x = x
         self.y = y
-
     def accept(self, v): return v.visit_Plus(self.x, self.y)
 
 
 class Minus(Expr):
     in_types = ['int', 'int']
     out_type = 'int'
-
     def __init__(self, x, y):
         self.x = x
         self.y = y
-
     def accept(self, v): return v.visit_Minus(self.x, self.y)
 
 
 class Times(Expr):
     in_types = ['int', 'int']
     out_type = 'int'
-
     def __init__(self, x, y):
         self.x = x
         self.y = y
-
     def accept(self, v): return v.visit_Times(self.x, self.y)
 
 
 class Lt(Expr):
     in_types = ['bool', 'bool']
     out_type = 'bool'
-
     def __init__(self, x, y):
         self.x = x
         self.y = y
-
     def accept(self, v): return v.visit_Lt(self.x, self.y)
 
 
 class And(Expr):
     in_types = ['bool', 'bool']
     out_type = 'bool'
-
     def __init__(self, x, y):
         self.x = x
         self.y = y
-
     def accept(self, v): return v.visit_And(self.x, self.y)
 
 
 class If(Expr):
     in_types = ['bool', 'int', 'int']
     out_type = 'int'
-
     def __init__(self, b, x, y):
         self.b = b
         self.x = x
         self.y = y
-
     def accept(self, v): return v.visit_If(self.b, self.x, self.y)
 
 
 class Line(Expr):
     in_types = ['int', 'int', 'int', 'int', 'int']
     out_type = 'bitmap'
-
     def __init__(self, x1, y1, x2, y2, color=Num(1)):
         self.x1 = x1
         self.y1 = y1
         self.x2 = x2
         self.y2 = y2
         self.color = color
-
     def accept(self, v): return v.visit_Line(self.x1, self.y1, self.x2, self.y2, self.color)
 
 
 class Point(Expr):
     in_types = ['int', 'int', 'int']
     out_type = 'bitmap'
-
     def __init__(self, x, y, color=Num(1)):
         self.x = x
         self.y = y
         self.color = color
-
     def accept(self, v): return v.visit_Point(self.x, self.y, self.color)
 
 
 class Rect(Expr):
     in_types = ['int', 'int', 'int', 'int', 'int']
     out_type = 'bitmap'
-
     def __init__(self, x, y, w, h, color=Num(1)):
         self.x = x
         self.y = y
         self.w = w
         self.h = h
         self.color = color
-
     def accept(self, v): return v.visit_Rect(self.x, self.y, self.w, self.h, self.color)
 
 
 class Sprite(Expr):
     in_types = ['int', 'int', 'int']
     out_type = 'bitmap'
-
     def __init__(self, i, x=Num(0), y=Num(0)):
         self.i = i
         self.x = x
         self.y = y
-
     def accept(self, v): return v.visit_Sprite(self.i, self.x, self.y)
 
 
 class Seq(Expr):
     in_types = ['list(bitmap)']
     out_type = 'bitmap'
-    
     def __init__(self, *bmps): 
         self.bmps = bmps
-
     def accept(self, v): return v.visit_Seq(self.bmps)
 
 class Join(Expr):
     in_types = ['bitmap', 'bitmap']
     out_type = 'bitmap'
-
     def __init__(self, bmp1, bmp2):
         self.bmp1 = bmp1
         self.bmp2 = bmp2
-
     def accept(self, v): return v.visit_Join(self.bmp1, self.bmp2)
 
 
@@ -260,136 +205,94 @@ class Apply(Expr):
     """Applies a transformation to a bitmap"""
     in_types = ['transform', 'bitmap']
     out_type = 'bitmap'
-    
     def __init__(self, f, bmp):
         self.f = f
         self.bmp = bmp
-        
     def accept(self, v): return v.visit_Apply(self.f, self.bmp)
 
 
 class Repeat(Expr):
     in_types = ['transform', 'int']
     out_type = 'transform'
-    
     def __init__(self, f, n):
         self.f = f
         self.n = n
-        
     def accept(self, v): return v.visit_Repeat(self.f, self.n)
 
 
 class Intersect(Expr):
     in_types = ['bitmap']
     out_type = 'transform'
-
     def __init__(self, bmp):
         self.bmp = bmp
-
     def accept(self, v): return v.visit_Intersect(self.bmp)
 
 
 class HFlip(Expr):
     in_types = []
     out_type = 'transform'
-
     def __init__(self): pass
-
     def accept(self, v): return v.visit_HFlip()
 
 
 class VFlip(Expr):
     in_types = []
     out_type = 'transform'
-
     def __init__(self): pass
-
     def accept(self, v): return v.visit_VFlip()
 
 
 class Translate(Expr):
     in_types = ['int', 'int']
     out_type = 'transform'
-
     def __init__(self, dx, dy):
         self.dx = dx
         self.dy = dy
-
     def accept(self, v): return v.visit_Translate(self.dx, self.dy)
 
 
 class Recolor(Expr):
     in_types = ['int']
     out_type = 'transform'
-    
     def __init__(self, c): self.c = c
-    
     def accept(self, v): return v.visit_Recolor(self.c)
 
 
 class Compose(Expr):
     in_types = ['transform', 'transform']
     out_type = 'transform'
-    
     def __init__(self, f, g): 
         self.f = f
         self.g = g
-
     def accept(self, v): return v.visit_Compose(self.f, self.g)
 
         
 class Visitor:
 
     def fail(self, s): assert False, f"Visitor subclass `{type(self).__name__}` should implement `visit_{s}`"
-
-    def visit_Empty(self): self.fail('Empty')
-
     def visit_Nil(self): self.fail('Nil')
-
     def visit_Num(self, n): self.fail('Num')
-
     def visit_Z(self, i): self.fail('Z')
-
     def visit_Not(self, b): self.fail('Not')
-
     def visit_Plus(self, x, y): self.fail('Plus')
-
     def visit_Minus(self, x, y): self.fail('Minus')
-
     def visit_Times(self, x, y): self.fail('Times')
-
     def visit_Lt(self, x, y): self.fail('Lt')
-
     def visit_And(self, x, y): self.fail('And')
-
     def visit_If(self, b, x, y): self.fail('If')
-
     def visit_Point(self, x, y, color): self.fail('Point')
-
     def visit_Line(self, x1, y1, x2, y2, color): self.fail('Line')
-
     def visit_Rect(self, x, y, w, h, color): self.fail('Rect')
-
     def visit_Sprite(self, i, x, y): self.fail('Sprite')
-
     def visit_Join(self, bmp1, bmp2): self.fail('Join')
-
     def visit_Seq(self, bmps): self.fail('Seq')
-
     def visit_Intersect(self, bmp): self.fail('Intersect')
-
     def visit_HFlip(self): self.fail('HFlip')
-
     def visit_VFlip(self): self.fail('VFlip')
-
     def visit_Translate(self, bmp, dx, dy): self.fail('Translate')
-
     def visit_Recolor(self, c): self.fail('Recolor')
-
     def visit_Compose(self, f, g): self.fail('Compose')
-
     def visit_Apply(self, f, bmp): self.fail('Apply')
-
     def visit_Repeat(self, f, n): self.fail('Repeat')
 
 
@@ -412,9 +315,6 @@ class Eval(Visitor):
                     return c
             return 0
         return Eval.make_bitmap(overlay_pt)
-
-    def visit_Empty(self):
-        return None
 
     def visit_Nil(self):
         return False
@@ -575,116 +475,64 @@ class Eval(Visitor):
 
 class Size(Visitor):
     def __init__(self): pass
-
-    def visit_Empty(self): return 0
-
     def visit_Nil(self): return 1
-
     def visit_Num(self, n): return 1
-
     def visit_Z(self, i): return 1
-
     def visit_Not(self, b): return b.accept(self) + 1
-
     def visit_Plus(self, x, y): return x.accept(self) + y.accept(self) + 1
-
     def visit_Minus(self, x, y): return x.accept(self) + y.accept(self) + 1
-
     def visit_Times(self, x, y): return x.accept(self) + y.accept(self) + 1
-
     def visit_Lt(self, x, y): return x.accept(self) + y.accept(self) + 1
-
     def visit_And(self, x, y): return x.accept(self) + y.accept(self) + 1
-
     def visit_If(self, b, x, y): return b.accept(self) + x.accept(self) + y.accept(self) + 1
-
     def visit_Point(self, x, y, color): return x.accept(self) + y.accept(self) + color.accept(self) + 1
-
     def visit_Line(self, x1, y1, x2, y2, color): 
         return x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self) + color.accept(self) + 1
-
     def visit_Rect(self, x, y, w, h, color):
         return x.accept(self) + y.accept(self) + w.accept(self) + h.accept(self) + color.accept(self) + 1
-
     def visit_Sprite(self, i, x, y):
         return x.accept(self) + y.accept(self) + 1
-
     def visit_Seq(self, bmps): return sum(bmp.accept(self) for bmp in bmps) + 1
-
     def visit_Join(self, bmp1, bmp2): return bmp1.accept(self) + bmp2.accept(self) + 1
-
     def visit_Intersect(self, bmp): return bmp.accept(self) + 1
-
     def visit_HFlip(self): return 1
-
     def visit_VFlip(self): return 1
-
     def visit_Translate(self, x, y): return x.accept(self) + y.accept(self) + 1
-
     def visit_Recolor(self, c): return c.accept(self) + 1
-
     def visit_Compose(self, f, g): return f.accept(self) + g.accept(self) + 1
-
     def visit_Apply(self, f, bmp): return f.accept(self) + bmp.accept(self) + 1
-
     def visit_Repeat(self, f, n): return f.accept(self) + n.accept(self) + 1
 
 
 class Print(Visitor):
     def __init__(self): pass
-
-    def visit_Empty(self): return 'Empty'
-
     def visit_Nil(self): return 'False'
-
     def visit_Num(self, n): return f'{n}'
-
     def visit_Z(self, i): return f'z_{i}'
-
     def visit_Not(self, b): return f'(not {b.accept(self)})'
-
     def visit_Plus(self, x, y): return f'(+ {x.accept(self)} {y.accept(self)})'
-
     def visit_Minus(self, x, y): return f'(- {x.accept(self)} {y.accept(self)})'
-
     def visit_Times(self, x, y): return f'(* {x.accept(self)} {y.accept(self)})'
-
     def visit_Lt(self, x, y): return f'(< {x.accept(self)} {y.accept(self)})'
-
     def visit_And(self, x, y): return f'(and {x.accept(self)} {y.accept(self)})'
-
     def visit_If(self, b, x, y): return f'(if {b.accept(self)} {x.accept(self)} {y.accept(self)})'
-
     def visit_Point(self, x, y, color): 
         return f'(Point[{color.accept(self)}] {x.accept(self)} {y.accept(self)})'
-
     def visit_Line(self, x1, y1, x2, y2, color):
         return f'(Line[{color.accept(self)}] {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
-
     def visit_Rect(self, x, y, w, h, color):
         return f'(Rect[{color.accept(self)}] {x.accept(self)} {y.accept(self)} {w.accept(self)} {h.accept(self)})'
-
     def visit_Sprite(self, i, x, y):
         return f'(Sprite_{i} {x.accept(self)} {y.accept(self)})'
-
     def visit_Seq(self, bmps): return '(seq ' + ' '.join([bmp.accept(self) for bmp in bmps]) + ')'
-
     def visit_Join(self, bmp1, bmp2): return f'(join {bmp1.accept(self)} {bmp2.accept(self)})'
-
     def visit_Intersect(self, bmp): return f'(intersect {bmp.accept(self)})'
-
     def visit_HFlip(self): return 'h-flip'
-
     def visit_VFlip(self): return 'v-flip'
-
     def visit_Translate(self, x, y): return f'(translate {x.accept(self)} {y.accept(self)})'
-
     def visit_Recolor(self, c): return f'[{c.accept(self)}]'
-
     def visit_Compose(self, f, g): return f'(compose {f.accept(self)} {g.accept(self)})'
-    
     def visit_Apply(self, f, bmp): return f'({f.accept(self)} {bmp.accept(self)})'
-
     def visit_Repeat(self, f, n): return f'(repeat {f.accept(self)} {n.accept(self)})'
 
 
@@ -695,8 +543,6 @@ def deserialize(tokens):
     def D(tokens):
         if not tokens: return []
         h, t = tokens[0], D(tokens[1:])
-        if h == '': 
-            return [Empty()] + t
         if isinstance(h, bool) and h == False: 
             return [Nil()] + t
         if isinstance(h, int): 
@@ -754,177 +600,100 @@ def deserialize(tokens):
 
 class Serialize(Visitor):
     def __init__(self): pass
-
-    def visit_Empty(self): return ['']
-
     def visit_Nil(self): return [False]
-
     def visit_Num(self, n): return [n]
-
     def visit_Z(self, i): return [f'z_{i}']
-
     def visit_Not(self, b): return ['~'] + b.accept(self)
-
     def visit_Plus(self, x, y): return ['+'] + x.accept(self) + y.accept(self)
-
     def visit_Minus(self, x, y): return ['-'] + x.accept(self) + y.accept(self)
-
     def visit_Times(self, x, y): return ['*'] + x.accept(self) + y.accept(self)
-
     def visit_Lt(self, x, y): return ['<'] + x.accept(self) + y.accept(self)
-
     def visit_And(self, x, y): return ['&'] + x.accept(self) + y.accept(self)
-
     def visit_If(self, b, x, y): return ['?'] + b.accept(self) + x.accept(self) + y.accept(self)
-
     def visit_Point(self, x, y, color): return ['P'] + color.accept(self) + x.accept(self) + y.accept(self)
-
     def visit_Line(self, x1, y1, x2, y2, color):
         return ['L'] + color.accept(self) + x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self)
-
     def visit_Rect(self, x, y, w, h, color):
         return ['R'] + color.accept(self) + x.accept(self) + y.accept(self) + w.accept(self) + h.accept(self)
-
     def visit_Sprite(self, i, x, y):
         return [f'S_{i}'] + x.accept(self) + y.accept(self)
-
     def visit_Seq(self, bmps): 
         l = ['{'];
         for bmp in bmps:
             l.extend(bmp.accept(self))
         l.append('}')           # stop symbol
         return l
-
     def visit_Join(self, bmp1, bmp2): return [';'] + bmp1.accept(self) + bmp2.accept(self)
-
     # def visit_Intersect(self, bmp): return ['I'] + bmp.accept(self)
-
     def visit_HFlip(self): return ['H']
-
     def visit_VFlip(self): return ['V']
-
     def visit_Translate(self, x, y): return ['T'] + x.accept(self) + y.accept(self)
-
     def visit_Recolor(self, c): return ['#'] + c.accept(self)
-
     def visit_Compose(self, f, g): return ['o'] + f.accept(self) + g.accept(self)
-    
     def visit_Apply(self, f, bmp): return ['@'] + f.accept(self) + bmp.accept(self)
-
     def visit_Repeat(self, f, n): return ['!'] + f.accept(self) + n.accept(self)
 
 
 class Zs(Visitor):
     def __init__(self): pass
-
-    def visit_Empty(self): return set()
-
     def visit_Nil(self): return set()
-
     def visit_Num(self, n): return set()
-
     def visit_Z(self, i): return {i}
-
     def visit_Not(self, b): return b.accept(self)
-
     def visit_Plus(self, x, y): return x.accept(self) | y.accept(self)
-
     def visit_Minus(self, x, y): return x.accept(self) | y.accept(self)
-
     def visit_Times(self, x, y): return x.accept(self) | y.accept(self)
-
     def visit_Lt(self, x, y): return x.accept(self) | y.accept(self)
-
     def visit_And(self, x, y): return x.accept(self) | y.accept(self)
-
     def visit_If(self, b, x, y): return b.accept(self) | x.accept(self) | y.accept(self)
-
     def visit_Point(self, x, y, color): return x.accept(self) | y.accept(self) | color.accept(self)
-
     def visit_Line(self, x1, y1, x2, y2, color):
         return x1.accept(self) | y1.accept(self) | x2.accept(self) | y2.accept(self) | color.accept(self)
-
     def visit_Rect(self, x, y, w, h, color):
         return x.accept(self) | y.accept(self) | w.accept(self) | h.accept(self) | color.accept(self)
-
     def visit_Sprite(self, i, x, y):
         return x.accept(self) | y.accept(self)
-
     def visit_Seq(self, bmps): return set.union(*[bmp.accept(self) for bmp in bmps])
-
     def visit_Join(self, bmp1, bmp2): return bmp1.accept(self) | bmp2.accept(self)
-
     def visit_Intersect(self, bmp): return bmp.accept(self)
-
     def visit_HFlip(self): return set()
-
     def visit_VFlip(self): return set()
-
     def visit_Translate(self, x, y): return x.accept(self) | y.accept(self)
-
     def visit_Recolor(self, c): return c.accept(self)
-
     def visit_Compose(self, f, g): return f.accept(self) | g.accept(self)
-
     def visit_Apply(self, f, bmp): return f.accept(self) | bmp.accept(self)
-
     def visit_Repeat(self, f, n): return f.accept(self) | n.accept(self)
 
 
 class Sprites(Visitor):
     def __init__(self): pass
-
     def visit_Empty(self): return set()
-
     def visit_Nil(self): return set()
-
     def visit_Num(self, n): return set()
-
     def visit_Z(self, i): return set()
-
     def visit_Not(self, b): return b.accept(self)
-
     def visit_Plus(self, x, y): return x.accept(self) | y.accept(self)
-
     def visit_Minus(self, x, y): return x.accept(self) | y.accept(self)
-
     def visit_Times(self, x, y): return x.accept(self) | y.accept(self)
-
     def visit_Lt(self, x, y): return x.accept(self) | y.accept(self)
-
     def visit_And(self, x, y): return x.accept(self) | y.accept(self)
-
     def visit_If(self, b, x, y): return b.accept(self) | x.accept(self) | y.accept(self)
-
     def visit_Point(self, x, y, color): return x.accept(self) | y.accept(self) | color.accept(self)
-
     def visit_Line(self, x1, y1, x2, y2, color):
         return x1.accept(self) | y1.accept(self) | x2.accept(self) | y2.accept(self) | color.accept(self)
-
     def visit_Rect(self, x, y, w, h, color):
         return x.accept(self) | y.accept(self) | w.accept(self) | h.accept(self) | color.accept(self)
-
     def visit_Sprite(self, i, x, y):
         return {i} | x.accept(self) | y.accept(self)
-
     def visit_Seq(self, bmps): return set.union(*[bmp.accept(self) for bmp in bmps])
-
     def visit_Join(self, bmp1, bmp2): return bmp1.accept(self) | bmp2.accept(self)
-
     def visit_Intersect(self, bmp): return bmp.accept(self)
-
     def visit_HFlip(self): return set()
-
     def visit_VFlip(self): return set()
-
     def visit_Translate(self, x, y): return x.accept(self) | y.accept(self)
-
     def visit_Recolor(self, c): return c.accept(self)
-
     def visit_Compose(self, f, g): return f.accept(self) | g.accept(self)
-
     def visit_Apply(self, f, bmp): return f.accept(self) | bmp.accept(self)
-
     def visit_Repeat(self, f, n): return f.accept(self) | n.accept(self)
 
 
@@ -936,61 +705,58 @@ class SimplifyIndices(Visitor):
         '''
         self.z_mapping = {z:i for i,z in enumerate(sorted(zs))}
         self.sprite_mapping = {sprite:i for i,sprite in enumerate(sorted(sprites))}
-
     def visit_Empty(self): return Empty()
-
     def visit_Nil(self): return Nil()
-
     def visit_Num(self, n): return Num(n)
-
     def visit_Z(self, i): return Z(self.z_mapping[i])
-
     def visit_Not(self, b): return Not(b.accept(self))
-
     def visit_Plus(self, x, y): return Plus(x.accept(self), y.accept(self))
-
     def visit_Minus(self, x, y): return Minus(x.accept(self), y.accept(self))
-
     def visit_Times(self, x, y): return Times(x.accept(self), y.accept(self))
-
     def visit_Lt(self, x, y): return Lt(x.accept(self), y.accept(self))
-
     def visit_And(self, x, y): return And(x.accept(self), y.accept(self))
-
     def visit_If(self, b, x, y): return If(b.accept(self), x.accept(self), y.accept(self))
-
     def visit_Point(self, x, y, color): return Point(x.accept(self), y.accept(self), color.accept(self))
-
     def visit_Line(self, x1, y1, x2, y2, color): return Line(x1.accept(self), y1.accept(self), 
                                                              x2.accept(self), y2.accept(self),
                                                              color.accept(self))
-
     def visit_Rect(self, x, y, w, h, color): return Rect(x.accept(self), y.accept(self), 
                                                          w.accept(self), h.accept(self),
                                                          color.accept(self))
-
     def visit_Sprite(self, i, x, y): return Sprite(self.sprite_mapping[i], x.accept(self), y.accept(self))
-
     def visit_Seq(self, bmps): return Seq(*[bmp.accept(self) for bmp in bmps])
-
     def visit_Join(self, bmp1, bmp2): return Join(bmp1.accept(self), bmp2.accept(self))
-
     def visit_Intersect(self, bmp): return Intersect(bmp.accept(self))
-
     def visit_HFlip(self): return HFlip()
-
     def visit_VFlip(self): return VFlip()
-
-    def visit_Translate(self, x, y): return TranslatE(x.accept(self), y.accept(self))
-
+    def visit_Translate(self, x, y): return Translate(x.accept(self), y.accept(self))
     def visit_Recolor(self, c): return Recolor(c.accept(self))
-
     def visit_Compose(self, f, g): return Compose(f.accept(self), g.accept(self))
-
     def visit_Apply(self, f, bmp): return Apply(f.accept(self), bmp.accept(self))
-
     def visit_Repeat(self, f, n): return Repeat(f.accept(self), n.accept(self))
         
+
+class Range(Visitor):
+    def __init__(self, envs): self.envs = envs
+    def visit_Num(self, n): 
+        return (n, n)
+    def visit_Z(self, i): 
+        return (min(env['z'][i] for env in self.envs),
+                max(env['z'][i] for env in self.envs))
+    def visit_Plus(self, x, y): 
+        x_min, x_max = x.accept(self)
+        y_min, y_max = y.accept(self)
+        return (x_min + y_min, x_max + y_max)
+    def visit_Minus(self, x, y): 
+        x_min, x_max = x.accept(self)
+        y_min, y_max = y.accept(self)
+        return (x_min - y_max, x_max - y_min)
+    def visit_Times(self, x, y): 
+        x_min, x_max = x.accept(self)
+        y_min, y_max = y.accept(self)
+        products = [x * y for x in [x_min, x_max] for y in [y_min, y_max]]
+        return (min(products), max(products))
+
 
 def test_eval():
     tests = [
@@ -1412,6 +1178,26 @@ def test_simplify_indices():
 def test_serialize():
     pass
 
+def test_range():
+    envs = [
+        {'z': [1, 0]},
+        {'z': [-3, 3]},
+        {'z': [2, 5]},
+        {'z': [8, -4]},
+    ]
+    test_cases = [
+        (Num(0), 0, 0),
+        (Num(1), 1, 1),
+        (Z(0), -3, 8),
+        (Z(1), -4, 5),
+        (Plus(Z(0), Z(1)), -7, 13),
+        (Minus(Z(0), Z(1)), -8, 12),
+        (Times(Z(0), Z(1)), -32, 40),
+    ]
+    for expr, lo, hi in test_cases:
+        out = expr.range(envs)
+        assert out == (lo, hi), f"test_range failed: in={expr}, expected={(lo, hi)}, actual={out}"
+    print(" [+] passed test_range")
 
 if __name__ == '__main__':
     test_eval()
@@ -1419,4 +1205,5 @@ if __name__ == '__main__':
     test_eval_color()
     test_sprite()
     test_simplify_indices()
+    test_range()
     # test_zs()
