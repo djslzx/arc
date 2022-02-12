@@ -1,7 +1,5 @@
 """
-Make large programs as training data
-
-TODO: generate up to n objs, not always exactly n objs
+Make programs to use as training data
 """
 
 import pdb
@@ -101,20 +99,17 @@ def rand_transform(e):
     #     t = t(*t_args)
     pass
 
-def simplify(sprites, env):
+def elim_dead_entities(entities, env):
     '''
-    Remove any sprites in `sprites` that are occluded by other sprites in `env`
+    Remove any occluded entities
     '''
-    keep = sprites[:1]
-    for i, sprite in enumerate(sprites[1:], 1):
-        # check that the sprites overlayed on top of `sprite` don't obscure `sprite`
-        e = Seq(*sprites[:i])
-        e_bmp = e.eval(env)
-        s_bmp = sprite.eval(env)
-        if not all(s_bmp[r][c] == 0 or e_bmp[r][c] > 0 
-                   for r in range(e_bmp.shape[0]) 
-                   for c in range(e_bmp.shape[1])):
-            keep.append(sprite)
+    orig_bmp = Seq(*entities).eval(env)
+    keep = entities[:1]
+    for i, entity in enumerate(entities[1:], 1):
+        excl = entities[:i] + entities[i+1:]
+        excl_bmp = Seq(*excl).eval(env)
+        if T.ne(excl_bmp, orig_bmp).any():
+            keep.append(entity)
     return keep
 
 def viz_sprites(envs):
@@ -122,7 +117,8 @@ def viz_sprites(envs):
     for env in envs:
         viz_grid(env['sprites'][:k**2], txt=f'sprites[:{k**2}]')
 
-def test_simplify():
+def test_elim_dead_entities():
+    zs = [ 0, 1, 2, 3, 4, 5 ]
     tests = [
         ([
             ["1_",
@@ -156,13 +152,26 @@ def test_simplify():
           ],
          [Sprite(0), Sprite(1), Sprite(2)],
          [Sprite(0), Sprite(1)]),
+        ([],
+         [Rect(Num(0), Num(0), Num(2), Num(2)),
+          Rect(Num(0), Num(0), Num(2), Num(2))],
+         [Rect(Num(0), Num(0), Num(2), Num(2))]),
+        ([],
+         [Rect(Num(0), Num(0), Num(2), Num(2)),
+          Line(Num(0), Num(0), Num(1), Num(1))],
+         [Rect(Num(0), Num(0), Num(2), Num(2))]),
+        ([],
+         [Line(Num(0), Num(0), Num(1), Num(1)),
+          Rect(Num(0), Num(0), Num(2), Num(2))],
+         [Line(Num(0), Num(0), Num(1), Num(1)),
+          Rect(Num(0), Num(0), Num(2), Num(2))]),
     ]
-
-    for lib, sprites, ans in tests:
+    for lib, entities, ans in tests:
         lib = [util.img_to_tensor(b, w=B_W, h=B_H) for b in lib]
-        out = simplify(sprites, {'z': [], 'sprites': lib})
-        assert out == ans, f"Failed test: expected {ans}, got {out}"
-    print("[+] passed test_simplify")
+        env = {'z': zs, 'sprites': lib}
+        out = elim_dead_entities(entities, env)
+        assert out == ans, f"Failed test: in={entities}; expected {ans}, got {out}"
+    print("[+] passed test_elim_dead_entities")
 
 def make_exprs(n_exprs,         # number of total programs to make
                n_envs,          # number of envs (bitmaps) per program
@@ -220,6 +229,8 @@ def list_exs(fname):
 
 if __name__ == '__main__':
 
+    test_elim_dead_entities()
+
     # # Load saved exprs and generate bmps
     # data = util.load('../data/exs.dat')
     # for bmps, tokens in data:
@@ -228,10 +239,10 @@ if __name__ == '__main__':
     #     print('expr:', d, len(d))
     #     print(viz_grid(bmps[:25], d))
 
-    make_exprs(n_exprs=5, n_envs=9, max_n_objs=5, a_bound=1,
-               entities=[Point, Line, Rect],
-               cmps_loc='../data/tiny-cmps.dat',
-               exprs_loc='../data/tiny-exs.dat',
-               load_pool=False)
+    # make_exprs(n_exprs=5, n_envs=9, max_n_objs=5, a_bound=1,
+    #            entities=[Point, Line, Rect],
+    #            cmps_loc='../data/tiny-cmps.dat',
+    #            exprs_loc='../data/tiny-exs.dat',
+    #            load_pool=False)
 
     # list_exs('../data/full-exs.dat')
