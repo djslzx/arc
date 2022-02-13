@@ -13,9 +13,9 @@ import matplotlib.pyplot as plt
 
 from grammar import *
 
-# device = T.device('cuda:0' if T.cuda.is_available() else 'cpu')
-device = T.device('cpu')
-print('Using ' + ('GPU' if T.cuda.is_available() else 'CPU'))
+dev_name = 'cuda:0' if T.cuda.is_available() else 'cpu'
+device = T.device(dev_name)
+print(f'Using {dev_name}')
 
 PATH='./tf_model.pt'
 
@@ -208,7 +208,7 @@ class ArcTransformer(nn.Module):
         optimizer = T.optim.Adam(self.parameters(), lr=0.001)
         writer = tb.SummaryWriter()
         start_t = time.time()
-        current_hour = 0
+        checkpoint_no = 1       # only checkpoint after first 5 hr period
 
         for epoch in range(1, epochs+1):
             epoch_start_t = time.time()
@@ -222,7 +222,7 @@ class ArcTransformer(nn.Module):
             writer.add_scalar('training loss', tloss, epoch)
             writer.add_scalar('validation loss', vloss, epoch)
 
-            if (epoch_end_t - start_t)//3600 > current_hour:
+            if (epoch_end_t - start_t)//(3600 * 5) > checkpoint_no: # checkpoint every 5 hours
                 T.save({
                     'epoch': epoch,
                     'model_state_dict': self.state_dict(),
@@ -230,7 +230,7 @@ class ArcTransformer(nn.Module):
                     'training loss': tloss,
                     'validation loss': vloss,
                 }, self.model_path(epoch))
-                current_hour += 1
+                checkpoint_no += 1
 
             if vloss <= threshold or tloss <= threshold: break
 

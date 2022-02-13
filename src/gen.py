@@ -311,8 +311,8 @@ def list_exs(fname):
 
 if __name__ == '__main__':
 
-    test_rm_dead_code()
-    test_canonical_ordering()
+    # test_rm_dead_code()
+    # test_canonical_ordering()
 
     # # Load saved exprs and generate bmps
     # data = util.load('../data/exs.dat')
@@ -322,14 +322,14 @@ if __name__ == '__main__':
     #     print('expr:', d, len(d))
     #     print(viz_grid(bmps[:25], d))
 
-    make_exprs(n_exprs=5, n_envs=1, max_n_entities=5, a_bound=1,
+    make_exprs(n_exprs=10_000, n_envs=5, max_n_entities=5, a_bound=1,
                entities=[Point, Line, Rect],
                a_grammar = Grammar(ops=[Plus, Minus, Times], 
                                    consts=([Z(i) for i in range(LIB_SIZE)] + 
                                            [Num(i) for i in range(Z_LO, Z_HI + 1)])),
-               cmps_loc='../data/tiny-cmps.dat',
-               exprs_loc='../data/tiny-exs.dat',
+               cmps_loc='../data/10k-zful-cmps.dat',
+               exprs_loc='../data/10k-zful-exs.dat',
                load_pool=False,
-               max_zs=0)
+               max_zs=2)
 
     # list_exs('../data/full-exs.dat')
