@@ -19,8 +19,6 @@ print('Using ' + ('GPU' if T.cuda.is_available() else 'CPU'))
 
 PATH='./tf_model.pt'
 
-T.set_printoptions(threshold=10_000)
-
 # TODO: pay attention to batch dim/sequence length dim
 class PositionalEncoding(nn.Module):
     """
@@ -275,8 +273,8 @@ class ArcTransformer(nn.Module):
             prompt = T.cat((prompt, next_index), dim=1)
         return prompt
 
-def train_tf(data_loc, lexicon, epochs, batch_size):
-    model = ArcTransformer(N=9, H=B_H, W=B_W, lexicon=lexicon, batch_size=batch_size).to(device)
+def train_tf(data_loc, lexicon, epochs, N, batch_size):
+    model = ArcTransformer(N=N, H=B_H, W=B_W, lexicon=lexicon, batch_size=batch_size).to(device)
     tloader, vloader = model.make_dataloaders(data_loc)
     model.learn(tloader, vloader, epochs)
 
@@ -382,13 +380,13 @@ if __name__ == '__main__':
         test_sampling(checkpoint_loc, data_loc)        
 
     elif sys.argv[1] == 'train':
-        if len(sys.argv) != 3:
-            print("Usage: transformer.py train data_loc")
+        if len(sys.argv) != 4:
+            print("Usage: transformer.py train data_loc N")
             exit(1)
 
         data_loc = sys.argv[2]
-        train_tf(data_loc, lexicon,
-                 epochs=1_000_000, batch_size=16)        
+        N = int(sys.argv[3])
+        train_tf(data_loc, lexicon, N=N, epochs=1_000_000, batch_size=16)        
     else:
         print("Usage: transformer.py train | sample")
         exit(1)
