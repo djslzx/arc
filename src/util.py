@@ -79,10 +79,10 @@ def make_bitmap(f, W, H):
                      for y in range(H)]).float()
 
 def split(l, pred):
-    '''
-    Split l into two lists `a` and `b`, where 
+    """
+    Split l into two lists `a` and `b`, where
     all elts of `a` satisfy `pred` and all elts of `b` do not
-    '''
+    """
     sat, unsat = [], []
     for x in l:
         if pred(x): sat.append(x)
@@ -94,6 +94,10 @@ def to_abspath(path):
         return path
     else:
         return os.path.join(dirname, path)
+
+def clear(fname):
+    print(f'Clearing {fname}...')
+    open(fname, 'w').close()
 
 def save(data, fname, append=False, verbose=True):
     path = to_abspath(fname)

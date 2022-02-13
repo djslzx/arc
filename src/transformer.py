@@ -364,7 +364,6 @@ if __name__ == '__main__':
                'H', 'V', 'T', '#', 'o', '@', '!', '{', '}',]
 
     # TODO: update/improve model state save loc 
-    # TODO: command line args; would enable running multiple models in tandem without editing source files
     # TODO: make N flexible - adapt to datasets with variable-size bitmap example sets
 
     if len(sys.argv) < 2:
@@ -390,4 +389,3 @@ if __name__ == '__main__':
     else:
         print("Usage: transformer.py train | sample")
         exit(1)
-    

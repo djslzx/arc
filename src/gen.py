@@ -3,13 +3,10 @@ Make programs to use as training data
 """
 
 import pdb
-import pickle
-from math import floor, ceil, log2, sqrt
-from random import choice, randint, randrange, shuffle
-import numpy as np
+from math import floor, sqrt
+from random import choice, randint, shuffle
 
-import util
-from viz import viz, viz_grid, viz_mult
+from viz import viz_grid
 from grammar import *
 from bottom_up import bottom_up_generator, eval
 
@@ -20,7 +17,6 @@ def gen_shape_pool(entities, a_exprs, envs, pool_size, min_zs=0, max_zs=None):
     assert max_zs <= len(z_exprs), f'Expected max_zs <= |zs|, but found max_zs={max_zs}, |zs|={len(zexpers)}'
     assert min_zs <= max_zs, f'Expected min_zs <= max_zs, but found min_zs={min_zs}, max_zs={max_zs}'
     pool = {}
-    outs = {}
     for entity in entities:
         n_tries = 0
         n_hits = 0
@@ -43,9 +39,9 @@ def gen_shape_pool(entities, a_exprs, envs, pool_size, min_zs=0, max_zs=None):
     return pool
 
 def rm_dead_code(entities, envs):
-    '''
+    """
     Remove any occluded entities
-    '''
+    """
     def bmps(xs):
         return T.stack([Seq(*xs).eval(env) for env in envs])
 
@@ -59,27 +55,27 @@ def rm_dead_code(entities, envs):
     return keep
 
 def canonical_ordering(entities):
-    '''
+    """
     Order entities by complexity and position.
-    - Complexity: Point < Line < Rect 
+    - Complexity: Point < Line < Rect
     - Positions are sorted in y-major order (e.g., (1, 4) < (2, 1) and (3, 1) < (3, 2))
-    '''
+    """
     def destructure(e):
         if isinstance(e, Point):
-            return (0, e.x, e.y)
+            return 0, e.x, e.y
         elif isinstance(e, Line):
-            return (1, e.x1, e.y1, e.x2, e.y2)
+            return 1, e.x1, e.y1, e.x2, e.y2
         elif isinstance(e, Rect):
-            return (2, e.x, e.y, e.w, e.h)
+            return 2, e.x, e.y, e.w, e.h
     
     return sorted(entities, key=lambda e: destructure(e))
 
 def gen_random_expr(pool, a_exprs, envs, n_entities):
-    '''
-    Generate a random sequence of entities.  
+    """
+    Generate a random sequence of entities.
     - dead code removal
     - canonical ordering
-    '''
+    """
     # TODO: transforms
     # TODO: don't sample elements of pool that have previously been used
 
@@ -123,9 +119,9 @@ def rand_sprite(envs, a_exprs, i=-1, color=-1):
     else:         return s
 
 def rand_transform(e):
-    '''
+    """
     Return a random (nontrivial) transformation of e
-    '''
+    """
     # # Transform
     # n = choice(a_exprs)
     # t = choice(transforms)
@@ -283,6 +279,7 @@ def make_exprs(n_exprs,         # number of total programs to make
             open(cmps_loc, 'wb').close() # clear file
         except FileNotFoundError:
             pass
+        util.clear(fname=cmps_loc)
         util.save({'meta': {'n_envs': n_envs,
                             'a_bound': a_bound,
                             'pool_size': pool_size,
@@ -293,11 +290,13 @@ def make_exprs(n_exprs,         # number of total programs to make
                   cmps_loc)
 
     # Generate and save exprs w/ bmp outputs
+    util.clear(fname=exprs_loc)
     for n_entities in range(1, max_n_entities+1):
         for expr in gen_random_exprs(pool, a_exprs, envs, n_exprs_per_size, n_entities):
             bmps = [expr.eval(env) for env in envs] 
             p = expr.simplify_indices().serialize()
             util.save((bmps, p), fname=exprs_loc, append=True, verbose=False)
+    print(f'Saved to {exprs_loc}.')
 
 def viz_exs(fname):
     for bmps, tokens in util.load_incremental(fname):
@@ -307,7 +306,7 @@ def viz_exs(fname):
 
 def list_exs(fname):
     for bmps, tokens in util.load_incremental(fname):
-        print(deserialize(tokens))
+        print(deserialize(tokens), f'{len(bmps)} bitmaps')
 
 if __name__ == '__main__':
 
@@ -332,4 +331,4 @@ if __name__ == '__main__':
                load_pool=False,
                max_zs=2)
 
-    # list_exs('../data/full-exs.dat')
+   # list_exs('../data/tiny-exs.dat')
