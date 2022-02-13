@@ -36,34 +36,64 @@ def gen_shape_pool(entities, a_exprs, envs, pool_size):
         print(f'{entity} hits: {n_hits}/{n_tries}')
     return pool
 
-def gen_random_expr(pool, a_exprs, envs, n_objs):
-    objs = []
-    while len(objs) < n_objs:
-        n = R.randint(0, 8)
-        # if n < 8:
-        if n < 1:   entity = Point
-        elif n < 4: entity = Line
-        else:       entity = Rect
-        e = R.choice(pool[entity])
-        # else:
-        #     e = rand_sprite(envs, a_exprs)
-        # TODO: transforms
-        if e not in objs:
-            objs.append(e)
-    expr = Seq(*objs)
+def rm_dead_code(entities, envs):
+    '''
+    Remove any occluded entities
+    '''
+    def bmps(xs):
+        return T.stack([Seq(*xs).eval(env) for env in envs])
+
+    orig_bmps = bmps(entities)
+    keep = []
+    for i, entity in enumerate(entities):
+        # pdb.set_trace()
+        excl_bmps = bmps(keep + entities[i+1:])
+        if (excl_bmps != orig_bmps).any():
+            keep.append(entity)
+    return keep
+
+def canonical_ordering(entities):
+    '''
+    Order entities by complexity and position.
+    - Complexity: Point < Line < Rect 
+    - Positions are sorted in y-major order (e.g., (1, 4) < (2, 1) and (3, 1) < (3, 2))
+    '''
+    def destructure(e):
+        if isinstance(e, Point):
+            return (0, e.x, e.y)
+        elif isinstance(e, Line):
+            return (1, e.x1, e.y1, e.x2, e.y2)
+        elif isinstance(e, Rect):
+            return (2, e.x, e.y, e.w, e.h)
+    
+    return sorted(entities, key=lambda e: destructure(e))
+
+def gen_random_expr(pool, a_exprs, envs, n_entities):
+    '''
+    Generate a random sequence of entities.  
+    - dead code removal
+    - canonical ordering
+    '''
+    # TODO: transforms
+
+    entities = []
+    while len(objs) < n_entities:
+        n = R.randint(0, 8)     # 0..8 (inclusive)
+        if n < 1:   t = Point
+        elif n < 5: t = Line
+        else:       t = Rect
+        entity = R.choice(pool[t])
+        if entity not in objs:
+            objs.append(entity)
+        entities = rm_dead_code(entities, envs)
+        
+    entities = canonical_ordering(entities)
+    expr = Seq(*entities)
     return clean(expr)
 
-def clean(expr):
-    # 1. replace z indices
-    # 2. canonical forms?
-    # cleaned = expr.simplify_indices()
-    # print(f'expr: {expr}, cleaned: {cleaned}')
-    # return cleaned
-    return expr
-
-def gen_random_exprs(pool, a_exprs, envs, n_exprs, n_objs, verbose=True):
+def gen_random_exprs(pool, a_exprs, envs, n_exprs, n_entities, verbose=True):
     for i in range(n_exprs):
-        expr = gen_random_expr(pool, a_exprs, envs, n_objs)
+        expr = gen_random_expr(pool, a_exprs, envs, n_entities)
         if verbose: print(f'expr generated [{i+1}/{n_exprs}]: {expr}')
         yield expr
 
@@ -99,27 +129,59 @@ def rand_transform(e):
     #     t = t(*t_args)
     pass
 
-def elim_dead_entities(entities, env):
-    '''
-    Remove any occluded entities
-    '''
-    orig_bmp = Seq(*entities).eval(env)
-    keep = entities[:1]
-    for i, entity in enumerate(entities[1:], 1):
-        excl = entities[:i] + entities[i+1:]
-        excl_bmp = Seq(*excl).eval(env)
-        if T.ne(excl_bmp, orig_bmp).any():
-            keep.append(entity)
-    return keep
-
 def viz_sprites(envs):
     k = floor(sqrt(LIB_SIZE))
     for env in envs:
-        viz_grid(env['sprites'][:k**2], txt=f'sprites[:{k**2}]')
+        viz_grid(env['sprites'][:k**2], text=f'sprites[:{k**2}]')
 
-def test_elim_dead_entities():
-    zs = [ 0, 1, 2, 3, 4, 5 ]
-    tests = [
+def test_canonical_ordering():
+    test_cases = [
+        ([
+            Point(Num(0), Num(1)), 
+            Point(Num(1), Num(0))
+         ],
+         [
+             Point(Num(0), Num(1)), 
+             Point(Num(1), Num(0))
+         ]),
+        ([
+            Point(Num(2), Num(1)), 
+            Point(Num(2), Num(0))
+         ],
+         [
+             Point(Num(2), Num(0)), 
+             Point(Num(2), Num(1))
+         ]),
+        ([
+            Line(Num(2), Num(0), Num(3), Num(1)), 
+            Rect(Num(1), Num(0), Num(1), Num(1)),
+            Point(Num(2), Num(1)),
+            Rect(Num(0), Num(1), Num(2), Num(2)),
+            Rect(Num(0), Num(1), Num(3), Num(2)),
+            Point(Num(0), Num(2)),
+            Line(Num(0), Num(0), Num(3), Num(3)),
+         ],
+         [
+            Point(Num(0), Num(2)),
+            Point(Num(2), Num(1)),
+            Line(Num(0), Num(0), Num(3), Num(3)),
+            Line(Num(2), Num(0), Num(3), Num(1)), 
+            Rect(Num(0), Num(1), Num(2), Num(2)),
+            Rect(Num(0), Num(1), Num(3), Num(2)),
+            Rect(Num(1), Num(0), Num(1), Num(1)),
+         ]),
+    ]
+    for entities, ans in test_cases:
+        out = canonical_ordering(entities)
+        assert out == ans, f'Failed test: expected {ans}, got {out}'
+    print("[+] passed test_canonical_ordering")
+
+def test_rm_dead_code():
+    zs = [
+        [0, 1,],
+        [0, 2,],
+    ]
+    test_cases = [
         ([
             ["1_",
              "1_"],
@@ -161,29 +223,43 @@ def test_elim_dead_entities():
           Line(Num(0), Num(0), Num(1), Num(1))],
          [Rect(Num(0), Num(0), Num(2), Num(2))]),
         ([],
-         [Line(Num(0), Num(0), Num(1), Num(1)),
-          Rect(Num(0), Num(0), Num(2), Num(2))],
-         [Line(Num(0), Num(0), Num(1), Num(1)),
-          Rect(Num(0), Num(0), Num(2), Num(2))]),
+         [Line(Num(0), Num(0), Num(1), Num(1), color=Num(1)),
+          Rect(Num(0), Num(0), Num(2), Num(2), color=Num(1))],
+         [Rect(Num(0), Num(0), Num(2), Num(2), color=Num(1))]),
+        ([],
+         [Line(Num(0), Num(0), Num(1), Num(1), color=Num(1)),
+          Rect(Num(0), Num(0), Num(2), Num(2), color=Num(2))],
+         [Line(Num(0), Num(0), Num(1), Num(1), color=Num(1)),
+          Rect(Num(0), Num(0), Num(2), Num(2), color=Num(2))]),
+        ([],
+         [Rect(Z(0), Z(0), Num(2), Num(2)), Point(Z(0), Plus(Z(0), Num(1)))],
+         [Rect(Z(0), Z(0), Num(2), Num(2))]),
+        ([],
+         [Rect(Z(0), Z(1), Num(2), Num(2)), Point(Z(0), Z(1))],
+         [Rect(Z(0), Z(1), Num(2), Num(2))]),
+        ([],
+         [Rect(Z(0), Z(0), Num(2), Num(2)), Point(Z(0), Plus(Z(1), Num(1)))],
+         [Rect(Z(0), Z(0), Num(2), Num(2)), Point(Z(0), Plus(Z(1), Num(1)))]),
     ]
-    for lib, entities, ans in tests:
+    for lib, entities, ans in test_cases:
         lib = [util.img_to_tensor(b, w=B_W, h=B_H) for b in lib]
-        env = {'z': zs, 'sprites': lib}
-        out = elim_dead_entities(entities, env)
+        envs = [{'z': z, 'sprites': lib} for z in zs]
+        out = rm_dead_code(entities, envs)
         assert out == ans, f"Failed test: in={entities}; expected {ans}, got {out}"
-    print("[+] passed test_elim_dead_entities")
+    print("[+] passed test_rm_dead_code")
 
 def make_exprs(n_exprs,         # number of total programs to make
                n_envs,          # number of envs (bitmaps) per program
-               max_n_objs,      # number of entities in each program
+               max_n_entities,  # number of entities in each program
+               a_grammar,       # grammar for arithmetic exprs (components of entities)
                a_bound,         # bound on arithmetic exprs in each entity
                entities,        # entity classes allowed
                cmps_loc,        # where to save/load pool of random components
                exprs_loc,       # where to save generated programs
                load_pool=True): # whether to load cmps from cmps_loc or not (gen from scratch)
-    n_exprs_per_size = n_exprs//max_n_objs
-    pool_size = n_exprs * max_n_objs
-    print(f'Parameters: n_exprs={n_exprs}, n_envs={n_envs}, max_n_objs={max_n_objs}, a_bound={a_bound}, entities={entities}')
+    n_exprs_per_size = n_exprs//max_n_entities
+    pool_size = n_exprs * max_n_entities
+    print(f'Parameters: n_exprs={n_exprs}, n_envs={n_envs}, max_n_entities={max_n_entities}, a_bound={a_bound}, entities={entities}')
 
     if load_pool:
         cmps = util.load(cmps_loc)
@@ -191,9 +267,6 @@ def make_exprs(n_exprs,         # number of total programs to make
         meta = cmps['meta']
         n_envs, a_bound, pool_size, entities = meta['n_envs'], meta['a_bound'], meta['pool_size'], meta['entities']
     else:
-        a_grammar = Grammar(ops=[Plus, Minus, Times], 
-                     consts=([Z(i) for i in range(LIB_SIZE)] + 
-                             [Num(i) for i in range(Z_LO, Z_HI + 1)]))
         envs = [{'z': seed_zs(), 'sprites': seed_sprites()} for _ in range(n_envs)]
         a_exprs = [a_expr for a_expr, size in bottom_up_generator(a_bound, a_grammar, envs)]
         pool = gen_shape_pool(entities, a_exprs, envs, pool_size)
@@ -211,8 +284,8 @@ def make_exprs(n_exprs,         # number of total programs to make
                   cmps_loc)
 
     # Generate and save exprs w/ bmp outputs
-    for n_objs in range(1, max_n_objs+1):
-        for expr in gen_random_exprs(pool, a_exprs, envs, n_exprs_per_size, n_objs):
+    for n_entities in range(1, max_n_entities+1):
+        for expr in gen_random_exprs(pool, a_exprs, envs, n_exprs_per_size, n_entities):
             bmps = [expr.eval(env) for env in envs] 
             p = expr.simplify_indices().serialize()
             util.save((bmps, p), fname=exprs_loc, append=True, verbose=False)
@@ -229,7 +302,8 @@ def list_exs(fname):
 
 if __name__ == '__main__':
 
-    test_elim_dead_entities()
+    test_rm_dead_code()
+    test_canonical_ordering()
 
     # # Load saved exprs and generate bmps
     # data = util.load('../data/exs.dat')
@@ -239,8 +313,11 @@ if __name__ == '__main__':
     #     print('expr:', d, len(d))
     #     print(viz_grid(bmps[:25], d))
 
-    # make_exprs(n_exprs=5, n_envs=9, max_n_objs=5, a_bound=1,
+    # make_exprs(n_exprs=5, n_envs=9, max_n_entities=5, a_bound=1,
     #            entities=[Point, Line, Rect],
+    #            a_grammar = Grammar(ops=[Plus, Minus, Times], 
+    #                                consts=([Z(i) for i in range(LIB_SIZE)] + 
+    #                                        [Num(i) for i in range(Z_LO, Z_HI + 1)]))
     #            cmps_loc='../data/tiny-cmps.dat',
     #            exprs_loc='../data/tiny-exs.dat',
     #            load_pool=False)
