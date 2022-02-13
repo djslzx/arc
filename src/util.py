@@ -1,7 +1,15 @@
 import torch as T
 import pickle
 import os
+from random import choice
+
 dirname = os.path.dirname(__file__)
+
+def clamp(x, lo, hi):
+    assert hi >= lo
+    if x > hi:   return hi
+    elif x < lo: return lo
+    return x
 
 def avg(it):
     s = 0

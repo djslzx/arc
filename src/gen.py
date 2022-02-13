@@ -5,16 +5,20 @@ Make programs to use as training data
 import pdb
 import pickle
 from math import floor, ceil, log2, sqrt
-import random as R
+from random import choice, randint, randrange, shuffle
 import numpy as np
 
+import util
 from viz import viz, viz_grid, viz_mult
 from grammar import *
 from bottom_up import bottom_up_generator, eval
 
-
-def gen_shape_pool(entities, a_exprs, envs, pool_size):
+def gen_shape_pool(entities, a_exprs, envs, pool_size, min_zs=0, max_zs=None):
     z_exprs, c_exprs = util.split(a_exprs, lambda a: a.zs())
+    if max_zs is None: max_zs = len(z_exprs)
+    if min_zs is None: min_zs = max_zs
+    assert max_zs <= len(z_exprs), f'Expected max_zs <= |zs|, but found max_zs={max_zs}, |zs|={len(zexpers)}'
+    assert min_zs <= max_zs, f'Expected min_zs <= max_zs, but found min_zs={min_zs}, max_zs={max_zs}'
     pool = {}
     outs = {}
     for entity in entities:
@@ -22,11 +26,13 @@ def gen_shape_pool(entities, a_exprs, envs, pool_size):
         n_hits = 0
         pool[entity] = []
         while len(pool[entity]) < pool_size:
+            # pdb.set_trace()
             color = rand_color()
-            k = R.randrange(1, len(entity.in_types)) # num z's to use
-            args = ([R.choice(z_exprs) for _ in entity.in_types[:k]] + 
-                    [R.choice(c_exprs) for _ in entity.in_types[k:]])
-            R.shuffle(args)
+            n_zs = min(len(entity.in_types), randint(min_zs, max_zs))
+            z_args = [choice(z_exprs) for _ in entity.in_types[:n_zs]] 
+            c_args = [choice(c_exprs) for _ in entity.in_types[n_zs:]]
+            args = z_args + c_args
+            shuffle(args)
             e = entity(*args[:-1], color)
             outs = eval(e, envs)
             if all(out is not None for out in outs): 
@@ -75,21 +81,22 @@ def gen_random_expr(pool, a_exprs, envs, n_entities):
     - canonical ordering
     '''
     # TODO: transforms
+    # TODO: don't sample elements of pool that have previously been used
 
     entities = []
-    while len(objs) < n_entities:
-        n = R.randint(0, 8)     # 0..8 (inclusive)
+    while len(entities) < n_entities:
+        n = randint(0, 8)     # 0..8 (inclusive)
         if n < 1:   t = Point
         elif n < 5: t = Line
         else:       t = Rect
-        entity = R.choice(pool[t])
-        if entity not in objs:
-            objs.append(entity)
+        entity = choice(pool[t])
+        if entity not in entities:
+            entities.append(entity)
         entities = rm_dead_code(entities, envs)
         
     entities = canonical_ordering(entities)
     expr = Seq(*entities)
-    return clean(expr)
+    return expr
 
 def gen_random_exprs(pool, a_exprs, envs, n_exprs, n_entities, verbose=True):
     for i in range(n_exprs):
@@ -98,14 +105,14 @@ def gen_random_exprs(pool, a_exprs, envs, n_exprs, n_entities, verbose=True):
         yield expr
 
 def rand_color():
-    return Num(R.randrange(1, 10))
+    return Num(randrange(1, 10))
 
 def rand_sprite(envs, a_exprs, i=-1, color=-1):
-    i = i if 0 <= i < LIB_SIZE else R.randrange(1, LIB_SIZE)
+    i = i if 0 <= i < LIB_SIZE else randrange(1, LIB_SIZE)
     color = color if isinstance(color, Num) and 1 <= color.n <= 9 else rand_color()
     n_misses = 0
     while True:
-        s = Sprite(i, R.choice(a_exprs), R.choice(a_exprs))
+        s = Sprite(i, choice(a_exprs), choice(a_exprs))
         outs = eval(s, envs)
         if all(out is not None for out in outs):
             break
@@ -120,9 +127,9 @@ def rand_transform(e):
     Return a random (nontrivial) transformation of e
     '''
     # # Transform
-    # n = R.choice(a_exprs)
-    # t = R.choice(transforms)
-    # t_args = [R.choice(a_exprs) for _ in t.in_types]
+    # n = choice(a_exprs)
+    # t = choice(transforms)
+    # t_args = [choice(a_exprs) for _ in t.in_types]
     # if any(n.eval(env) > 0 for env in envs):
     #     t = Repeat(t(*t_args), n)
     # else:
@@ -256,6 +263,8 @@ def make_exprs(n_exprs,         # number of total programs to make
                entities,        # entity classes allowed
                cmps_loc,        # where to save/load pool of random components
                exprs_loc,       # where to save generated programs
+               min_zs=0,        # min number of z's to allow in each entity
+               max_zs=None,     # max number of z's to allow in each entity
                load_pool=True): # whether to load cmps from cmps_loc or not (gen from scratch)
     n_exprs_per_size = n_exprs//max_n_entities
     pool_size = n_exprs * max_n_entities
@@ -269,7 +278,7 @@ def make_exprs(n_exprs,         # number of total programs to make
     else:
         envs = [{'z': seed_zs(), 'sprites': seed_sprites()} for _ in range(n_envs)]
         a_exprs = [a_expr for a_expr, size in bottom_up_generator(a_bound, a_grammar, envs)]
-        pool = gen_shape_pool(entities, a_exprs, envs, pool_size)
+        pool = gen_shape_pool(entities, a_exprs, envs, pool_size, min_zs, max_zs)
         try:
             open(cmps_loc, 'wb').close() # clear file
         except FileNotFoundError:
@@ -313,13 +322,14 @@ if __name__ == '__main__':
     #     print('expr:', d, len(d))
     #     print(viz_grid(bmps[:25], d))
 
-    # make_exprs(n_exprs=5, n_envs=9, max_n_entities=5, a_bound=1,
-    #            entities=[Point, Line, Rect],
-    #            a_grammar = Grammar(ops=[Plus, Minus, Times], 
-    #                                consts=([Z(i) for i in range(LIB_SIZE)] + 
-    #                                        [Num(i) for i in range(Z_LO, Z_HI + 1)]))
-    #            cmps_loc='../data/tiny-cmps.dat',
-    #            exprs_loc='../data/tiny-exs.dat',
-    #            load_pool=False)
+    make_exprs(n_exprs=5, n_envs=1, max_n_entities=5, a_bound=1,
+               entities=[Point, Line, Rect],
+               a_grammar = Grammar(ops=[Plus, Minus, Times], 
+                                   consts=([Z(i) for i in range(LIB_SIZE)] + 
+                                           [Num(i) for i in range(Z_LO, Z_HI + 1)])),
+               cmps_loc='../data/tiny-cmps.dat',
+               exprs_loc='../data/tiny-exs.dat',
+               load_pool=False,
+               max_zs=0)
 
     # list_exs('../data/full-exs.dat')
