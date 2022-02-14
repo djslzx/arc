@@ -35,7 +35,7 @@ class Expr(Visited):
     def eval(self, env={}): return self.accept(Eval(env))
     def zs(self): return self.accept(Zs())
     def sprites(self): return self.accept(Sprites())
-    def simplify_indices(self): 
+    def simplify_indices(self):
         zs = self.zs()
         sprites = self.sprites()
         return self.accept(SimplifyIndices(zs, sprites))
@@ -43,8 +43,8 @@ class Expr(Visited):
     def range(self, envs): return self.accept(Range(envs))
     def __len__(self): return self.accept(Size())
     def __str__(self): return self.accept(Print())
-    def dist_to(self, other): 
-        '''Edit distance to transform self into other'''
+    def dist_to(self, other):
+        """Edit distance to transform self into other"""
         # TODO: make this better
         return nltk.edit_distance(str(self), str(other))
 
@@ -52,8 +52,8 @@ def seed_zs():
     return (T.rand(LIB_SIZE) * (Z_HI - Z_LO) - Z_LO).long()
 
 def seed_sprites():
-    return T.stack([make_sprite(w=randrange(2, B_W/3), 
-                                h=randrange(2, B_H/3), 
+    return T.stack([make_sprite(w=randrange(2, B_W//3),
+                                h=randrange(2, B_H//3),
                                 W=B_W, H=B_H)
                     for _ in range(LIB_SIZE)])
 
@@ -188,7 +188,7 @@ class Sprite(Expr):
 class Seq(Expr):
     in_types = ['list(bitmap)']
     out_type = 'bitmap'
-    def __init__(self, *bmps): 
+    def __init__(self, *bmps):
         self.bmps = bmps
     def accept(self, v): return v.visit_Seq(self.bmps)
 
@@ -261,12 +261,12 @@ class Recolor(Expr):
 class Compose(Expr):
     in_types = ['transform', 'transform']
     out_type = 'transform'
-    def __init__(self, f, g): 
+    def __init__(self, f, g):
         self.f = f
         self.g = g
     def accept(self, v): return v.visit_Compose(self.f, self.g)
 
-        
+
 class Visitor:
 
     def fail(self, s): assert False, f"Visitor subclass `{type(self).__name__}` should implement `visit_{s}`"
@@ -289,7 +289,7 @@ class Visitor:
     def visit_Intersect(self, bmp): self.fail('Intersect')
     def visit_HFlip(self): self.fail('HFlip')
     def visit_VFlip(self): self.fail('VFlip')
-    def visit_Translate(self, bmp, dx, dy): self.fail('Translate')
+    def visit_Translate(self, dx, dy): self.fail('Translate')
     def visit_Recolor(self, c): self.fail('Recolor')
     def visit_Compose(self, f, g): self.fail('Compose')
     def visit_Apply(self, f, bmp): self.fail('Apply')
@@ -427,7 +427,7 @@ class Eval(Visitor):
 
     @staticmethod
     def translate(bmp, dx, dy):
-        assert isinstance(bmp, T.Tensor) 
+        assert isinstance(bmp, T.Tensor)
         assert isinstance(dx, int) and isinstance(dy, int)
 
         def slices(delta):
@@ -439,14 +439,14 @@ class Eval(Visitor):
         c, d = (dy, 0) if dy > 0 else (0, -dy)
         c_lo, c_hi = slices(dx)
         r_lo, r_hi = slices(dy)
-        
+
         return F.pad(bmp[r_lo:r_hi, c_lo:c_hi], (a, b, c, d))
 
-    def visit_Translate(self, dx, dy): 
+    def visit_Translate(self, dx, dy):
         dx, dy = dx.accept(self), dy.accept(self)
         return lambda bmp: Eval.translate(bmp, dx, dy)
 
-    def visit_Recolor(self, c): 
+    def visit_Recolor(self, c):
         def index(bmp, p):
             x, y = p
             return bmp[y][x]
@@ -458,17 +458,19 @@ class Eval(Visitor):
         f, g = f.accept(self), g.accept(self)
         return lambda bmp: f(g(bmp))
 
-    def visit_Repeat(self, f, n): 
+    def visit_Repeat(self, f, n):
         n, f = n.accept(self), f.accept(self)
         bmps = []
+
         def g(bmp):
             for i in range(n):
                 bmp = f(bmp)
                 bmps.append(bmp)
             return Eval.overlay(*bmps)
+
         return g
 
-    def visit_Apply(self, f, bmp): 
+    def visit_Apply(self, f, bmp):
         f, bmp = f.accept(self), bmp.accept(self)
         return Eval.overlay(f(bmp), bmp)
 
@@ -486,7 +488,7 @@ class Size(Visitor):
     def visit_And(self, x, y): return x.accept(self) + y.accept(self) + 1
     def visit_If(self, b, x, y): return b.accept(self) + x.accept(self) + y.accept(self) + 1
     def visit_Point(self, x, y, color): return x.accept(self) + y.accept(self) + color.accept(self) + 1
-    def visit_Line(self, x1, y1, x2, y2, color): 
+    def visit_Line(self, x1, y1, x2, y2, color):
         return x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self) + color.accept(self) + 1
     def visit_Rect(self, x, y, w, h, color):
         return x.accept(self) + y.accept(self) + w.accept(self) + h.accept(self) + color.accept(self) + 1
@@ -497,7 +499,7 @@ class Size(Visitor):
     def visit_Intersect(self, bmp): return bmp.accept(self) + 1
     def visit_HFlip(self): return 1
     def visit_VFlip(self): return 1
-    def visit_Translate(self, x, y): return x.accept(self) + y.accept(self) + 1
+    def visit_Translate(self, dx, dy): return dx.accept(self) + dy.accept(self) + 1
     def visit_Recolor(self, c): return c.accept(self) + 1
     def visit_Compose(self, f, g): return f.accept(self) + g.accept(self) + 1
     def visit_Apply(self, f, bmp): return f.accept(self) + bmp.accept(self) + 1
@@ -516,7 +518,7 @@ class Print(Visitor):
     def visit_Lt(self, x, y): return f'(< {x.accept(self)} {y.accept(self)})'
     def visit_And(self, x, y): return f'(and {x.accept(self)} {y.accept(self)})'
     def visit_If(self, b, x, y): return f'(if {b.accept(self)} {x.accept(self)} {y.accept(self)})'
-    def visit_Point(self, x, y, color): 
+    def visit_Point(self, x, y, color):
         return f'(Point[{color.accept(self)}] {x.accept(self)} {y.accept(self)})'
     def visit_Line(self, x1, y1, x2, y2, color):
         return f'(Line[{color.accept(self)}] {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
@@ -529,7 +531,7 @@ class Print(Visitor):
     def visit_Intersect(self, bmp): return f'(intersect {bmp.accept(self)})'
     def visit_HFlip(self): return 'h-flip'
     def visit_VFlip(self): return 'v-flip'
-    def visit_Translate(self, x, y): return f'(translate {x.accept(self)} {y.accept(self)})'
+    def visit_Translate(self, dx, dy): return f'(translate {dx.accept(self)} {dy.accept(self)})'
     def visit_Recolor(self, c): return f'[{c.accept(self)}]'
     def visit_Compose(self, f, g): return f'(compose {f.accept(self)} {g.accept(self)})'
     def visit_Apply(self, f, bmp): return f'({f.accept(self)} {bmp.accept(self)})'
@@ -537,18 +539,18 @@ class Print(Visitor):
 
 
 def deserialize(tokens):
-    '''
+    """
     Deserialize a serialized seq into a program.
-    '''
+    """
     def D(tokens):
         if not tokens: return []
         h, t = tokens[0], D(tokens[1:])
-        if isinstance(h, bool) and h == False: 
+        if isinstance(h, bool) and not h:
             return [Nil()] + t
-        if isinstance(h, int): 
+        if isinstance(h, int):
             return [Num(h)] + t
         if isinstance(h, str):
-            if h.startswith('z_'): 
+            if h.startswith('z_'):
                 return [Z(int(h[2:]))] + t
             if h.startswith('S_'):
                 return [Sprite(int(h[2:]), t[0], t[1])] + t[2:]
@@ -572,19 +574,19 @@ def deserialize(tokens):
             return [Line(t[1], t[2], t[3], t[4], color=t[0])] + t[5:]
         if h == 'R':
             return [Rect(t[1], t[2], t[3], t[4], color=t[0])] + t[5:]
-        if h =='H':
+        if h == 'H':
             return [HFlip()] + t
-        if h =='V':
+        if h == 'V':
             return [VFlip()] + t
-        if h =='T':
+        if h == 'T':
             return [Translate(t[0], t[1])] + t[2:]
         if h == '#':
             return [Recolor(t[0])] + t[1:]
         if h == 'o':
             return [Compose(t[0], t[1])] + t[2:]
-        if h =='@':
+        if h == '@':
             return [Apply(t[0], t[1])] + t[2:]
-        if h =='!':
+        if h == '!':
             return [Repeat(t[0], t[1])] + t[2:]
         if h == '{':
             i = t.index('}')
@@ -617,12 +619,12 @@ class Serialize(Visitor):
         return ['R'] + color.accept(self) + x.accept(self) + y.accept(self) + w.accept(self) + h.accept(self)
     def visit_Sprite(self, i, x, y):
         return [f'S_{i}'] + x.accept(self) + y.accept(self)
-    def visit_Seq(self, bmps): 
-        l = ['{'];
+    def visit_Seq(self, bmps):
+        tokens = ['{']
         for bmp in bmps:
-            l.extend(bmp.accept(self))
-        l.append('}')           # stop symbol
-        return l
+            tokens.extend(bmp.accept(self))
+        tokens.append('}')           # stop symbol
+        return tokens
     def visit_Join(self, bmp1, bmp2): return [';'] + bmp1.accept(self) + bmp2.accept(self)
     # def visit_Intersect(self, bmp): return ['I'] + bmp.accept(self)
     def visit_HFlip(self): return ['H']
@@ -667,7 +669,6 @@ class Zs(Visitor):
 
 class Sprites(Visitor):
     def __init__(self): pass
-    def visit_Empty(self): return set()
     def visit_Nil(self): return set()
     def visit_Num(self, n): return set()
     def visit_Z(self, i): return set()
@@ -698,14 +699,13 @@ class Sprites(Visitor):
 
 
 class SimplifyIndices(Visitor):
-    def __init__(self, zs, sprites): 
-        '''
+    def __init__(self, zs, sprites):
+        """
         zs: the indices of zs in the whole expression
         sprites: the indices of sprites in the whole expression
-        '''
-        self.z_mapping = {z:i for i,z in enumerate(sorted(zs))}
-        self.sprite_mapping = {sprite:i for i,sprite in enumerate(sorted(sprites))}
-    def visit_Empty(self): return Empty()
+        """
+        self.z_mapping = {z: i for i, z in enumerate(sorted(zs))}
+        self.sprite_mapping = {sprite: i for i, sprite in enumerate(sorted(sprites))}
     def visit_Nil(self): return Nil()
     def visit_Num(self, n): return Num(n)
     def visit_Z(self, i): return Z(self.z_mapping[i])
@@ -717,10 +717,10 @@ class SimplifyIndices(Visitor):
     def visit_And(self, x, y): return And(x.accept(self), y.accept(self))
     def visit_If(self, b, x, y): return If(b.accept(self), x.accept(self), y.accept(self))
     def visit_Point(self, x, y, color): return Point(x.accept(self), y.accept(self), color.accept(self))
-    def visit_Line(self, x1, y1, x2, y2, color): return Line(x1.accept(self), y1.accept(self), 
+    def visit_Line(self, x1, y1, x2, y2, color): return Line(x1.accept(self), y1.accept(self),
                                                              x2.accept(self), y2.accept(self),
                                                              color.accept(self))
-    def visit_Rect(self, x, y, w, h, color): return Rect(x.accept(self), y.accept(self), 
+    def visit_Rect(self, x, y, w, h, color): return Rect(x.accept(self), y.accept(self),
                                                          w.accept(self), h.accept(self),
                                                          color.accept(self))
     def visit_Sprite(self, i, x, y): return Sprite(self.sprite_mapping[i], x.accept(self), y.accept(self))
@@ -734,28 +734,28 @@ class SimplifyIndices(Visitor):
     def visit_Compose(self, f, g): return Compose(f.accept(self), g.accept(self))
     def visit_Apply(self, f, bmp): return Apply(f.accept(self), bmp.accept(self))
     def visit_Repeat(self, f, n): return Repeat(f.accept(self), n.accept(self))
-        
+
 
 class Range(Visitor):
     def __init__(self, envs): self.envs = envs
-    def visit_Num(self, n): 
-        return (n, n)
-    def visit_Z(self, i): 
+    def visit_Num(self, n):
+        return n, n
+    def visit_Z(self, i):
         return (min(env['z'][i] for env in self.envs),
                 max(env['z'][i] for env in self.envs))
-    def visit_Plus(self, x, y): 
+    def visit_Plus(self, x, y):
         x_min, x_max = x.accept(self)
         y_min, y_max = y.accept(self)
-        return (x_min + y_min, x_max + y_max)
-    def visit_Minus(self, x, y): 
+        return x_min + y_min, x_max + y_max
+    def visit_Minus(self, x, y):
         x_min, x_max = x.accept(self)
         y_min, y_max = y.accept(self)
-        return (x_min - y_max, x_max - y_min)
-    def visit_Times(self, x, y): 
+        return x_min - y_max, x_max - y_min
+    def visit_Times(self, x, y):
         x_min, x_max = x.accept(self)
         y_min, y_max = y.accept(self)
         products = [x * y for x in [x_min, x_max] for y in [y_min, y_max]]
-        return (min(products), max(products))
+        return min(products), max(products)
 
 
 def test_eval():
@@ -865,7 +865,7 @@ def test_eval_bitmap():
           "_#__"]),
 
         # Reflection
-        (Apply(HFlip(), 
+        (Apply(HFlip(),
                Line(Num(0), Num(0),
                     Num(3), Num(3))),
          ["#___" + "_"*(B_W-8) + "___#",
@@ -1025,7 +1025,7 @@ def test_eval_bitmap():
             f" expected=\n{expected}\n" \
             f" out=\n{out}"
     print(" [+] passed test_eval_bitmap")
-        
+
 
 def test_sprite():
     tests = [
@@ -1078,13 +1078,13 @@ def test_sprite():
                Sprite(0)),
          ["111",
           "__1",
-          "_1_"] 
+          "_1_"]
          +
          ["___"] * (B_H - 6)
          +
          ["_2_",
           "__2",
-          "222"]),        
+          "222"]),
     ]
     for sprites, expr, correct_semantics in tests:
         env = {'z': [],
@@ -1198,6 +1198,7 @@ def test_range():
         out = expr.range(envs)
         assert out == (lo, hi), f"test_range failed: in={expr}, expected={(lo, hi)}, actual={out}"
     print(" [+] passed test_range")
+
 
 if __name__ == '__main__':
     test_eval()

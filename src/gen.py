@@ -14,7 +14,7 @@ def gen_shape_pool(entities, a_exprs, envs, pool_size, min_zs=0, max_zs=None):
     z_exprs, c_exprs = util.split(a_exprs, lambda a: a.zs())
     if max_zs is None: max_zs = len(z_exprs)
     if min_zs is None: min_zs = max_zs
-    assert max_zs <= len(z_exprs), f'Expected max_zs <= |zs|, but found max_zs={max_zs}, |zs|={len(zexpers)}'
+    assert max_zs <= len(z_exprs), f'Expected max_zs <= |zs|, but found max_zs={max_zs}, |zs|={len(z_exprs)}'
     assert min_zs <= max_zs, f'Expected min_zs <= max_zs, but found min_zs={min_zs}, max_zs={max_zs}'
     pool = {}
     for entity in entities:
@@ -323,8 +323,8 @@ if __name__ == '__main__':
 
     make_exprs(n_exprs=10_000, n_envs=5, max_n_entities=5, a_bound=1,
                entities=[Point, Line, Rect],
-               a_grammar = Grammar(ops=[Plus, Minus, Times], 
-                                   consts=([Z(i) for i in range(LIB_SIZE)] + 
+               a_grammar = Grammar(ops=[Plus, Minus, Times],
+                                   consts=([Z(i) for i in range(LIB_SIZE)] +
                                            [Num(i) for i in range(Z_LO, Z_HI + 1)])),
                cmps_loc='../data/10k-zful-cmps.dat',
                exprs_loc='../data/10k-zful-exs.dat',
