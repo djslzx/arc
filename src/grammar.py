@@ -588,6 +588,8 @@ def deserialize(tokens):
             return [Apply(t[0], t[1])] + t[2:]
         if h == '!':
             return [Repeat(t[0], t[1])] + t[2:]
+        if h == '^':
+            return [Intersect(t[0])] + t[1:]
         if h == '{':
             i = t.index('}')
             return [Seq(*t[:i])] + t[i+1:]
@@ -626,7 +628,7 @@ class Serialize(Visitor):
         tokens.append('}')           # stop symbol
         return tokens
     def visit_Join(self, bmp1, bmp2): return [';'] + bmp1.accept(self) + bmp2.accept(self)
-    # def visit_Intersect(self, bmp): return ['I'] + bmp.accept(self)
+    def visit_Intersect(self, bmp): return ['^'] + bmp.accept(self)
     def visit_HFlip(self): return ['H']
     def visit_VFlip(self): return ['V']
     def visit_Translate(self, x, y): return ['T'] + x.accept(self) + y.accept(self)
@@ -1032,47 +1034,38 @@ def test_sprite():
         ([["2___",
            "2___",
            "____",
-           "____"],
-        ],
+           "____"]],
          Sprite(0),
          ["2___",
           "2___",
           "____",
           "____"]),
-        ([
-            ["__",
-             "__"],
-            ["11",
-             "_1"],
-        ],
+        ([["__",
+           "__"],
+          ["11",
+           "_1"]],
          Sprite(0),
          ["__",
           "__"]),
-        ([
-            ["__",
-             "__"],
-            ["11",
-             "_1"],
-        ],
+        ([["__",
+           "__"],
+          ["11",
+           "_1"]],
          Sprite(1),
          ["11",
           "_1"]),
-        ([
-            ["111",
-             "__1",
-             "_1_"]
-        ],
+        ([["111",
+           "__1",
+           "_1_"]],
          Apply(Compose(HFlip(),
                        Recolor(Num(2))),
                Sprite(0)),
             ["111" + '_' * (B_W - 6) + "222",
              "__1" + '_' * (B_W - 6) + "2__",
              "_1_" + '_' * (B_W - 6) + "_2_"]),
-        ([
-            ["111",
-             "__1",
-             "_1_"]
-        ],
+        ([["111",
+           "__1",
+           "_1_"]],
          Apply(Compose(VFlip(),
                        Recolor(Num(2))),
                Sprite(0)),
@@ -1176,7 +1169,29 @@ def test_simplify_indices():
     print(" [+] passed test_simplify_indices")
 
 def test_serialize():
-    pass
+    test_cases = [
+        (Nil(), [False]),
+        (Plus(Z(0), Z(1)), ['+', 'z_0', 'z_1']),
+        (Plus(Times(Num(1), Num(0)), Minus(Num(3), Num(2))), ['+', '*', 1, 0, '-', 3, 2]),
+        (And(Not(Nil()), Nil()), ['&', '~', False, False]),
+        (Not(Lt(Num(3), Minus(Num(2), Num(7)))), ['~', '<', 3, '-', 2, 7]),
+        (If(Not(Lt(Num(3), Z(0))), Num(2), Num(5)), ['?', '~', '<', 3, 'z_0', 2, 5]),
+        (If(Lt(Z(0), Z(1)), Point(Z(0), Z(0)), Rect(Z(1), Z(1), Num(2), Num(3))),
+         ['?', '<', 'z_0', 'z_1', 'P', 1, 'z_0', 'z_0', 'R', 1, 'z_1', 'z_1', 2, 3]),
+        (Seq(Sprite(0), Sprite(1), Sprite(2), Sprite(3)),
+         ['{', 'S_0', 0, 0, 'S_1', 0, 0, 'S_2', 0, 0, 'S_3', 0, 0, '}']),
+        (Apply(Intersect(Rect(Plus(Z(0), Num(1)), Plus(Z(0), Num(1)), Num(2), Num(2))),
+                   Rect(Z(0), Z(0), Num(2), Num(2))),
+         ['@', '^', 'R', 1, '+', 'z_0', 1, '+', 'z_0', 1, 2, 2, 'R', 1, 'z_0', 'z_0', 2, 2]),
+    ]
+    for expr, ans in test_cases:
+        serialized = expr.serialize()
+        deserialized = deserialize(serialized)
+        assert serialized == ans, \
+            f'serialization failed: in={expr}:\n  expected {ans},\n   but got {serialized}'
+        assert deserialized == expr, \
+            f'deserialization failed: in={expr}:\n  expected {expr},\n   but got {deserialized}'
+    print(' [+] passed test_serialize')
 
 def test_range():
     envs = [
@@ -1207,4 +1222,5 @@ if __name__ == '__main__':
     test_sprite()
     test_simplify_indices()
     test_range()
+    test_serialize()
     # test_zs()
