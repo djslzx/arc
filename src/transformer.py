@@ -409,12 +409,13 @@ def test_sampling(checkpoint_loc, data_loc, max_length=100):
 
 
 if __name__ == '__main__':
-    lexicon = [f'z_{i}' for i in range(LIB_SIZE)] + \
-              [f'S_{i}' for i in range(LIB_SIZE)] + \
-              [i for i in range(Z_LO, Z_HI + 1)] + \
-              ['~', '+', '-', '*', '<', '&', '?',
-               'P', 'L', 'R', 
-               'H', 'V', 'T', '#', 'o', '@', '!', '{', '}',]
+    lexicon = ([i for i in range(Z_LO, Z_HI + 1)] + 
+            # [f'z_{i}' for i in range(LIB_SIZE)] + 
+            # [f'S_{i}' for i in range(LIB_SIZE)] +
+               ['~', '+', '-', '*', '<', '&', '?',
+                'P', 'L', 'R', 
+                'H', 'V', 'T', '#', 'o', '@', '!', '{', '}',])
+    print(f'lexicon: {lexicon}')
 
     # TODO: update/improve model state save loc 
     # TODO: make N flexible - adapt to datasets with variable-size bitmap example sets
