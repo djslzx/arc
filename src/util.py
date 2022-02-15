@@ -97,7 +97,10 @@ def to_abspath(path):
 
 def clear(fname):
     print(f'Clearing {fname}...')
-    open(fname, 'w').close()
+    try:
+        open(fname, 'wb').close() # clear file
+    except FileNotFoundError:
+        pass
 
 def save(data, fname, append=False, verbose=True):
     path = to_abspath(fname)

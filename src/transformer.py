@@ -250,6 +250,8 @@ class ArcTransformer(nn.Module):
                 n_non_blank += any_non_blank
                 if any_non_blank:
                     writer.add_images(f'bmp samples for {e_expr}', T.stack(bmps), epoch)
+                else:
+                    print('blank bitmap, skipped')
 
         # record number of well-formed/non-blank programs found
         writer.add_scalar(f'well-formed', n_well_formed, epoch)
@@ -288,8 +290,7 @@ class ArcTransformer(nn.Module):
             'out exprs':       out_exprs,
         }
 
-
-    def learn(self, tloader, vloader, epochs, threshold=0, sample_freq=1):
+    def learn(self, tloader, vloader, epochs, threshold=0, sample_freq=10):
         self.to(device)
         optimizer = T.optim.Adam(self.parameters(), lr=10 ** -4)
         writer = tb.SummaryWriter()
