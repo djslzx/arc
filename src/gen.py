@@ -22,8 +22,7 @@ def gen_shape_pool(entities, a_exprs, envs, pool_size, min_zs=0, max_zs=None):
         n_hits = 0
         pool[entity] = []
         while len(pool[entity]) < pool_size:
-            # pdb.set_trace()
-            color = rand_color()
+            color = Num(randrange(1, Z_HI+1))
             n_zs = min(len(entity.in_types), randint(min_zs, max_zs))
             z_args = [choice(z_exprs) for _ in entity.in_types[:n_zs]] 
             c_args = [choice(c_exprs) for _ in entity.in_types[n_zs:]]
@@ -95,9 +94,6 @@ def gen_random_exprs(pool, a_exprs, envs, n_exprs, n_entities, entity_types, ver
         expr = gen_random_expr(pool, a_exprs, envs, n_entities, entity_types)
         if verbose: print(f'expr generated [{i+1}/{n_exprs}]: {expr}')
         yield expr
-
-def rand_color():
-    return Num(randrange(1, 10))
 
 def rand_sprite(envs, a_exprs, i=-1, color=-1):
     i = i if 0 <= i < LIB_SIZE else randrange(1, LIB_SIZE)
@@ -313,15 +309,18 @@ if __name__ == '__main__':
     #     print('expr:', d, len(d))
     #     print(viz_grid(bmps[:25], d))
 
+    a_gram = Grammar(ops=[Plus, Minus, Times],
+                     consts=([Z(i) for i in range(LIB_SIZE)] +
+                             [Num(i) for i in range(Z_LO, Z_HI + 1)]))
+    print(a_gram.ops, a_gram.consts)
+
     make_exprs(n_exprs=10_000, n_envs=1, max_n_entities=2, a_bound=1,
                entities=[# Point, Line,
                          Rect],
-               a_grammar = Grammar(ops=[Plus, Minus, Times],
-                                   consts=([Z(i) for i in range(LIB_SIZE)] +
-                                           [Num(i) for i in range(Z_LO, Z_HI + 1)])),
-               cmps_loc='../data/small-cmps.dat',
-               exprs_loc='../data/small-exs.dat',
+               a_grammar = a_gram,
+               cmps_loc='../data/10k-simple-cmps.dat',
+               exprs_loc='../data/10k-simple-exs.dat',
                load_pool=False,
                max_zs=0)
 
-   # list_exs('../data/10k-zless-exs.dat')
+    # list_exs('../data/10k-simple-exs.dat')
