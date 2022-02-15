@@ -598,6 +598,8 @@ def deserialize(tokens):
         else:
             assert False, f'Failed to classify token: {h} of type {type(h)}'
 
+    decoded = D(tokens)
+    assert len(decoded) == 1, f'Parsed more than one program in one token sequence'
     expr = D(tokens)[0]
     return expr
 
@@ -1193,6 +1195,35 @@ def test_serialize():
             f'deserialization failed: in={expr}:\n  expected {expr},\n   but got {deserialized}'
     print(' [+] passed test_serialize')
 
+def test_deserialize_breaking():
+    test_cases = [
+        ([1], False),
+        (['{', 'P', 0, 1, 2, '}'], False),
+        ([1, 2, 3], True),
+        (['P', 0, 1, 2], False),
+        (['P', 'g', 1, 2], True),
+        (['L', 0, 1, 1, 3, 3], False),
+        (['L', 'g', 1, 1, 3, 3], True),
+        (['R', 0, 9, 'R', 11, 6, 8, '}', '}', 4, 2, 8, 15, 9, 9, 7, 13, 4, '}', 2, 8], True),
+        (['L', 'R', 4, 8, 2, 4, 3, 2, '}', 9, 1, '}', 2, 6, '}', 6, 4, 8], True),
+    ]
+    for case, should_fail in test_cases:
+        try:
+            out = deserialize(case)
+            failed = False
+        except:
+            failed = True
+
+        if should_fail and not failed:
+            print( f"expected to fail but didn't: in={case}, got {out}")
+            exit(1)
+        elif not should_fail and failed:
+            print( f"failed unexpectedly: in={case}")
+            exit(1)
+
+    print(" [+] passed test_deserialize_breaking")
+    
+
 def test_range():
     envs = [
         {'z': [1, 0]},
@@ -1216,11 +1247,12 @@ def test_range():
 
 
 if __name__ == '__main__':
-    test_eval()
-    test_eval_bitmap()
-    test_eval_color()
-    test_sprite()
-    test_simplify_indices()
-    test_range()
-    test_serialize()
+    # test_eval()
+    # test_eval_bitmap()
+    # test_eval_color()
+    # test_sprite()
+    # test_simplify_indices()
+    # test_range()
+    # test_serialize()
+    test_deserialize_breaking()
     # test_zs()
