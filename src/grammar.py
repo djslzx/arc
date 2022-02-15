@@ -600,7 +600,9 @@ def deserialize(tokens):
 
     decoded = D(tokens)
     assert len(decoded) == 1, f'Parsed more than one program in one token sequence'
+    assert decoded.count('{') == decoded.count('}'), f'Mismatched parens' # basic check; TODO: more sophisticated
     expr = D(tokens)[0]
+    assert isinstance(expr, Expr), f'Decoded program should be of type Expr'
     return expr
 
 
@@ -1198,10 +1200,12 @@ def test_serialize():
 def test_deserialize_breaking():
     test_cases = [
         ([1], False),
-        (['{', 'P', 0, 1, 2, '}'], False),
         ([1, 2, 3], True),
+        (['{'], True),
         (['P', 0, 1, 2], False),
         (['P', 'g', 1, 2], True),
+        (['P', 'R', 0, 1, 2, 3, 4, 5, 6], True),
+        (['{', 'P', 0, 1, 2, '}'], False),
         (['L', 0, 1, 1, 3, 3], False),
         (['L', 'g', 1, 1, 3, 3], True),
         (['R', 0, 9, 'R', 11, 6, 8, '}', '}', 4, 2, 8, 15, 9, 9, 7, 13, 4, '}', 2, 8], True),
