@@ -6,8 +6,8 @@ from random import randrange
 from ant import make_sprite
 
 # bitmap size constants
-B_W = 24
-B_H = 24
+B_W = 8
+B_H = 8
 
 LIB_SIZE = 10
 Z_LO = 0  # min poss value in z_n
@@ -53,8 +53,8 @@ def seed_zs(lo=Z_LO, hi=Z_HI, n_zs=LIB_SIZE):
     return (T.rand(n_zs) * (hi - lo) - lo).long()
 
 def seed_sprites(n_sprites=LIB_SIZE):
-    return T.stack([make_sprite(w=randrange(2, B_W//3),
-                                h=randrange(2, B_H//3),
+    return T.stack([make_sprite(w=randrange(2, B_W//2),
+                                h=randrange(2, B_H//2),
                                 W=B_W, H=B_H)
                     for _ in range(n_sprites)])
 
