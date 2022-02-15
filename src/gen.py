@@ -267,7 +267,6 @@ def make_exprs(n_exprs,         # number of total programs to make
         envs = [{'z': seed_zs(), 'sprites': seed_sprites()} for _ in range(n_envs)]
         a_exprs = [a_expr for a_expr, size in bottom_up_generator(a_bound, a_grammar, envs)]
         pool = gen_shape_pool(entities, a_exprs, envs, pool_size, min_zs, max_zs)
-        util.clear(fname=cmps_loc)
         util.save({'meta': {'n_envs': n_envs,
                             'a_bound': a_bound,
                             'pool_size': pool_size,
@@ -275,15 +274,20 @@ def make_exprs(n_exprs,         # number of total programs to make
                    'envs': envs, 
                    'pool': pool, 
                    'a_exprs': a_exprs},
-                  cmps_loc)
+                  cmps_loc,
+                  append=False)
 
     # Generate and save exprs w/ bmp outputs
-    util.clear(fname=exprs_loc)
+    cleared = False
     for n_entities in range(1, max_n_entities+1):
         for expr in gen_random_exprs(pool, a_exprs, envs, n_exprs_per_size, n_entities, entities):
             bmps = [expr.eval(env) for env in envs] 
             p = expr.simplify_indices().serialize()
-            util.save((bmps, p), fname=exprs_loc, append=True, verbose=False)
+            if cleared:
+                util.save((bmps, p), fname=exprs_loc, append=True, verbose=False)
+            else:
+                util.save((bmps, p), fname=exprs_loc, append=False, verbose=False)
+                cleared = True
     print(f'Saved to {exprs_loc}.')
 
 def viz_exs(fname):

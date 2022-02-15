@@ -95,13 +95,6 @@ def to_abspath(path):
     else:
         return os.path.join(dirname, path)
 
-def clear(fname):
-    print(f'Clearing {fname}...')
-    try:
-        open(fname, 'wb').close() # clear file
-    except FileNotFoundError:
-        pass
-
 def save(data, fname, append=False, verbose=True):
     path = to_abspath(fname)
     if verbose: print(f'Saving to {path}...')
