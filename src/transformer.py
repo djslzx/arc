@@ -3,16 +3,19 @@ import sys
 import math
 import numpy as np
 import time
+import random
 
 import torch as T
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from torch.utils.data import SubsetRandomSampler, BatchSampler, TensorDataset, DataLoader
 import torch.utils.tensorboard as tb
 import matplotlib.pyplot as plt
 
 from grammar import *
 
+# dev_name = 'cpu'
 dev_name = 'cuda:0' if T.cuda.is_available() else 'cpu'
 device = T.device(dev_name)
 print(f'Using {dev_name}')
@@ -155,11 +158,10 @@ class ArcTransformer(nn.Module):
         # 80/20 split
         tB, vB = B.split((B.shape[0]*4)//5)
         tP, vP = P.split((P.shape[0]*4)//5)
-
-        tloader = T.utils.data.DataLoader(T.utils.data.TensorDataset(tB, tP),
-                                          batch_size=self.batch_size, shuffle=True)
-        vloader = T.utils.data.DataLoader(T.utils.data.TensorDataset(vB, vP),
-                                          batch_size=self.batch_size, shuffle=True)
+        tloader = DataLoader(TensorDataset(tB, tP),
+                             batch_size=self.batch_size, shuffle=True)
+        vloader = DataLoader(TensorDataset(vB, vP),
+                             batch_size=self.batch_size, shuffle=True)
         return tloader, vloader
 
     @staticmethod
@@ -172,7 +174,6 @@ class ArcTransformer(nn.Module):
         for B, P in dataloader:
             B.to(device)
             P.to(device)
-            # pdb.set_trace()
             P_input    = P[:, :-1].to(device)
             P_expected = F.one_hot(P[:, 1:], num_classes=self.n_tokens).float().transpose(0, 1).to(device)
             out = self(B, P_input)
@@ -203,7 +204,92 @@ class ArcTransformer(nn.Module):
                 epoch_loss += loss.detach().item()
         return epoch_loss / len(dataloader)
 
-    def learn(self, tloader, vloader, epochs, threshold=0):
+    def sample_model(self, writer, dataloader, epoch, n_samples, max_length):
+        self.eval()
+        B, P = dataloader.dataset[:self.batch_size] # first batch
+        samples = self.sample_programs(B, P, max_length)
+        expected_tokens = samples['expected tokens']
+        expected_exprs = samples['expected exprs']
+        out_tokens = samples['out tokens']
+        out_exprs = samples['out exprs']
+
+        n_well_formed = 0       # count the number of well-formed programs over time
+        n_non_blank = 0         # count the number of programs with non-blank renders
+
+        def well_formed(expr):
+            try:
+                if expr is not None:
+                    return True
+            except: pass        # handle weird exceptions
+            return False
+
+        for e_toks, e_expr, o_toks, o_expr in zip(expected_tokens, expected_exprs,
+                                                  out_tokens, out_exprs):
+            # print(f'Ground truth: {e_expr}')
+            # print(f'Sampled program: {o_toks}')
+
+            # record program
+            writer.add_text(f'program sample for {e_expr}',
+                            f'tokens: {o_toks}, expr: {o_expr}',
+                            epoch)
+            # record sampled bitmaps (if possible)
+            if well_formed(o_expr):
+                print("well-formed program, making bitmap...")
+                n_well_formed += 1
+                any_non_blank = False
+                bmps = []
+                for i in range(self.N):
+                    env = {'z': seed_zs(), 'sprites': seed_sprites()}
+                    try:
+                        bmp = out_expr.eval(env)
+                        any_non_blank = True
+                    except:
+                        bmp = T.zeros(B_H, B_W).unsqueeze(0) # blank canvas
+                    bmps.append(bmp)
+
+                n_non_blank += any_non_blank
+                if any_non_blank:
+                    writer.add_images(f'bmp samples for {e_expr}', T.stack(bmps), epoch)
+
+        # record number of well-formed/non-blank programs found
+        writer.add_scalar(f'well-formed', n_well_formed, epoch)
+        writer.add_scalar(f'non-blank', n_non_blank, epoch)
+
+    def sample_programs(self, B, P, max_length):
+        assert len(B) > 0
+        assert len(P) > 0
+
+        def strip(tokens):
+            start = int(tokens[0] == 'START')
+            end = None
+            for i, tok in enumerate(tokens):
+                if tok == 'END':
+                    end = i
+                    break
+            return tokens[start:end]
+
+        expected_tokens = [self.indices_to_tokens(p) for p in P]
+        expected_exprs = [deserialize(strip(toks)) for toks in expected_tokens]
+        out = self.sample(B, max_length)
+        out_tokens = [self.indices_to_tokens(o) for o in out]
+        out_exprs = []
+        for toks in out_tokens:
+            try:
+                stripped = strip(toks)
+                d = deserialize(stripped)
+                print(f'in: {toks}, stripped: {stripped}, deserialized: {d}')
+                out_exprs.append(d)
+            except:
+                out_exprs.append(None)
+        return {
+            'expected tokens': expected_tokens,
+            'expected exprs':  expected_exprs,
+            'out tokens':      out_tokens,
+            'out exprs':       out_exprs,
+        }
+
+
+    def learn(self, tloader, vloader, epochs, threshold=0, sample_freq=1):
         self.to(device)
         optimizer = T.optim.Adam(self.parameters(), lr=0.001)
         writer = tb.SummaryWriter()
@@ -231,6 +317,9 @@ class ArcTransformer(nn.Module):
                     'validation loss': vloss,
                 }, self.model_path(epoch))
                 checkpoint_no += 1
+
+            if epoch % sample_freq == 0:
+                self.sample_model(writer, vloader, epoch, n_samples=10, max_length=50)
 
             if vloss <= threshold or tloss <= threshold: break
 
@@ -278,48 +367,22 @@ def train_tf(data_loc, lexicon, epochs, N, batch_size):
     tloader, vloader = model.make_dataloaders(data_loc)
     model.learn(tloader, vloader, epochs)
 
-def test_sampling(checkpoint_loc, data_loc):
-    def strip(tokens):
-        return [t for t in tokens if t not in ['START', 'END', 'PAD']]
-
+def test_sampling(checkpoint_loc, data_loc, max_length=100):
     model = ArcTransformer(N=9, H=B_H, W=B_W, lexicon=lexicon, batch_size=16).to(device)
-    checkpoint = T.load(checkpoint_loc)
-    try:
-        # backwards compatibility
-        tloss = checkpoint['training_loss']
-    except KeyError:
-        try:
-            tloss = checkpoint['training loss']
-        except:
-            tloss = None
-
-    if tloss is not None:
-        vloss = checkpoint['validation loss']
-        print(f"Training loss: {tloss}, validation loss: {vloss}")
-        model.load_state_dict(checkpoint['model_state_dict'])
-    else:
-        model.load_state_dict(checkpoint)
-
     tloader, vloader = model.make_dataloaders(data_loc)
+    checkpoint = T.load(checkpoint_loc)
+    tloss = checkpoint['training loss']
+    vloss = checkpoint['validation loss']
+    model_state = checkpoint['model_state_dict']
 
     n_envs = 7
     for B, P in tloader:
-        # for bitmaps, program in zip(B, P):
-        expected_tokens = [model.indices_to_tokens(p) for p in P]
-        expected_exprs = [deserialize(strip(ts)) for ts in expected_tokens]
+        samples = self.sample_programs(B, P, max_length)
+        expected_tokens = samples['expected tokens']
+        expected_exprs = samples['expected exprs']
+        out_tokens = samples['out tokens']
+        out_tokens = samples['out exprs']
 
-        out = model.sample(B, max_length=50)
-        out_tokens = [model.indices_to_tokens(o) for o in out]
-        # pdb.set_trace()
-
-        out_exprs = []
-        for ts in out_tokens:
-            try:
-                out_exprs.append(deserialize(strip(ts)))
-            except:
-                out_exprs.append("Ill-formed")
-
-        # text = f'wanted: {ans}\ngot: {out}\n'
         n_matches = 0
         n_compares = len(P)
         for x_toks, x_expr, y_toks, y_expr in zip(expected_tokens, expected_exprs, 
@@ -341,18 +404,7 @@ def test_sampling(checkpoint_loc, data_loc):
                 print(f'token matches: {tok_matches}/{m}')
             print()
 
-        # TODO: show first mismatch, edit distance?
         print(f'matches: {n_matches}/{n_compares} [{n_matches/n_compares * 100}%]')
-
-        # bmps = []
-        # while len(bmps) < n_envs:
-        #     env = {'z': seed_zs(), 'sprites': seed_sprites()}
-        #     try:
-        #         bmps.append((ans.eval(env), out.eval(env)))
-        #     except:
-        #         pass
-        # x, y = util.unzip(bmps)
-        # viz.viz_sample(x, y, text=text)
 
 
 if __name__ == '__main__':
