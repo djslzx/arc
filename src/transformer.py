@@ -234,7 +234,7 @@ class ArcTransformer(nn.Module):
                             epoch)
             # record sampled bitmaps (if possible)
             if well_formed(o_expr):
-                print("well-formed program, making bitmap...")
+                print("well-formed program, making bitmaps...")
                 n_well_formed += 1
                 any_non_blank = False
                 bmps = []
@@ -291,7 +291,7 @@ class ArcTransformer(nn.Module):
 
     def learn(self, tloader, vloader, epochs, threshold=0, sample_freq=1):
         self.to(device)
-        optimizer = T.optim.Adam(self.parameters(), lr=0.001)
+        optimizer = T.optim.Adam(self.parameters(), lr=10 ** -4)
         writer = tb.SummaryWriter()
         start_t = time.time()
         checkpoint_no = 1       # only checkpoint after first 5 hr period
