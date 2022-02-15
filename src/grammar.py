@@ -40,6 +40,7 @@ class Expr(Visited):
         sprites = self.sprites()
         return self.accept(SimplifyIndices(zs, sprites))
     def serialize(self): return self.accept(Serialize())
+    def well_formed(self): return self.accept(WellFormed())
     def range(self, envs): return self.accept(Range(envs))
     def __len__(self): return self.accept(Size())
     def __str__(self): return self.accept(Print())
@@ -48,14 +49,14 @@ class Expr(Visited):
         # TODO: make this better
         return nltk.edit_distance(str(self), str(other))
 
-def seed_zs():
-    return (T.rand(LIB_SIZE) * (Z_HI - Z_LO) - Z_LO).long()
+def seed_zs(lo=Z_LO, hi=Z_HI, n_zs=LIB_SIZE):
+    return (T.rand(n_zs) * (hi - lo) - lo).long()
 
-def seed_sprites():
+def seed_sprites(n_sprites=LIB_SIZE):
     return T.stack([make_sprite(w=randrange(2, B_W//3),
                                 h=randrange(2, B_H//3),
                                 W=B_W, H=B_H)
-                    for _ in range(LIB_SIZE)])
+                    for _ in range(n_sprites)])
 
 
 class Nil(Expr):
@@ -600,9 +601,9 @@ def deserialize(tokens):
 
     decoded = D(tokens)
     assert len(decoded) == 1, f'Parsed more than one program in one token sequence'
-    assert decoded.count('{') == decoded.count('}'), f'Mismatched parens' # basic check; TODO: more sophisticated
     expr = D(tokens)[0]
     assert isinstance(expr, Expr), f'Decoded program should be of type Expr'
+    assert expr.well_formed(), f'Decoded program should be well-formed'
     return expr
 
 
@@ -740,6 +741,92 @@ class SimplifyIndices(Visitor):
     def visit_Compose(self, f, g): return Compose(f.accept(self), g.accept(self))
     def visit_Apply(self, f, bmp): return Apply(f.accept(self), bmp.accept(self))
     def visit_Repeat(self, f, n): return Repeat(f.accept(self), n.accept(self))
+
+
+class WellFormed(Visitor):
+    # TODO: clean up exception handling (unsafe as is)
+    def __init__(self): pass
+    def visit_Nil(self): return True
+    def visit_Num(self, n): return isinstance(n, int)
+    def visit_Z(self, i): return isinstance(i, int)
+    def visit_Not(self, b): 
+        try: return b.out_type == 'bool' and b.accept(self) 
+        except: return False
+    def visit_Plus(self, x, y): 
+        try: return x.out_type == 'int' and y.out_type == 'int' and \
+           x.accept(self) and y.accept(self)
+        except: return False
+    def visit_Minus(self, x, y): 
+        try: return x.out_type == 'int' and y.out_type == 'int' and \
+           x.accept(self) and y.accept(self)
+        except: return False
+    def visit_Times(self, x, y): 
+        try: return x.out_type == 'int' and y.out_type == 'int' and \
+           x.accept(self) and y.accept(self)
+        except: return False
+    def visit_Lt(self, x, y): 
+        try: return x.out_type == 'int' and y.out_type == 'int' and \
+           x.accept(self) and y.accept(self)
+        except: return False
+    def visit_And(self, x, y): 
+        try: return x.out_type == 'bool' and y.out_type == 'bool' and \
+           x.accept(self) and y.accept(self)
+        except: return False
+    def visit_If(self, b, x, y): 
+        try: return b.out_type == 'bool' and b.accept(self) and \
+           x.accept(self) and y.accept(self)
+        except: return False
+    def visit_Point(self, x, y, color): 
+        try: return x.out_type == 'int' and y.out_type == 'int' and color.out_type == 'int' and \
+           x.accept(self) and y.accept(self) and color.accept(self)
+        except: return False
+    def visit_Line(self, x1, y1, x2, y2, color): 
+        try: return x1.out_type == 'int' and y1.out_type == 'int' and \
+           x2.out_type == 'int' and y2.out_type == 'int' and \
+           x1.accept(self) and y1.accept(self) and \
+           x2.accept(self) and y2.accept(self) and \
+           color.out_type == 'int' and color.accept(self)
+        except: return False
+    def visit_Rect(self, x, y, w, h, color): 
+        try: return x.out_type == 'int' and y.out_type == 'int' and \
+           w.out_type == 'int' and h.out_type == 'int' and \
+           x.accept(self) and y.accept(self) and \
+           w.accept(self) and h.accept(self) and \
+           color.out_type == 'int' and color.accept(self)
+        except: return False
+    def visit_Sprite(self, i, x, y): 
+        try: return x.out_type == 'int' and y.out_type == 'int' and isinstance(i, int) and \
+           x.accept(self) and y.accept(self)
+        except: return False
+    def visit_Seq(self, bmps): return all(bmp.accept(self) for bmp in bmps)
+    def visit_Join(self, bmp1, bmp2): 
+        try: return bmp1.out_type == 'bitmap' and bmp2.out_type == 'bitmap' and \
+           bmp1.accept(self) and bmp2.accept(self)
+        except: return False
+    def visit_Intersect(self, bmp): 
+        try: return bmp.out_type == 'bitmap' and bmp.accept(self)
+        except: return False
+    def visit_HFlip(self): return True
+    def visit_VFlip(self): return True
+    def visit_Translate(self, x, y): 
+        try: return x.out_type == 'bitmap' and y.out_type == 'bitmap' and \
+           x.accept(self) and y.accept(self)
+        except: return False
+    def visit_Recolor(self, c): 
+        try: return c.out_type == 'int' and c.accept(self)
+        except: return False
+    def visit_Compose(self, f, g): 
+        try: return f.out_type == 'transform' and g.out_type == 'transform' and \
+           f.accept(self) and g.accept(self)
+        except: return False
+    def visit_Apply(self, f, bmp): 
+        try: return f.out_type == 'transform' and bmp.out_type == 'bitmap' and \
+           f.accept(self) and bmp.accept(self)
+        except: return False
+    def visit_Repeat(self, f, n): 
+        try: return f.out_type == 'transform' and n.out_type == 'int' and \
+           f.accept(self) and n.accept(self)
+        except: return False
 
 
 class Range(Visitor):
@@ -1206,7 +1293,7 @@ def test_deserialize_breaking():
         (['P', 'g', 1, 2], True),
         (['P', 'R', 0, 1, 2, 3, 4, 5, 6], True),
         (['{', 'P', 0, 1, 2, '}'], False),
-        (['L', 0, 1, 1, 3, 3], False),
+        (['L', 1, 1, 3, 3, 2], False),
         (['L', 'g', 1, 1, 3, 3], True),
         (['R', 0, 9, 'R', 11, 6, 8, '}', '}', 4, 2, 8, 15, 9, 9, 7, 13, 4, '}', 2, 8], True),
         (['L', 'R', 4, 8, 2, 4, 3, 2, '}', 9, 1, '}', 2, 6, '}', 6, 4, 8], True),
@@ -1224,9 +1311,19 @@ def test_deserialize_breaking():
         elif not should_fail and failed:
             print( f"failed unexpectedly: in={case}")
             exit(1)
-
     print(" [+] passed test_deserialize_breaking")
     
+def test_well_formed():
+    test_cases = [
+        (Point(Num(0), Num(1)), True),
+        (Point(0, 1), False),
+        (Line(Num(1), Num(1), Num(3), Num(3), Num(1)), True),
+        # (),
+    ]
+    for expr, ans in test_cases:
+        out = expr.well_formed()
+        assert out == ans, f'well_formed case failed: in={expr}, expected={ans}, got={out}'
+    print(' [+] passed test_well_formed')
 
 def test_range():
     envs = [
@@ -1258,5 +1355,6 @@ if __name__ == '__main__':
     # test_simplify_indices()
     # test_range()
     # test_serialize()
+    test_well_formed()
     test_deserialize_breaking()
     # test_zs()
