@@ -70,7 +70,7 @@ def canonical_ordering(entities):
     
     return sorted(entities, key=lambda e: destructure(e))
 
-def gen_random_expr(pool, a_exprs, envs, n_entities):
+def gen_random_expr(pool, a_exprs, envs, n_entities, entity_types):
     """
     Generate a random sequence of entities.
     - dead code removal
@@ -81,22 +81,18 @@ def gen_random_expr(pool, a_exprs, envs, n_entities):
 
     entities = []
     while len(entities) < n_entities:
-        n = randint(0, 8)     # 0..8 (inclusive)
-        if n < 1:   t = Point
-        elif n < 5: t = Line
-        else:       t = Rect
+        t = choice(entity_types)
         entity = choice(pool[t])
         if entity not in entities:
             entities.append(entity)
+        entities = canonical_ordering(entities) # edit ordering before checking overlaps
         entities = rm_dead_code(entities, envs)
-        
-    entities = canonical_ordering(entities)
     expr = Seq(*entities)
     return expr
 
-def gen_random_exprs(pool, a_exprs, envs, n_exprs, n_entities, verbose=True):
+def gen_random_exprs(pool, a_exprs, envs, n_exprs, n_entities, entity_types, verbose=True):
     for i in range(n_exprs):
-        expr = gen_random_expr(pool, a_exprs, envs, n_entities)
+        expr = gen_random_expr(pool, a_exprs, envs, n_entities, entity_types)
         if verbose: print(f'expr generated [{i+1}/{n_exprs}]: {expr}')
         yield expr
 
@@ -275,10 +271,6 @@ def make_exprs(n_exprs,         # number of total programs to make
         envs = [{'z': seed_zs(), 'sprites': seed_sprites()} for _ in range(n_envs)]
         a_exprs = [a_expr for a_expr, size in bottom_up_generator(a_bound, a_grammar, envs)]
         pool = gen_shape_pool(entities, a_exprs, envs, pool_size, min_zs, max_zs)
-        try:
-            open(cmps_loc, 'wb').close() # clear file
-        except FileNotFoundError:
-            pass
         util.clear(fname=cmps_loc)
         util.save({'meta': {'n_envs': n_envs,
                             'a_bound': a_bound,
@@ -292,7 +284,7 @@ def make_exprs(n_exprs,         # number of total programs to make
     # Generate and save exprs w/ bmp outputs
     util.clear(fname=exprs_loc)
     for n_entities in range(1, max_n_entities+1):
-        for expr in gen_random_exprs(pool, a_exprs, envs, n_exprs_per_size, n_entities):
+        for expr in gen_random_exprs(pool, a_exprs, envs, n_exprs_per_size, n_entities, entities):
             bmps = [expr.eval(env) for env in envs] 
             p = expr.simplify_indices().serialize()
             util.save((bmps, p), fname=exprs_loc, append=True, verbose=False)
@@ -321,14 +313,15 @@ if __name__ == '__main__':
     #     print('expr:', d, len(d))
     #     print(viz_grid(bmps[:25], d))
 
-    make_exprs(n_exprs=10_000, n_envs=5, max_n_entities=5, a_bound=1,
-               entities=[Point, Line, Rect],
+    make_exprs(n_exprs=10_000, n_envs=1, max_n_entities=2, a_bound=1,
+               entities=[# Point, Line,
+                         Rect],
                a_grammar = Grammar(ops=[Plus, Minus, Times],
                                    consts=([Z(i) for i in range(LIB_SIZE)] +
                                            [Num(i) for i in range(Z_LO, Z_HI + 1)])),
-               cmps_loc='../data/10k-zful-cmps.dat',
-               exprs_loc='../data/10k-zful-exs.dat',
+               cmps_loc='../data/small-cmps.dat',
+               exprs_loc='../data/small-exs.dat',
                load_pool=False,
-               max_zs=2)
+               max_zs=0)
 
-   # list_exs('../data/tiny-exs.dat')
+   # list_exs('../data/10k-zless-exs.dat')
