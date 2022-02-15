@@ -22,7 +22,7 @@ def gen_shape_pool(entities, a_exprs, envs, pool_size, min_zs=0, max_zs=None):
         n_hits = 0
         pool[entity] = []
         while len(pool[entity]) < pool_size:
-            color = Num(randrange(1, Z_HI+1))
+            color = Num(randint(1, Z_HI))
             n_zs = min(len(entity.in_types), randint(min_zs, max_zs))
             z_args = [choice(z_exprs) for _ in entity.in_types[:n_zs]] 
             c_args = [choice(c_exprs) for _ in entity.in_types[n_zs:]]
@@ -97,7 +97,7 @@ def gen_random_exprs(pool, a_exprs, envs, n_exprs, n_entities, entity_types, ver
 
 def rand_sprite(envs, a_exprs, i=-1, color=-1):
     i = i if 0 <= i < LIB_SIZE else randrange(1, LIB_SIZE)
-    color = color if isinstance(color, Num) and 1 <= color.n <= 9 else rand_color()
+    color = color if isinstance(color, Num) and 1 <= color.n <= Z_HI else Num(randint(1, Z_HI))
     n_misses = 0
     while True:
         s = Sprite(i, choice(a_exprs), choice(a_exprs))
