@@ -138,7 +138,7 @@ class ArcTransformer(nn.Module):
         out = self.out(out)
         return out
 
-    def make_dataloaders(self, data_loc):
+    def make_dataloader(self, data_loc):
         B, P = [], []
         max_p_len = max(len(p) for bmps, p in util.load_incremental(data_loc))
         for bmps, p in util.load_incremental(data_loc):
@@ -152,14 +152,7 @@ class ArcTransformer(nn.Module):
 
         B = T.stack(B)
         P = T.stack(P)
-        # 80/20 split
-        tB, vB = B.split((B.shape[0]*4)//5)
-        tP, vP = P.split((P.shape[0]*4)//5)
-        tloader = DataLoader(TensorDataset(tB, tP),
-                             batch_size=self.batch_size, shuffle=True)
-        vloader = DataLoader(TensorDataset(vB, vP),
-                             batch_size=self.batch_size, shuffle=True)
-        return tloader, vloader
+        return DataLoader(TensorDataset(B, P), batch_size=self.batch_size, shuffle=True)
 
     @staticmethod
     def loss(expected, actual):
@@ -364,9 +357,10 @@ class ArcTransformer(nn.Module):
             prompt = T.cat((prompt, next_index), dim=1)
         return prompt
 
-def test_sampling(checkpoint_loc, data_loc, max_length=100):
-    model = ArcTransformer(N=9, H=B_H, W=B_W, lexicon=lexicon, batch_size=16).to(device)
-    tloader, vloader = model.make_dataloaders(data_loc)
+def test_sampling(checkpoint_loc, train_data_loc, validation_data_loc, N=9, max_length=100):
+    # TODO: add more args / generalize
+    model = ArcTransformer(N=N, H=B_H, W=B_W, lexicon=lexicon, batch_size=16).to(device)
+    tloader = model.make_dataloader(train_data_loc),
     checkpoint = T.load(checkpoint_loc)
     tloss = checkpoint['training loss']
     vloss = checkpoint['validation loss']
@@ -410,7 +404,9 @@ if __name__ == '__main__':
     p.add_argument('--sample', action='store_true', help='run in sample mode')
     p.add_argument('--train', action='store_true', help='run in train mode')
     p.add_argument('--name', type=str, help='name of transformer')
-    p.add_argument('-d', '--data', type=str, help='path of input data')
+    p.add_argument('--training_data', type=str)
+    p.add_argument('--validation_data', type=str)
+    p.add_argument('--test_data', type=str)
     p.add_argument('-c', '--checkpoint', type=str, help='path of model checkpoint')
     p.add_argument('-n', type=int, help='value of N for transformer')
     p.add_argument('-e', '--epochs', type=int, default=1_000_000, help='num epochs to train')
@@ -421,13 +417,15 @@ if __name__ == '__main__':
 
     a = p.parse_args()
     if a.sample:
-        assert a.checkpoint is not None and a.data is not None, \
-            "Usage: transformer.py --sample -c CHECKPOINT -d DATA ..."
+        assert a.checkpoint is not None and a.test_data is not None, \
+            "Usage: transformer.py --sample -c CHECKPOINT --test-data TEST_DATA ... "
         print(f'Using {dev_name}')
-        test_sampling(a.checkpoint, a.data)
+        test_sampling(a.checkpoint, a.training_data, validation_data)
     elif a.train:
-        assert a.data is not None and a.n is not None and a.name is not None, \
+        assert a.training_data is not None and a.validation_data is not None \
+            and a.n is not None and a.name is not None, \
             "Usage: transformer.py --train --name NAME --d DATA -n N ..."
+
         print(f'Using {dev_name}')
         lexicon = ([i for i in range(Z_LO, Z_HI + 1)] + 
                  # [f'z_{i}' for i in range(LIB_SIZE)] + 
@@ -436,11 +434,13 @@ if __name__ == '__main__':
                     'P', 'L', 'R', 
                     'H', 'V', 'T', '#', 'o', '@', '!', '{', '}',])
         print(f'lexicon: {lexicon}')
+
         model = ArcTransformer(name=a.name, 
                                lexicon=lexicon, 
                                N=a.n, H=B_H, W=B_W, 
                                batch_size=a.batch_size).to(device)
-        tloader, vloader = model.make_dataloaders(a.data)
+        tloader, vloader = (model.make_dataloader(a.training_data),
+                            model.make_dataloader(a.validation_data))
         model.learn(tloader, vloader, 
                     epochs=a.epochs, 
                     threshold=a.threshold, 
