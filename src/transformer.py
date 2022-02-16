@@ -234,16 +234,16 @@ class ArcTransformer(nn.Module):
                             epoch)
             # record sampled bitmaps (if possible)
             if well_formed(o_expr):
-                print("well-formed program, making bitmaps...")
+                print(f"well-formed program {o_expr}, making bitmaps...")
                 n_well_formed += 1
                 any_non_blank = False
                 bmps = []
                 for i in range(self.N):
                     env = {'z': seed_zs(), 'sprites': seed_sprites()}
                     try:
-                        bmp = out_expr.eval(env)
+                        bmp = o_expr.eval(env)
                         any_non_blank = True
-                    except:
+                    except AssertionError:
                         bmp = T.zeros(B_H, B_W).unsqueeze(0) # blank canvas
                     bmps.append(bmp)
 
