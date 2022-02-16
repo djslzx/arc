@@ -292,7 +292,7 @@ class ArcTransformer(nn.Module):
     def learn(self, tloader, vloader, epochs, threshold=0, sample_freq=10, log_freq=1):
         self.to(device)
         optimizer = T.optim.Adam(self.parameters(), lr=10 ** -4)
-        writer = tb.SummaryWriter(comment=self.name)
+        writer = tb.SummaryWriter(comment=f'_{self.name}')
         start_t = time.time()
         checkpoint_no = 1       # only checkpoint after first 5 hr period
 
