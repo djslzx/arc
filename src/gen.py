@@ -322,10 +322,10 @@ if __name__ == '__main__':
     #     print('expr:', d, len(d))
     #     print(viz_grid(bmps[:25], d))
 
-    # a_gram = Grammar(ops=[Plus, Minus, Times],
-    #                  consts=([Z(i) for i in range(LIB_SIZE)] +
-    #                          [Num(i) for i in range(Z_LO, Z_HI + 1)]))
-    # print(a_gram.ops, a_gram.consts)
+    a_gram = Grammar(ops=[Plus, Minus, Times],
+                     consts=([Z(i) for i in range(LIB_SIZE)] +
+                             [Num(i) for i in range(Z_LO, Z_HI + 1)]))
+    print(a_gram.ops, a_gram.consts)
 
     make_exprs(n_exprs=10_000, n_envs=1, max_n_entities=4, a_bound=1,
                entities=[# Point, Line,
