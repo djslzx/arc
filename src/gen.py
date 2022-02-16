@@ -327,19 +327,28 @@ if __name__ == '__main__':
     #                          [Num(i) for i in range(Z_LO, Z_HI + 1)]))
     # print(a_gram.ops, a_gram.consts)
 
-    # make_exprs(n_exprs=10_000, n_envs=1, max_n_entities=2, a_bound=1,
-    #            entities=[# Point, Line,
-    #                      Rect],
-    #            a_grammar = a_gram,
-    #            cmps_loc='../data/10k-simple-cmps.dat',
-    #            exprs_loc='../data/10k-simple-exs.dat',
-    #            load_pool=False,
-    #            max_zs=0)
+    make_exprs(n_exprs=10_000, n_envs=1, max_n_entities=4, a_bound=1,
+               entities=[# Point, Line,
+                         Rect],
+               a_grammar = a_gram,
+               cmps_loc='../data/10k-4rect-train.cmps',
+               exprs_loc='../data/10k-4rect-train.exs',
+               load_pool=False,
+               max_zs=0)
 
-    u = count_uniq('../data/10k-simple-exs.dat')
-    n = {}
-    for k, v in u.items():
-        n[v] = n.get(v, []) + [k]
-    for k, v in sorted(n.items()):
-        print(k, v)
+    make_exprs(n_exprs=10_000, n_envs=1, max_n_entities=4, a_bound=1,
+               entities=[# Point, Line,
+                         Rect],
+               a_grammar = a_gram,
+               cmps_loc='../data/10k-4rect-test.cmps',
+               exprs_loc='../data/10k-4rect-test.exs',
+               load_pool=False,
+               max_zs=0)
+
+    # u = count_uniq('../data/10k-simple-exs.dat')
+    # n = {}
+    # for k, v in u.items():
+    #     n[v] = n.get(v, []) + [k]
+    # for k, v in sorted(n.items()):
+    #     print(k, v)
 
