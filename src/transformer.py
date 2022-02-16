@@ -242,7 +242,7 @@ class ArcTransformer(nn.Module):
                         any_non_blank = True
                     except AssertionError:
                         bmp = T.zeros(B_H, B_W).unsqueeze(0) # blank canvas
-                    bmps.append(bmp)
+                    bmps.append(bmp/10)                      # grayscale value btwn 0 and 1
 
                 n_non_blank += any_non_blank
                 if any_non_blank:
@@ -414,7 +414,6 @@ if __name__ == '__main__':
                 'P', 'L', 'R', 
                 'H', 'V', 'T', '#', 'o', '@', '!', '{', '}',])
 
-    # TODO: update/improve model state save loc 
     # TODO: make N flexible - adapt to datasets with variable-size bitmap example sets
 
     p = ap.ArgumentParser(description='Sample or train a transformer')
