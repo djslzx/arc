@@ -241,7 +241,7 @@ class ArcTransformer(nn.Module):
                 for i in range(self.N):
                     env = {'z': seed_zs(), 'sprites': seed_sprites()}
                     try:
-                        bmp = o_expr.eval(env)
+                        bmp = o_expr.eval(env).unsqueeze(0)
                         any_non_blank = True
                     except AssertionError:
                         bmp = T.zeros(B_H, B_W).unsqueeze(0) # blank canvas
@@ -249,9 +249,10 @@ class ArcTransformer(nn.Module):
 
                 n_non_blank += any_non_blank
                 if any_non_blank:
-                    writer.add_images(f'bmp samples for {e_expr}', T.stack(bmps), epoch)
+                    bmp_stack = T.stack(bmps)
+                    writer.add_images(f'bmp samples for {e_expr}', bmp_stack, epoch, dataformats='NCHW')
                 else:
-                    print('blank bitmap, skipped')
+                    print('all bitmaps blank, skipped')
 
         # record number of well-formed/non-blank programs found
         writer.add_scalar(f'well-formed', n_well_formed, epoch)
