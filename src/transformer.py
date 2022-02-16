@@ -419,10 +419,12 @@ if __name__ == '__main__':
     p = ap.ArgumentParser(description='Sample or train a transformer')
     p.add_argument('--sample', action='store_true', help='run in sample mode')
     p.add_argument('--train', action='store_true', help='run in train mode')
+    p.add_argument('--name', type=str, help='name of transformer')
     p.add_argument('-d', '--data', type=str, help='path of input data')
     p.add_argument('-c', '--checkpoint', type=str, help='path of model checkpoint')
     p.add_argument('-N', type=int, help='value of N for transformer')
-    p.add_argument('--name', type=int, help='name of transformer')
+    p.add_argument('-e', '--epochs', type=int, default=1_000_000, help='num epochs to train')
+    p.add_argument('-b', '--batch-size', type=int, default=16, help='batch size for training')
 
     a = p.parse_args()
     if a.sample:
@@ -435,6 +437,6 @@ if __name__ == '__main__':
             "Usage: transformer.py train name data_loc N"
         print(f'Using {dev_name}')
         print(f'lexicon: {lexicon}')
-        train_tf(name, data_loc, lexicon, N, epochs=1_000_000, batch_size=16)        
+        train_tf(a.name, a.data, lexicon, a.N, epochs=a.epochs, batch_size=a.batch_size)        
     else:
         p.print_help()
