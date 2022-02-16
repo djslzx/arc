@@ -230,7 +230,9 @@ class ArcTransformer(nn.Module):
                             f'tokens: {o_toks}, expr: {o_expr}',
                             epoch)
             # record sampled bitmaps (if possible)
-            if well_formed(o_expr):
+            if not well_formed(o_expr):
+                print(f"malformed program {o_toks}, skipping...")
+            else:
                 print(f"well-formed program {o_expr}, making bitmaps...")
                 n_well_formed += 1
                 any_non_blank = False
@@ -242,7 +244,7 @@ class ArcTransformer(nn.Module):
                         any_non_blank = True
                     except AssertionError:
                         bmp = T.zeros(B_H, B_W).unsqueeze(0) # blank canvas
-                    bmps.append(bmp/10)                      # grayscale value btwn 0 and 1
+                    bmps.append(bmp/10)                      # scale color value to fit in [0,1]
 
                 n_non_blank += any_non_blank
                 if any_non_blank:
@@ -277,7 +279,6 @@ class ArcTransformer(nn.Module):
             try:
                 stripped = strip(toks)
                 d = deserialize(stripped)
-                print(f'in: {toks}, stripped: {stripped}, deserialized: {d}')
                 out_exprs.append(d)
             except:
                 out_exprs.append(None)
@@ -288,7 +289,7 @@ class ArcTransformer(nn.Module):
             'out exprs':       out_exprs,
         }
 
-    def learn(self, tloader, vloader, epochs, threshold=0, sample_freq=10):
+    def learn(self, tloader, vloader, epochs, threshold=0, sample_freq=10, log_freq=1):
         self.to(device)
         optimizer = T.optim.Adam(self.parameters(), lr=10 ** -4)
         writer = tb.SummaryWriter(comment=self.name)
@@ -307,7 +308,8 @@ class ArcTransformer(nn.Module):
             writer.add_scalar('training loss', tloss, epoch)
             writer.add_scalar('validation loss', vloss, epoch)
 
-            if (epoch_end_t - start_t)//(3600 * 5) > checkpoint_no: # checkpoint every 5 hours
+            # write a checkpoint every `log_freq` hours
+            if (epoch_end_t - start_t)//(3600 * log_freq) > checkpoint_no: 
                 T.save({
                     'epoch': epoch,
                     'model_state_dict': self.state_dict(),
@@ -320,6 +322,7 @@ class ArcTransformer(nn.Module):
             if epoch % sample_freq == 0:
                 self.sample_model(writer, vloader, epoch, n_samples=10, max_length=50)
 
+            # exit when error is within threshold
             if vloss <= threshold or tloss <= threshold: break
 
         T.save({
@@ -361,11 +364,6 @@ class ArcTransformer(nn.Module):
             prompt = T.cat((prompt, next_index), dim=1)
         return prompt
 
-def train_tf(data_loc, lexicon, epochs, N, batch_size):
-    model = ArcTransformer(N=N, H=B_H, W=B_W, lexicon=lexicon, batch_size=batch_size).to(device)
-    tloader, vloader = model.make_dataloaders(data_loc)
-    model.learn(tloader, vloader, epochs)
-
 def test_sampling(checkpoint_loc, data_loc, max_length=100):
     model = ArcTransformer(N=9, H=B_H, W=B_W, lexicon=lexicon, batch_size=16).to(device)
     tloader, vloader = model.make_dataloaders(data_loc)
@@ -405,15 +403,7 @@ def test_sampling(checkpoint_loc, data_loc, max_length=100):
 
         print(f'matches: {n_matches}/{n_compares} [{n_matches/n_compares * 100}%]')
 
-
 if __name__ == '__main__':
-    lexicon = ([i for i in range(Z_LO, Z_HI + 1)] + 
-            # [f'z_{i}' for i in range(LIB_SIZE)] + 
-            # [f'S_{i}' for i in range(LIB_SIZE)] +
-               ['~', '+', '-', '*', '<', '&', '?',
-                'P', 'L', 'R', 
-                'H', 'V', 'T', '#', 'o', '@', '!', '{', '}',])
-
     # TODO: make N flexible - adapt to datasets with variable-size bitmap example sets
 
     p = ap.ArgumentParser(description='Sample or train a transformer')
@@ -422,21 +412,39 @@ if __name__ == '__main__':
     p.add_argument('--name', type=str, help='name of transformer')
     p.add_argument('-d', '--data', type=str, help='path of input data')
     p.add_argument('-c', '--checkpoint', type=str, help='path of model checkpoint')
-    p.add_argument('-N', type=int, help='value of N for transformer')
+    p.add_argument('-n', type=int, help='value of N for transformer')
     p.add_argument('-e', '--epochs', type=int, default=1_000_000, help='num epochs to train')
     p.add_argument('-b', '--batch-size', type=int, default=16, help='batch size for training')
+    p.add_argument('--threshold', type=float, default=10 ** -4, help='threshold for exiting with low loss')
+    p.add_argument('--sample-freq', type=int, default=100, help='num epochs between img/text samples')
+    p.add_argument('--log-freq', type=int, default=1, help='num hours between logging model/optimizer params')
 
     a = p.parse_args()
     if a.sample:
         assert a.checkpoint is not None and a.data is not None, \
-            "Usage: transformer.py sample checkpoint_loc data_loc"
+            "Usage: transformer.py --sample -c CHECKPOINT -d DATA ..."
         print(f'Using {dev_name}')
         test_sampling(a.checkpoint, a.data)
     elif a.train:
-        assert a.data is not None and a.N is not None and a.name is not None, \
-            "Usage: transformer.py train name data_loc N"
+        assert a.data is not None and a.n is not None and a.name is not None, \
+            "Usage: transformer.py --train --name NAME --d DATA -n N ..."
         print(f'Using {dev_name}')
+        lexicon = ([i for i in range(Z_LO, Z_HI + 1)] + 
+                 # [f'z_{i}' for i in range(LIB_SIZE)] + 
+                 # [f'S_{i}' for i in range(LIB_SIZE)] +
+                   ['~', '+', '-', '*', '<', '&', '?',
+                    'P', 'L', 'R', 
+                    'H', 'V', 'T', '#', 'o', '@', '!', '{', '}',])
         print(f'lexicon: {lexicon}')
-        train_tf(a.name, a.data, lexicon, a.N, epochs=a.epochs, batch_size=a.batch_size)        
+        model = ArcTransformer(name=a.name, 
+                               lexicon=lexicon, 
+                               N=a.n, H=B_H, W=B_W, 
+                               batch_size=a.batch_size).to(device)
+        tloader, vloader = model.make_dataloaders(a.data)
+        model.learn(tloader, vloader, 
+                    epochs=a.epochs, 
+                    threshold=a.threshold, 
+                    sample_freq=a.sample_freq,
+                    log_freq=a.log_freq)
     else:
         p.print_help()
