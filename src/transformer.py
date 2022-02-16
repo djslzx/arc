@@ -1,9 +1,8 @@
 import pdb
 import sys
-import math
-import numpy as np
 import time
-import random
+import math
+import argparse as ap
 
 import torch as T
 import torch.nn as nn
@@ -18,9 +17,6 @@ from grammar import *
 # dev_name = 'cpu'
 dev_name = 'cuda:0' if T.cuda.is_available() else 'cpu'
 device = T.device(dev_name)
-print(f'Using {dev_name}')
-
-PATH='./tf_model.pt'
 
 # TODO: pay attention to batch dim/sequence length dim
 class PositionalEncoding(nn.Module):
@@ -47,20 +43,21 @@ class PositionalEncoding(nn.Module):
 class ArcTransformer(nn.Module):
 
     def __init__(self, 
-                 N, H, W,        # bitmap count, height, width
-                 lexicon,        # list of program grammar components
+                 name,          # identifier for tracking separate runs
+                 N, H, W,       # bitmap count, height, width
+                 lexicon,       # list of program grammar components
                  d_model=512,
                  n_conv_layers=6, 
                  n_conv_channels=16,
                  batch_size=16):
 
         super().__init__()
+        self.name = name
         self.N, self.H, self.W = N, H, W
         self.d_model = d_model
         self.n_conv_layers = n_conv_layers
         self.n_conv_channels = n_conv_channels
         self.batch_size = batch_size
-        self.run = int(time.time())
 
         # program embedding
         lexicon             = lexicon + ["START", "END", "PAD"] # add start/end tokens to lex
@@ -110,7 +107,7 @@ class ArcTransformer(nn.Module):
         return [self.lexicon[i] for i in indices]
     
     def model_path(self, epoch):
-        return f'tf_model_{self.run}_{epoch}.pt'
+        return f'tf_model_{self.name}_{epoch}.pt'
 
     def forward(self, B, P):
         """
@@ -294,7 +291,7 @@ class ArcTransformer(nn.Module):
     def learn(self, tloader, vloader, epochs, threshold=0, sample_freq=10):
         self.to(device)
         optimizer = T.optim.Adam(self.parameters(), lr=10 ** -4)
-        writer = tb.SummaryWriter()
+        writer = tb.SummaryWriter(comment=self.name)
         start_t = time.time()
         checkpoint_no = 1       # only checkpoint after first 5 hr period
 
@@ -416,31 +413,29 @@ if __name__ == '__main__':
                ['~', '+', '-', '*', '<', '&', '?',
                 'P', 'L', 'R', 
                 'H', 'V', 'T', '#', 'o', '@', '!', '{', '}',])
-    print(f'lexicon: {lexicon}')
 
     # TODO: update/improve model state save loc 
     # TODO: make N flexible - adapt to datasets with variable-size bitmap example sets
 
-    if len(sys.argv) < 2:
-        print("Usage: transformer.py train | sample")
-        exit(1)
+    p = ap.ArgumentParser(description='Sample or train a transformer')
+    p.add_argument('--sample', action='store_true', help='run in sample mode')
+    p.add_argument('--train', action='store_true', help='run in train mode')
+    p.add_argument('-d', '--data', type=str, help='path of input data')
+    p.add_argument('-c', '--checkpoint', type=str, help='path of model checkpoint')
+    p.add_argument('-N', type=int, help='value of N for transformer')
+    p.add_argument('--name', type=int, help='name of transformer')
 
-    if sys.argv[1] == 'sample':
-        if len(sys.argv) != 4:
-            print("Usage: transformer.py sample checkpoint_loc data_loc")
-            exit(1)
-
-        checkpoint_loc, data_loc = sys.argv[2:]
-        test_sampling(checkpoint_loc, data_loc)        
-
-    elif sys.argv[1] == 'train':
-        if len(sys.argv) != 4:
-            print("Usage: transformer.py train data_loc N")
-            exit(1)
-
-        data_loc = sys.argv[2]
-        N = int(sys.argv[3])
-        train_tf(data_loc, lexicon, N=N, epochs=1_000_000, batch_size=16)        
+    a = p.parse_args()
+    if a.sample:
+        assert a.checkpoint is not None and a.data is not None, \
+            "Usage: transformer.py sample checkpoint_loc data_loc"
+        print(f'Using {dev_name}')
+        test_sampling(a.checkpoint, a.data)
+    elif a.train:
+        assert a.data is not None and a.N is not None and a.name is not None, \
+            "Usage: transformer.py train name data_loc N"
+        print(f'Using {dev_name}')
+        print(f'lexicon: {lexicon}')
+        train_tf(name, data_loc, lexicon, N, epochs=1_000_000, batch_size=16)        
     else:
-        print("Usage: transformer.py train | sample")
-        exit(1)
+        p.print_help()
