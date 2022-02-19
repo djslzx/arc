@@ -303,47 +303,55 @@ def list_exs(fname):
 def count_uniq(fname):
     d = {}
     for bmps, tokens in util.load_incremental(fname):
-        toks = deserialize(tokens)
-        elts = toks.bmps
-        for e in elts:
+        for e in deserialize(tokens).bmps:
             d[e] = d.get(e, 0) + 1
     return d
+
+def compare(f1, f2):
+    d1 = count_uniq(f1)
+    d2 = count_uniq(f2)
+    n_keys = (len(d1) + len(d2))//2
+    val_capacity = sum(d1.values()) + sum(d2.values())
+
+    key_overlap = 0
+    abs_overlap = 0
+    for e in d1.keys():
+        if e in d2:
+            print(f'overlap: {e}')
+            key_overlap += 1
+            abs_overlap += min(d1[e], d2[e])
+    return key_overlap, abs_overlap, n_keys, val_capacity
 
 if __name__ == '__main__':
 
     # test_rm_dead_code()
     # test_canonical_ordering()
 
-    # # Load saved exprs and generate bmps
-    # data = util.load('../data/exs.dat')
-    # for bmps, tokens in data:
-    #     print('tokens:', tokens)
-    #     d = deserialize(tokens)
-    #     print('expr:', d, len(d))
-    #     print(viz_grid(bmps[:25], d))
+    # a_gram = Grammar(ops=[Plus, Minus, Times],
+    #                  consts=([Z(i) for i in range(LIB_SIZE)] +
+    #                          [Num(i) for i in range(Z_LO, Z_HI + 1)]))
+    # print(a_gram.ops, a_gram.consts)
 
-    a_gram = Grammar(ops=[Plus, Minus, Times],
-                     consts=([Z(i) for i in range(LIB_SIZE)] +
-                             [Num(i) for i in range(Z_LO, Z_HI + 1)]))
-    print(a_gram.ops, a_gram.consts)
+    # make_exprs(n_exprs=10_000, n_envs=1, max_n_entities=4, a_bound=1,
+    #            entities=[# Point, Line,
+    #                      Rect],
+    #            a_grammar = a_gram,
+    #            cmps_loc='../data/10k-4rect-train.cmps',
+    #            exprs_loc='../data/10k-4rect-train.exs',
+    #            load_pool=False,
+    #            max_zs=0)
 
-    make_exprs(n_exprs=10_000, n_envs=1, max_n_entities=4, a_bound=1,
-               entities=[# Point, Line,
-                         Rect],
-               a_grammar = a_gram,
-               cmps_loc='../data/10k-4rect-train.cmps',
-               exprs_loc='../data/10k-4rect-train.exs',
-               load_pool=False,
-               max_zs=0)
+    # make_exprs(n_exprs=10_000, n_envs=1, max_n_entities=4, a_bound=1,
+    #            entities=[# Point, Line,
+    #                      Rect],
+    #            a_grammar = a_gram,
+    #            cmps_loc='../data/10k-4rect-test.cmps',
+    #            exprs_loc='../data/10k-4rect-test.exs',
+    #            load_pool=False,
+    #            max_zs=0)
 
-    make_exprs(n_exprs=10_000, n_envs=1, max_n_entities=4, a_bound=1,
-               entities=[# Point, Line,
-                         Rect],
-               a_grammar = a_gram,
-               cmps_loc='../data/10k-4rect-test.cmps',
-               exprs_loc='../data/10k-4rect-test.exs',
-               load_pool=False,
-               max_zs=0)
+    # list_exs("../data/10k-4rect-train.exs")
+    # list_exs("../data/10k-4rect-test.exs")
 
     # u = count_uniq('../data/10k-simple-exs.dat')
     # n = {}
@@ -351,4 +359,7 @@ if __name__ == '__main__':
     #     n[v] = n.get(v, []) + [k]
     # for k, v in sorted(n.items()):
     #     print(k, v)
+    k_overlap, abs_overlap, n_keys, cap = compare('../data/10k-4rect-train.exs',
+                                                  '../data/10k-4rect-test.exs')
+    print(f'key overlap: {k_overlap}, abs overlap: {abs_overlap}, |keys|: {n_keys}, capacity: {cap}')
 
