@@ -138,13 +138,18 @@ class ArcTransformer(nn.Module):
         out = self.out(out)
         return out
 
-    def make_dataloader(self, data_loc):
+    def make_dataloader(self, data_loc, blind=False):
         B, P = [], []
         max_p_len = max(len(p) for bmps, p in util.load_incremental(data_loc))
         for bmps, p in util.load_incremental(data_loc):
-            # process bitmaps: add channel dimension and turn list of bmps into tensor
-            bmps = T.stack(bmps).unsqueeze(1)
+            # process bmps
+            if not blind:
+                # add channel dimension
+                bmps = T.stack(bmps).unsqueeze(1)
+            else:
+                bmps = T.zeros(self.N, 1, self.H, self.W)
             B.append(bmps)
+
             # process progs: turn into indices and add padding
             p = self.tokens_to_indices(p)
             p = F.pad(p, pad=(0, max_p_len + 2 - len(p)), value=self.pad_token) # add 2 to compensate for START/END tokens
@@ -403,6 +408,7 @@ if __name__ == '__main__':
     p = ap.ArgumentParser(description='Sample or train a transformer')
     p.add_argument('--sample', action='store_true', help='run in sample mode')
     p.add_argument('--train', action='store_true', help='run in train mode')
+    p.add_argument('--blind', action='store_true', help='run w/o looking at bmp input') # TODO
     p.add_argument('--name', type=str, help='name of transformer')
     p.add_argument('--training-data', type=str)
     p.add_argument('--validation-data', type=str)
@@ -439,8 +445,8 @@ if __name__ == '__main__':
                                lexicon=lexicon, 
                                N=a.n, H=B_H, W=B_W, 
                                batch_size=a.batch_size).to(device)
-        tloader, vloader = (model.make_dataloader(a.training_data),
-                            model.make_dataloader(a.validation_data))
+        tloader, vloader = (model.make_dataloader(a.training_data, blind=a.blind),
+                            model.make_dataloader(a.validation_data, blind=a.blind))
         model.learn(tloader, vloader, 
                     epochs=a.epochs, 
                     threshold=a.threshold, 
