@@ -231,7 +231,7 @@ class ArcTransformer(nn.Module):
             if not well_formed(o_expr):
                 print(f"malformed program {o_toks}, skipping...")
             else:
-                print(f"well-formed program {o_expr}, making bitmaps...")
+                print(f"well-formed program {o_expr} for input {e_expr}, making bitmaps...")
                 n_well_formed += 1
                 any_non_blank = False
                 bmps = []
