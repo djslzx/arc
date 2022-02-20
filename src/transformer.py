@@ -287,9 +287,9 @@ class ArcTransformer(nn.Module):
             'out exprs':       out_exprs,
         }
 
-    def learn(self, tloader, vloader, epochs, threshold=0, sample_freq=10, log_freq=1):
+    def learn(self, tloader, vloader, epochs, learning_rate=10 ** -4, threshold=0, sample_freq=10, log_freq=1):
         self.to(device)
-        optimizer = T.optim.Adam(self.parameters(), lr=10 ** -4)
+        optimizer = T.optim.Adam(self.parameters(), lr=learning_rate)
         writer = tb.SummaryWriter(comment=f'_{self.name}')
         start_t = time.time()
         checkpoint_no = 1       # only checkpoint after first 5 hr period
@@ -415,6 +415,8 @@ if __name__ == '__main__':
     p.add_argument('--test-data', type=str)
     p.add_argument('-c', '--checkpoint', type=str, help='path of model checkpoint')
     p.add_argument('-n', type=int, help='value of N for transformer')
+    p.add_argument('-d', '--model-dim', type=int, default=512, help='model dimension')
+    p.add_argument('-l', '--learning-rate', type=float, default=10 ** -4, help='learning rate')
     p.add_argument('-e', '--epochs', type=int, default=1_000_000, help='num epochs to train')
     p.add_argument('-b', '--batch-size', type=int, default=16, help='batch size for training')
     p.add_argument('--threshold', type=float, default=10 ** -4, help='threshold for exiting with low loss')
@@ -444,11 +446,13 @@ if __name__ == '__main__':
         model = ArcTransformer(name=a.name, 
                                lexicon=lexicon, 
                                N=a.n, H=B_H, W=B_W, 
+                               d_model=a.model_dim,
                                batch_size=a.batch_size).to(device)
         tloader, vloader = (model.make_dataloader(a.training_data, blind=a.blind),
                             model.make_dataloader(a.validation_data, blind=a.blind))
         model.learn(tloader, vloader, 
                     epochs=a.epochs, 
+                    learning_rate=a.learning_rate,
                     threshold=a.threshold, 
                     sample_freq=a.sample_freq,
                     log_freq=a.log_freq)
