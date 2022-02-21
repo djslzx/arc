@@ -252,6 +252,7 @@ def make_exprs(n_exprs,         # number of total programs to make
                entities,        # entity classes allowed
                cmps_loc,        # where to save/load pool of random components
                exprs_loc,       # where to save generated programs
+               label_zs=True,   # whether to label z's with indices or not (e.g. just have 'z' instead of 'z_0') TODO: unimplemented
                min_zs=0,        # min number of z's to allow in each entity
                max_zs=None,     # max number of z's to allow in each entity
                load_pool=True): # whether to load cmps from cmps_loc or not (gen from scratch)
@@ -333,37 +334,69 @@ if __name__ == '__main__':
                              [Num(i) for i in range(Z_LO, Z_HI + 1)]))
     print(a_gram.ops, a_gram.consts)
 
-    n_exprs = 10_000
-    entities = [Rect]
-    min_n_entities = 2
-    max_n_entities = 2
-    max_zs = 2
-    n_envs = 5
+    cfgs = [
+        {
+            'n_exprs': 10_000,
+            'entities': [Rect],
+            'min_n_entities': 1,
+            'max_n_entities': 4,
+            'max_zs': 4,
+            'n_envs': 5,
+            'label_zs': False,
+        },
+        # {
+        #     'n_exprs': 10_000,
+        #     'entities': [Rect, Line, Point],
+        #     'min_n_entities': 1,
+        #     'max_n_entities': 4,
+        #     'max_zs': 0,
+        #     'n_envs': 1,
+        #     'label_zs': True,
+        # },
+        # {
+        #     'n_exprs': 10_000,
+        #     'entities': [Rect, Line, Point],
+        #     'min_n_entities': 1,
+        #     'max_n_entities': 4,
+        #     'max_zs': 2,
+        #     'n_envs': 5,
+        #     'label_zs': True,
+        # },
+    ]
 
-    entities_code = f"{'p' if Point in entities else ''}{'l' if Line in entities else ''}{'r' if Rect in entities else ''}"
-    code = f'{n_exprs}-{max_n_entities}{entities_code}{max_zs}z'
-    print(f'code: {code}')
+    for cfg in cfgs:
+        n_exprs = cfg['n_exprs']
+        entities = cfg['entities']
+        min_n_entities = cfg['min_n_entities']
+        max_n_entities = cfg['max_n_entities']
+        max_zs = cfg['max_zs']
+        n_envs = cfg ['n_envs']
+        label_zs = cfg['label_zs']
 
-    make_exprs(n_exprs=10_000, n_envs=n_envs, min_n_entities=min_n_entities, max_n_entities=max_n_entities, a_bound=1,
-               entities=[# Point, Line,
-                         Rect],
-               a_grammar = a_gram,
-               cmps_loc=f'../data/{code}-train.cmps',
-               exprs_loc=f'../data/{code}-train.exs',
-               load_pool=False,
-               max_zs=max_zs)
+        entities_code = f"{'p' if Point in entities else ''}{'l' if Line in entities else ''}{'r' if Rect in entities else ''}"
+        code = f'{n_exprs}-{min_n_entities}~{max_n_entities}{entities_code}{max_zs}z{n_envs}e'
+        print(f'code: {code}')
 
-    make_exprs(n_exprs=10_000, n_envs=n_envs, min_n_entities=min_n_entities, max_n_entities=max_n_entities, a_bound=1,
-               entities=[# Point, Line,
-                         Rect],
-               a_grammar = a_gram,
-               cmps_loc=f'../data/{code}-test.cmps',
-               exprs_loc=f'../data/{code}-test.exs',
-               load_pool=False,
-               max_zs=max_zs)
+        make_exprs(n_exprs=10_000, n_envs=n_envs, min_n_entities=min_n_entities, max_n_entities=max_n_entities, a_bound=1,
+                   entities=entities,
+                   a_grammar = a_gram,
+                   cmps_loc=f'../data/{code}-train.cmps',
+                   exprs_loc=f'../data/{code}-train.exs',
+                   load_pool=False,
+                   label_zs=label_zs,
+                   max_zs=max_zs)
 
-    list_exs(f"../data/{code}-train.exs")
-    list_exs(f"../data/{code}-test.exs")
+        make_exprs(n_exprs=10_000, n_envs=n_envs, min_n_entities=min_n_entities, max_n_entities=max_n_entities, a_bound=1,
+                   entities=entities,
+                   a_grammar = a_gram,
+                   cmps_loc=f'../data/{code}-test.cmps',
+                   exprs_loc=f'../data/{code}-test.exs',
+                   load_pool=False,
+                   label_zs=label_zs,
+                   max_zs=max_zs)
+
+    # list_exs(f"../data/{code}-train.exs")
+    # list_exs(f"../data/{code}-test.exs")
 
     # u = count_uniq('../data/10k-simple-exs.dat')
     # n = {}
