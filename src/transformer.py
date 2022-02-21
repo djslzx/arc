@@ -199,9 +199,10 @@ class ArcTransformer(nn.Module):
                 epoch_loss += loss.detach().item()
         return epoch_loss / len(dataloader)
 
-    def sample_model(self, writer, dataloader, epoch, n_samples, max_length):
+    def sample_model(self, writer, dataloader, epoch, max_length):
         self.eval()
-        B, P = dataloader.dataset[:self.batch_size] # first batch
+        it = iter(dataloader)
+        B, P = it.next()
         samples = self.sample_programs(B, P, max_length)
         expected_tokens = samples['expected tokens']
         expected_exprs = samples['expected exprs']
@@ -318,7 +319,7 @@ class ArcTransformer(nn.Module):
                 checkpoint_no += 1
 
             if epoch % sample_freq == 0:
-                self.sample_model(writer, vloader, epoch, n_samples=10, max_length=50)
+                self.sample_model(writer, vloader, epoch, max_length=50)
 
             # exit when error is within threshold
             if vloss <= threshold or tloss <= threshold: break
