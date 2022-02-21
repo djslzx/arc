@@ -336,7 +336,7 @@ if __name__ == '__main__':
 
     cfgs = [
         {
-            'n_exprs': 10_000,
+            'n_exprs': 100,
             'entities': [Rect],
             'min_n_entities': 1,
             'max_n_entities': 4,
@@ -377,7 +377,7 @@ if __name__ == '__main__':
         code = f'{n_exprs}-{min_n_entities}~{max_n_entities}{entities_code}{max_zs}z{n_envs}e'
         print(f'code: {code}')
 
-        make_exprs(n_exprs=10_000, n_envs=n_envs, min_n_entities=min_n_entities, max_n_entities=max_n_entities, a_bound=1,
+        make_exprs(n_exprs=n_exprs, n_envs=n_envs, min_n_entities=min_n_entities, max_n_entities=max_n_entities, a_bound=1,
                    entities=entities,
                    a_grammar = a_gram,
                    cmps_loc=f'../data/{code}-train.cmps',
@@ -386,7 +386,7 @@ if __name__ == '__main__':
                    label_zs=label_zs,
                    max_zs=max_zs)
 
-        make_exprs(n_exprs=10_000, n_envs=n_envs, min_n_entities=min_n_entities, max_n_entities=max_n_entities, a_bound=1,
+        make_exprs(n_exprs=n_exprs, n_envs=n_envs, min_n_entities=min_n_entities, max_n_entities=max_n_entities, a_bound=1,
                    entities=entities,
                    a_grammar = a_gram,
                    cmps_loc=f'../data/{code}-test.cmps',
