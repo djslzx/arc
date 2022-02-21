@@ -436,8 +436,8 @@ if __name__ == '__main__':
 
         print(f'Using {dev_name}')
         lexicon = ([i for i in range(Z_LO, Z_HI + 1)] + 
-                 # [f'z_{i}' for i in range(LIB_SIZE)] + 
-                 # [f'S_{i}' for i in range(LIB_SIZE)] +
+                   [f'z_{i}' for i in range(LIB_SIZE)] + 
+                   [f'S_{i}' for i in range(LIB_SIZE)] +
                    ['~', '+', '-', '*', '<', '&', '?',
                     'P', 'L', 'R', 
                     'H', 'V', 'T', '#', 'o', '@', '!', '{', '}',])
