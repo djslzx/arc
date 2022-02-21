@@ -245,6 +245,7 @@ def test_rm_dead_code():
 
 def make_exprs(n_exprs,         # number of total programs to make
                n_envs,          # number of envs (bitmaps) per program
+               min_n_entities,  # number of entities in each program
                max_n_entities,  # number of entities in each program
                a_grammar,       # grammar for arithmetic exprs (components of entities)
                a_bound,         # bound on arithmetic exprs in each entity
@@ -279,7 +280,7 @@ def make_exprs(n_exprs,         # number of total programs to make
 
     # Generate and save exprs w/ bmp outputs
     cleared = False
-    for n_entities in range(1, max_n_entities+1):
+    for n_entities in range(min_n_entities, max_n_entities+1):
         for expr in gen_random_exprs(pool, a_exprs, envs, n_exprs_per_size, n_entities, entities):
             bmps = [expr.eval(env) for env in envs] 
             p = expr.simplify_indices().serialize()
@@ -327,31 +328,42 @@ if __name__ == '__main__':
     # test_rm_dead_code()
     # test_canonical_ordering()
 
-    # a_gram = Grammar(ops=[Plus, Minus, Times],
-    #                  consts=([Z(i) for i in range(LIB_SIZE)] +
-    #                          [Num(i) for i in range(Z_LO, Z_HI + 1)]))
-    # print(a_gram.ops, a_gram.consts)
+    a_gram = Grammar(ops=[Plus, Minus, Times],
+                     consts=([Z(i) for i in range(LIB_SIZE)] +
+                             [Num(i) for i in range(Z_LO, Z_HI + 1)]))
+    print(a_gram.ops, a_gram.consts)
 
-    # make_exprs(n_exprs=10_000, n_envs=1, max_n_entities=4, a_bound=1,
-    #            entities=[# Point, Line,
-    #                      Rect],
-    #            a_grammar = a_gram,
-    #            cmps_loc='../data/10k-4rect-train.cmps',
-    #            exprs_loc='../data/10k-4rect-train.exs',
-    #            load_pool=False,
-    #            max_zs=0)
+    n_exprs = 10_000
+    entities = [Rect]
+    min_n_entities = 2
+    max_n_entities = 2
+    max_zs = 2
+    n_envs = 5
 
-    # make_exprs(n_exprs=10_000, n_envs=1, max_n_entities=4, a_bound=1,
-    #            entities=[# Point, Line,
-    #                      Rect],
-    #            a_grammar = a_gram,
-    #            cmps_loc='../data/10k-4rect-test.cmps',
-    #            exprs_loc='../data/10k-4rect-test.exs',
-    #            load_pool=False,
-    #            max_zs=0)
+    entities_code = f"{'p' if Point in entities else ''}{'l' if Line in entities else ''}{'r' if Rect in entities else ''}"
+    code = f'{n_exprs}-{max_n_entities}{entities_code}{max_zs}z'
+    print(f'code: {code}')
 
-    # list_exs("../data/10k-4rect-train.exs")
-    # list_exs("../data/10k-4rect-test.exs")
+    make_exprs(n_exprs=10_000, n_envs=n_envs, min_n_entities=min_n_entities, max_n_entities=max_n_entities, a_bound=1,
+               entities=[# Point, Line,
+                         Rect],
+               a_grammar = a_gram,
+               cmps_loc=f'../data/{code}-train.cmps',
+               exprs_loc=f'../data/{code}-train.exs',
+               load_pool=False,
+               max_zs=max_zs)
+
+    make_exprs(n_exprs=10_000, n_envs=n_envs, min_n_entities=min_n_entities, max_n_entities=max_n_entities, a_bound=1,
+               entities=[# Point, Line,
+                         Rect],
+               a_grammar = a_gram,
+               cmps_loc=f'../data/{code}-test.cmps',
+               exprs_loc=f'../data/{code}-test.exs',
+               load_pool=False,
+               max_zs=max_zs)
+
+    list_exs(f"../data/{code}-train.exs")
+    list_exs(f"../data/{code}-test.exs")
 
     # u = count_uniq('../data/10k-simple-exs.dat')
     # n = {}
@@ -359,7 +371,7 @@ if __name__ == '__main__':
     #     n[v] = n.get(v, []) + [k]
     # for k, v in sorted(n.items()):
     #     print(k, v)
-    k_overlap, abs_overlap, n_keys, cap = compare('../data/10k-4rect-train.exs',
-                                                  '../data/10k-4rect-test.exs')
-    print(f'key overlap: {k_overlap}, abs overlap: {abs_overlap}, |keys|: {n_keys}, capacity: {cap}')
+    # k_overlap, abs_overlap, n_keys, cap = compare('../data/10k-4rect-train.exs',
+    #                                               '../data/10k-4rect-test.exs')
+    # print(f'key overlap: {k_overlap}, abs overlap: {abs_overlap}, |keys|: {n_keys}, capacity: {cap}')
 
