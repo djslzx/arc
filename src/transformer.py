@@ -199,10 +199,8 @@ class ArcTransformer(nn.Module):
                 epoch_loss += loss.detach().item()
         return epoch_loss / len(dataloader)
 
-    def sample_model(self, writer, dataloader, epoch, max_length):
+    def sample_model(self, writer, B, P, epoch, max_length):
         self.eval()
-        it = iter(dataloader)
-        B, P = it.next()
         samples = self.sample_programs(B, P, max_length)
         expected_tokens = samples['expected tokens']
         expected_exprs = samples['expected exprs']
@@ -229,10 +227,11 @@ class ArcTransformer(nn.Module):
                             f'tokens: {o_toks}, expr: {o_expr}',
                             epoch)
             # record sampled bitmaps (if possible)
+            print(f'output for program {e_expr}:')
             if not well_formed(o_expr):
-                print(f"malformed program {o_toks}, skipping...")
+                print(f"  malformed: {o_toks}")
             else:
-                print(f"well-formed program {o_expr} for input {e_expr}, making bitmaps...")
+                print(f"  well-formed: {o_expr}")
                 n_well_formed += 1
                 any_non_blank = False
                 bmps = []
@@ -241,7 +240,7 @@ class ArcTransformer(nn.Module):
                     try:
                         bmp = o_expr.eval(env).unsqueeze(0)
                         any_non_blank = True
-                    except AssertionError:
+                    except (AssertionError, AttributeError):
                         bmp = T.zeros(B_H, B_W).unsqueeze(0) # blank canvas
                     bmps.append(bmp/10)                      # scale color value to fit in [0,1]
 
@@ -295,6 +294,9 @@ class ArcTransformer(nn.Module):
         start_t = time.time()
         checkpoint_no = 1       # only checkpoint after first 5 hr period
 
+        it = iter(vloader)
+        sample_B, sample_P = it.next()
+
         for epoch in range(1, epochs+1):
             epoch_start_t = time.time()
             tloss = self.train_epoch(tloader, optimizer)
@@ -319,7 +321,7 @@ class ArcTransformer(nn.Module):
                 checkpoint_no += 1
 
             if epoch % sample_freq == 0:
-                self.sample_model(writer, vloader, epoch, max_length=50)
+                self.sample_model(writer, sample_B, sample_P, epoch, max_length=50)
 
             # exit when error is within threshold
             if vloss <= threshold or tloss <= threshold: break
