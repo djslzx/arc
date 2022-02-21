@@ -551,9 +551,9 @@ def deserialize(tokens):
         if isinstance(h, int):
             return [Num(h)] + t
         if isinstance(h, str):
-            if h.startswith('z_'):
+            if h.startswith('z'):
                 return [Z(int(h[2:]))] + t
-            if h.startswith('S_'):
+            if h.startswith('S'):
                 return [Sprite(int(h[2:]), t[0], t[1])] + t[2:]
         if h == '~':
             return [Not(t[0])] + t[1:]
@@ -608,10 +608,11 @@ def deserialize(tokens):
 
 
 class Serialize(Visitor):
-    def __init__(self): pass
+    def __init__(self, label_zs=True):
+        self.label_zs = label_zs
     def visit_Nil(self): return [False]
     def visit_Num(self, n): return [n]
-    def visit_Z(self, i): return [f'z_{i}']
+    def visit_Z(self, i): return [f'z_{i}'] if self.label_zs else ['z']
     def visit_Not(self, b): return ['~'] + b.accept(self)
     def visit_Plus(self, x, y): return ['+'] + x.accept(self) + y.accept(self)
     def visit_Minus(self, x, y): return ['-'] + x.accept(self) + y.accept(self)
