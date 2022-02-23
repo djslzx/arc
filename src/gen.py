@@ -3,57 +3,69 @@ Make programs to use as training data
 """
 
 import pdb
-from math import floor, sqrt
+from math import floor, sqrt, ceil
 from random import choice, randint, shuffle
+import multiprocessing as mp
 
 from viz import viz_grid
 from grammar import *
 from bottom_up import bottom_up_generator, eval
 
-def gen_shape_pool(entities, a_exprs, envs, pool_size, min_zs=0, max_zs=None):
+
+def gen_shapes(n_shapes, a_exprs, envs, shape_types, min_zs=0, max_zs=None):
     z_exprs, c_exprs = util.split(a_exprs, lambda a: a.zs())
     if max_zs is None: max_zs = len(z_exprs)
     if min_zs is None: min_zs = max_zs
     assert max_zs <= len(z_exprs), f'Expected max_zs <= |zs|, but found max_zs={max_zs}, |zs|={len(z_exprs)}'
     assert min_zs <= max_zs, f'Expected min_zs <= max_zs, but found min_zs={min_zs}, max_zs={max_zs}'
-    pool = {}
-    for entity in entities:
+
+    shapes = set()
+    for shape_type in shape_types:
         n_tries = 0
         n_hits = 0
-        pool[entity] = []
-        while len(pool[entity]) < pool_size:
-            color = Num(randint(1, Z_HI))
-            n_zs = min(len(entity.in_types), randint(min_zs, max_zs))
-            z_args = [choice(z_exprs) for _ in entity.in_types[:n_zs]] 
-            c_args = [choice(c_exprs) for _ in entity.in_types[n_zs:]]
+
+        while n_hits < n_shapes:
+            color = Num(randint(1, 9))
+            n_zs = min(len(shape_type.in_types), randint(min_zs, max_zs)) # cap n_zs by number of args for shape type
+            z_args = [choice(z_exprs) for _ in shape_type.in_types[:n_zs]] 
+            c_args = [choice(c_exprs) for _ in shape_type.in_types[n_zs:]]
             args = z_args + c_args
             shuffle(args)
-            e = entity(*args[:-1], color)
-            outs = eval(e, envs)
-            if all(out is not None for out in outs): 
+            shape = shape_type(*args[:-1], color)
+            if shape not in shapes and all(out is not None for out in eval(shape, envs)):  
+                shapes.add(shape)
                 n_hits += 1
-                pool[entity].append(e)
             n_tries += 1    
-        print(f'{entity} hits: {n_hits}/{n_tries}')
-    return pool
+        print(f'{shape_type} hits: {n_hits}/{n_tries}')
+    return shapes
 
-def rm_dead_code(entities, envs):
+def gen_shapes_mp(n_shapes, a_exprs, envs, shape_types, min_zs=0, max_zs=None, n_processes=8):
+    with mp.Pool(n_processes) as pool:
+        sets = pool.starmap(gen_shapes, [(ceil(n_shapes/n_processes),
+                                          a_exprs,
+                                          envs,
+                                          shape_types,
+                                          min_zs,
+                                          max_zs) 
+                                         for _ in range(n_processes)])
+    return set.union(*sets)
+
+def rm_dead_code(shapes, envs):
     """
-    Remove any occluded entities
+    Remove any occluded shapes in the scene w.r.t. envs
     """
     def bmps(xs):
         return T.stack([Seq(*xs).eval(env) for env in envs])
 
-    orig_bmps = bmps(entities)
+    orig_bmps = bmps(shapes)
     keep = []
-    for i, entity in enumerate(entities):
-        # pdb.set_trace()
-        excl_bmps = bmps(keep + entities[i+1:])
+    for i, shape in enumerate(shapes):
+        excl_bmps = bmps(keep + shapes[i+1:])
         if (excl_bmps != orig_bmps).any():
-            keep.append(entity)
+            keep.append(shape)
     return keep
 
-def canonical_ordering(entities):
+def canonical_ordering(scene):
     """
     Order entities by complexity and position.
     - Complexity: Point < Line < Rect
@@ -67,33 +79,49 @@ def canonical_ordering(entities):
         elif isinstance(e, Rect):
             return 2, e.x, e.y, e.w, e.h
     
-    return sorted(entities, key=lambda e: destructure(e))
+    return sorted(scene, key=destructure)
 
-def gen_random_expr(pool, a_exprs, envs, n_entities, entity_types):
+def gen_random_scene(shapes, envs, n_shapes):
     """
-    Generate a random sequence of entities.
+    Generate a random sequence of shapes.
     - dead code removal
     - canonical ordering
     """
     # TODO: transforms
-    # TODO: don't sample elements of pool that have previously been used
+    # TODO: don't sample elements of `shapes` that have previously been used
+    scene = []
+    while len(scene) < n_shapes:
+        shape = choice(shapes)
+        scene.append(shape)
+        scene = canonical_ordering(scene) # edit ordering before checking for overlaps
+        scene = rm_dead_code(scene, envs)
+    return Seq(*scene)
 
-    entities = []
-    while len(entities) < n_entities:
-        t = choice(entity_types)
-        entity = choice(pool[t])
-        if entity not in entities:
-            entities.append(entity)
-        entities = canonical_ordering(entities) # edit ordering before checking overlaps
-        entities = rm_dead_code(entities, envs)
-    expr = Seq(*entities)
-    return expr
+def gen_exs(n_exs, n_shapes, shapes, envs, save_to, verbose=True):
+    """
+    Generates a set of (bmp set, program) pairs from an expression generator on n entities.
+    Writes the set in a stream to the file `{fprefix}_{n_shapes}.exs`
+    """
+    fname = f'{save_to}_{n_shapes}.exs'
+    cleared = False
+    for i in range(n_exs):
+        scene = gen_random_scene(shapes, envs, n_shapes)
+        if verbose: print(f'scene generated [{i+1}/{n_exs}]: {scene}')
+        bmps = [scene.eval(env) for env in envs]
+        prog = scene.simplify_indices().serialize()
+        util.save((bmps, prog), fname=fname, append=cleared, verbose=False)
+        cleared = True
 
-def gen_random_exprs(pool, a_exprs, envs, n_exprs, n_entities, entity_types, verbose=True):
-    for i in range(n_exprs):
-        expr = gen_random_expr(pool, a_exprs, envs, n_entities, entity_types)
-        if verbose: print(f'expr generated [{i+1}/{n_exprs}]: {expr}')
-        yield expr
+def gen_exs_mp(n_exs, shapes, envs, min_shapes, max_shapes, save_to):
+    n_sizes = max_shapes - min_shapes + 1
+    shapes = list(shapes)
+    with mp.Pool(n_sizes) as pool:
+        pool.starmap(gen_exs, [(ceil(n_exs/n_sizes), 
+                                i, 
+                                shapes, 
+                                envs, 
+                                save_to)
+                               for i in range(min_shapes, max_shapes+1)])
 
 def rand_sprite(envs, a_exprs, i=-1, color=-1):
     i = i if 0 <= i < LIB_SIZE else randrange(1, LIB_SIZE)
@@ -122,7 +150,7 @@ def rand_transform(e):
     #     t = Repeat(t(*t_args), n)
     # else:
     #     t = t(*t_args)
-    pass
+    assert False, "not implemented"
 
 def viz_sprites(envs):
     k = floor(sqrt(LIB_SIZE))
@@ -243,54 +271,44 @@ def test_rm_dead_code():
         assert out == ans, f"Failed test: in={entities}; expected {ans}, got {out}"
     print("[+] passed test_rm_dead_code")
 
-def make_exprs(n_exprs,         # number of total programs to make
-               n_envs,          # number of envs (bitmaps) per program
-               min_n_entities,  # number of entities in each program
-               max_n_entities,  # number of entities in each program
-               a_grammar,       # grammar for arithmetic exprs (components of entities)
-               a_bound,         # bound on arithmetic exprs in each entity
-               entities,        # entity classes allowed
-               cmps_loc,        # where to save/load pool of random components
-               exprs_loc,       # where to save generated programs
-               label_zs=True,   # whether to label z's with indices or not (e.g. just have 'z' instead of 'z_0') TODO: unimplemented
-               min_zs=0,        # min number of z's to allow in each entity
-               max_zs=None,     # max number of z's to allow in each entity
-               load_pool=True): # whether to load cmps from cmps_loc or not (gen from scratch)
-    n_exprs_per_size = n_exprs//max_n_entities
-    pool_size = n_exprs * max_n_entities
-    print(f'Parameters: n_exprs={n_exprs}, n_envs={n_envs}, max_n_entities={max_n_entities}, a_bound={a_bound}, entities={entities}')
+def load_shapes(fname):
+    assert False, 'unimplemented'
 
-    if load_pool:
-        cmps = util.load(cmps_loc)
-        envs, pool, a_exprs = cmps['envs'], cmps['pool'], cmps['a_exprs']
-        meta = cmps['meta']
-        n_envs, a_bound, pool_size, entities = meta['n_envs'], meta['a_bound'], meta['pool_size'], meta['entities']
-    else:
-        envs = [{'z': seed_zs(), 'sprites': seed_sprites()} for _ in range(n_envs)]
-        a_exprs = [a_expr for a_expr, size in bottom_up_generator(a_bound, a_grammar, envs)]
-        pool = gen_shape_pool(entities, a_exprs, envs, pool_size, min_zs, max_zs)
-        util.save({'meta': {'n_envs': n_envs,
-                            'a_bound': a_bound,
-                            'pool_size': pool_size,
-                            'entities': entities}, 
-                   'envs': envs, 
-                   'pool': pool, 
-                   'a_exprs': a_exprs},
-                  cmps_loc,
-                  append=False)
+def make_exs(n_exs,           # number of total (bitmaps, program) pairs to make
+             n_envs,          # number of envs (bitmaps) per program
+             min_shapes,      # min number of shapes in each scene
+             max_shapes,      # max number of shapes in each scene
+             a_grammar,       # grammar for arithmetic exprs (components of shapes)
+             a_bound,         # bound on arithmetic exprs in each entity
+             shape_types,     # shape types allowed
+             fname,           # prefix to use for filenames
+             label_zs=True,   # whether to label z's with indices or not (e.g. just have 'z' instead of 'z_0') TODO: unimplemented
+             min_zs=0,        # min number of z's to allow in each entity
+             max_zs=None):    # max number of z's to allow in each entity
+    print(f'Parameters: n_exs={n_exs}, n_envs={n_envs}, zs=({min_zs}, {max_zs}), ' 
+          f'shape_types={shape_types}, min_shapes={min_shapes}, max_shapes={max_shapes}, ' 
+          f'a_grammar={a_grammar}, a_bound={a_bound}, shape_types={shape_types}')
+
+    # Generate and save shapes
+    envs = [{'z': seed_zs(), 'sprites': seed_sprites()} for _ in range(n_envs)]
+    a_exprs = [a_expr for a_expr, size in bottom_up_generator(a_bound, a_grammar, envs)]
+    n_shapes = n_exs * max_shapes
+    shapes = gen_shapes_mp(n_shapes, a_exprs, envs, shape_types, min_zs, max_zs)
+    util.save({'n_shapes': n_shapes,
+               'shape_types': shape_types,
+               'shapes': shapes, 
+               'zs': (min_zs, max_zs),
+               'n_envs': n_envs,
+               'envs': envs, 
+               'a_bound': a_bound,
+               'a_exprs': a_exprs},
+              f'{fname}.cmps',
+              append=False)
 
     # Generate and save exprs w/ bmp outputs
-    cleared = False
-    for n_entities in range(min_n_entities, max_n_entities+1):
-        for expr in gen_random_exprs(pool, a_exprs, envs, n_exprs_per_size, n_entities, entities):
-            bmps = [expr.eval(env) for env in envs] 
-            p = expr.simplify_indices().serialize()
-            if cleared:
-                util.save((bmps, p), fname=exprs_loc, append=True, verbose=False)
-            else:
-                util.save((bmps, p), fname=exprs_loc, append=False, verbose=False)
-                cleared = True
-    print(f'Saved to {exprs_loc}.')
+    gen_exs_mp(n_exs=n_exs, shapes=shapes, envs=envs, 
+               min_shapes=min_shapes, max_shapes=max_shapes, save_to=fname)
+
 
 def viz_exs(fname):
     for bmps, tokens in util.load_incremental(fname):
@@ -324,76 +342,51 @@ def compare(f1, f2):
             abs_overlap += min(d1[e], d2[e])
     return key_overlap, abs_overlap, n_keys, val_capacity
 
-if __name__ == '__main__':
+def shape_code(shape_types):
+    return f"{'p' if Point in shape_types else ''}" \
+           f"{'l' if Line in shape_types else ''}" \
+           f"{'r' if Rect in shape_types else ''}"
 
+if __name__ == '__main__':
     # test_rm_dead_code()
     # test_canonical_ordering()
 
     a_gram = Grammar(ops=[Plus, Minus, Times],
                      consts=([Z(i) for i in range(LIB_SIZE)] +
-                             [Num(i) for i in range(Z_LO, Z_HI + 1)]))
+                             [Num(i) for i in range(0, 10)]))
     print(a_gram.ops, a_gram.consts)
 
     cfgs = [
         {
-            'n_exprs': 100,
-            'entities': [Rect],
-            'min_n_entities': 1,
-            'max_n_entities': 4,
+            'n_exs': 10,
+            'shape_types': [Rect],
+            'min_shapes': 1,
+            'max_shapes': 5,
             'max_zs': 4,
+            'min_zs': 4,
+            'a_bound': 1,
             'n_envs': 5,
-            'label_zs': False,
+            'label_zs': True,
         },
-        # {
-        #     'n_exprs': 10_000,
-        #     'entities': [Rect, Line, Point],
-        #     'min_n_entities': 1,
-        #     'max_n_entities': 4,
-        #     'max_zs': 0,
-        #     'n_envs': 1,
-        #     'label_zs': True,
-        # },
-        # {
-        #     'n_exprs': 10_000,
-        #     'entities': [Rect, Line, Point],
-        #     'min_n_entities': 1,
-        #     'max_n_entities': 4,
-        #     'max_zs': 2,
-        #     'n_envs': 5,
-        #     'label_zs': True,
-        # },
     ]
 
     for cfg in cfgs:
-        n_exprs = cfg['n_exprs']
-        entities = cfg['entities']
-        min_n_entities = cfg['min_n_entities']
-        max_n_entities = cfg['max_n_entities']
-        max_zs = cfg['max_zs']
-        n_envs = cfg ['n_envs']
-        label_zs = cfg['label_zs']
-
-        entities_code = f"{'p' if Point in entities else ''}{'l' if Line in entities else ''}{'r' if Rect in entities else ''}"
-        code = f'{n_exprs}-{min_n_entities}~{max_n_entities}{entities_code}{max_zs}z{n_envs}e'
+        sc = shape_code(cfg['shape_types'])
+        code = f"{cfg['n_exs']}-{cfg['min_shapes']}~{cfg['max_shapes']}{sc}{cfg['max_zs']}z{cfg['n_envs']}e"
         print(f'code: {code}')
 
-        make_exprs(n_exprs=n_exprs, n_envs=n_envs, min_n_entities=min_n_entities, max_n_entities=max_n_entities, a_bound=1,
-                   entities=entities,
-                   a_grammar = a_gram,
-                   cmps_loc=f'../data/{code}-train.cmps',
-                   exprs_loc=f'../data/{code}-train.exs',
-                   load_pool=False,
-                   label_zs=label_zs,
-                   max_zs=max_zs)
-
-        make_exprs(n_exprs=n_exprs, n_envs=n_envs, min_n_entities=min_n_entities, max_n_entities=max_n_entities, a_bound=1,
-                   entities=entities,
-                   a_grammar = a_gram,
-                   cmps_loc=f'../data/{code}-test.cmps',
-                   exprs_loc=f'../data/{code}-test.exs',
-                   load_pool=False,
-                   label_zs=label_zs,
-                   max_zs=max_zs)
+        for mode in ['train', 'test']:
+            make_exs(n_exs=cfg['n_exs'], 
+                     shape_types=cfg['shape_types'],
+                     min_shapes=cfg['min_shapes'], 
+                     max_shapes=cfg['max_shapes'],
+                     n_envs=cfg['n_envs'], 
+                     max_zs=cfg['max_zs'],
+                     min_zs=cfg['min_zs'],
+                     a_bound=cfg['a_bound'],
+                     a_grammar = a_gram,
+                     fname=f'../data/{code}-{mode}',
+                     label_zs=cfg['label_zs'])
 
     # list_exs(f"../data/{code}-train.exs")
     # list_exs(f"../data/{code}-test.exs")
