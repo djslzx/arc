@@ -438,7 +438,7 @@ if __name__ == '__main__':
             "Usage: transformer.py --train --name NAME --d DATA -n N ..."
 
         print(f'Using {dev_name}')
-        lexicon = ([i for i in range(Z_LO, Z_HI + 1)] + 
+        lexicon = ([i for i in range(0, 10)] + 
                    [f'z_{i}' for i in range(LIB_SIZE)] + 
                    [f'S_{i}' for i in range(LIB_SIZE)] +
                    ['~', '+', '-', '*', '<', '&', '?',

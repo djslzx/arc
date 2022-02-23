@@ -1,9 +1,20 @@
 import torch as T
 import pickle
 import os
-from random import choice
+from random import choice, shuffle
 
 dirname = os.path.dirname(__file__)
+
+def shuffled(s):
+    shuffle(s)
+    return s
+
+def to_toks(s):
+    def tonum(s):
+        try: return int(s)
+        except: return s
+
+    return [tonum(c) for c in s]
 
 def clamp(x, lo, hi):
     assert hi >= lo
