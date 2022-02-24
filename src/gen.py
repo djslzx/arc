@@ -359,16 +359,16 @@ if __name__ == '__main__':
 
     cfgs = [
         {
-            'n_exs': 100,
+            'n_exs': 1_000_000,
             'shape_types': [Rect],
             'min_shapes': 1,
             'max_shapes': 5,
-            'max_zs': 1,
+            'max_zs': 2,
             'min_zs': 0,
             'a_bound': 1,
             'n_envs': 5,
             'label_zs': True,
-            'n_processes': 1,
+            'n_processes': 32,
         },
     ]
 
