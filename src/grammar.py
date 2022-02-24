@@ -13,16 +13,9 @@ LIB_SIZE = 10
 Z_LO = 0  # min poss value in z_n
 Z_HI = max(B_W, B_H)-1  # max poss value in z_n
 
-class Grammar:
-    def __init__(self, ops, consts):
-        self.ops = ops
-        self.consts = consts
-
-
 class Visited:
     def accept(self, visitor):
         assert False, f"`accept` not implemented for {type(self).__name__}"
-
 
 class Expr(Visited):
     def accept(self, visitor): assert False, f"not implemented for {type(self).__name__}"
@@ -49,6 +42,11 @@ class Expr(Visited):
         # TODO: make this better
         return nltk.edit_distance(str(self), str(other))
 
+class Grammar:
+    def __init__(self, ops: list[Expr], consts: list[Expr]):
+        self.ops = ops
+        self.consts = consts
+
 def seed_zs(lo=Z_LO, hi=Z_HI, n_zs=LIB_SIZE):
     return (T.rand(n_zs) * (hi - lo) - lo).long()
 
@@ -58,13 +56,11 @@ def seed_sprites(n_sprites=LIB_SIZE):
                                 W=B_W, H=B_H)
                     for _ in range(n_sprites)])
 
-
 class Nil(Expr):
     in_types = []
     out_type = 'bool'
     def __init__(self): pass
     def accept(self, v): return v.visit_Nil()
-
 
 class Num(Expr):
     in_types = []
@@ -72,20 +68,17 @@ class Num(Expr):
     def __init__(self, n): self.n = n
     def accept(self, v): return v.visit_Num(self.n)
 
-
 class Z(Expr):
     in_types = []
     out_type = 'int'
     def __init__(self, i): self.i = i
     def accept(self, v): return v.visit_Z(self.i)
 
-
 class Not(Expr):
     in_types = ['bool']
     out_type = 'bool'
     def __init__(self, b): self.b = b
     def accept(self, v): return v.visit_Not(self.b)
-
 
 class Plus(Expr):
     in_types = ['int', 'int']
@@ -95,7 +88,6 @@ class Plus(Expr):
         self.y = y
     def accept(self, v): return v.visit_Plus(self.x, self.y)
 
-
 class Minus(Expr):
     in_types = ['int', 'int']
     out_type = 'int'
@@ -103,7 +95,6 @@ class Minus(Expr):
         self.x = x
         self.y = y
     def accept(self, v): return v.visit_Minus(self.x, self.y)
-
 
 class Times(Expr):
     in_types = ['int', 'int']
@@ -113,7 +104,6 @@ class Times(Expr):
         self.y = y
     def accept(self, v): return v.visit_Times(self.x, self.y)
 
-
 class Lt(Expr):
     in_types = ['bool', 'bool']
     out_type = 'bool'
@@ -121,7 +111,6 @@ class Lt(Expr):
         self.x = x
         self.y = y
     def accept(self, v): return v.visit_Lt(self.x, self.y)
-
 
 class And(Expr):
     in_types = ['bool', 'bool']
@@ -131,7 +120,6 @@ class And(Expr):
         self.y = y
     def accept(self, v): return v.visit_And(self.x, self.y)
 
-
 class If(Expr):
     in_types = ['bool', 'int', 'int']
     out_type = 'int'
@@ -140,7 +128,6 @@ class If(Expr):
         self.x = x
         self.y = y
     def accept(self, v): return v.visit_If(self.b, self.x, self.y)
-
 
 class Line(Expr):
     in_types = ['int', 'int', 'int', 'int', 'int']
@@ -153,7 +140,6 @@ class Line(Expr):
         self.color = color
     def accept(self, v): return v.visit_Line(self.x1, self.y1, self.x2, self.y2, self.color)
 
-
 class Point(Expr):
     in_types = ['int', 'int', 'int']
     out_type = 'bitmap'
@@ -162,7 +148,6 @@ class Point(Expr):
         self.y = y
         self.color = color
     def accept(self, v): return v.visit_Point(self.x, self.y, self.color)
-
 
 class Rect(Expr):
     in_types = ['int', 'int', 'int', 'int', 'int']
@@ -175,7 +160,6 @@ class Rect(Expr):
         self.color = color
     def accept(self, v): return v.visit_Rect(self.x, self.y, self.w, self.h, self.color)
 
-
 class Sprite(Expr):
     in_types = ['int', 'int', 'int']
     out_type = 'bitmap'
@@ -185,14 +169,12 @@ class Sprite(Expr):
         self.y = y
     def accept(self, v): return v.visit_Sprite(self.i, self.x, self.y)
 
-
 class Seq(Expr):
     in_types = ['list(bitmap)']
     out_type = 'bitmap'
     def __init__(self, *bmps):
         self.bmps = bmps
     def accept(self, v): return v.visit_Seq(self.bmps)
-
 class Join(Expr):
     in_types = ['bitmap', 'bitmap']
     out_type = 'bitmap'
@@ -200,7 +182,6 @@ class Join(Expr):
         self.bmp1 = bmp1
         self.bmp2 = bmp2
     def accept(self, v): return v.visit_Join(self.bmp1, self.bmp2)
-
 
 class Apply(Expr):
     """Applies a transformation to a bitmap"""
@@ -211,7 +192,6 @@ class Apply(Expr):
         self.bmp = bmp
     def accept(self, v): return v.visit_Apply(self.f, self.bmp)
 
-
 class Repeat(Expr):
     in_types = ['transform', 'int']
     out_type = 'transform'
@@ -220,7 +200,6 @@ class Repeat(Expr):
         self.n = n
     def accept(self, v): return v.visit_Repeat(self.f, self.n)
 
-
 class Intersect(Expr):
     in_types = ['bitmap']
     out_type = 'transform'
@@ -228,20 +207,17 @@ class Intersect(Expr):
         self.bmp = bmp
     def accept(self, v): return v.visit_Intersect(self.bmp)
 
-
 class HFlip(Expr):
     in_types = []
     out_type = 'transform'
     def __init__(self): pass
     def accept(self, v): return v.visit_HFlip()
 
-
 class VFlip(Expr):
     in_types = []
     out_type = 'transform'
     def __init__(self): pass
     def accept(self, v): return v.visit_VFlip()
-
 
 class Translate(Expr):
     in_types = ['int', 'int']
@@ -251,13 +227,11 @@ class Translate(Expr):
         self.dy = dy
     def accept(self, v): return v.visit_Translate(self.dx, self.dy)
 
-
 class Recolor(Expr):
     in_types = ['int']
     out_type = 'transform'
     def __init__(self, c): self.c = c
     def accept(self, v): return v.visit_Recolor(self.c)
-
 
 class Compose(Expr):
     in_types = ['transform', 'transform']
@@ -266,7 +240,6 @@ class Compose(Expr):
         self.f = f
         self.g = g
     def accept(self, v): return v.visit_Compose(self.f, self.g)
-
 
 class Visitor:
 
@@ -295,7 +268,6 @@ class Visitor:
     def visit_Compose(self, f, g): self.fail('Compose')
     def visit_Apply(self, f, bmp): self.fail('Apply')
     def visit_Repeat(self, f, n): self.fail('Repeat')
-
 
 class Eval(Visitor):
     def __init__(self, env):
@@ -475,7 +447,6 @@ class Eval(Visitor):
         f, bmp = f.accept(self), bmp.accept(self)
         return Eval.overlay(f(bmp), bmp)
 
-
 class Size(Visitor):
     def __init__(self): pass
     def visit_Nil(self): return 1
@@ -505,7 +476,6 @@ class Size(Visitor):
     def visit_Compose(self, f, g): return f.accept(self) + g.accept(self) + 1
     def visit_Apply(self, f, bmp): return f.accept(self) + bmp.accept(self) + 1
     def visit_Repeat(self, f, n): return f.accept(self) + n.accept(self) + 1
-
 
 class Print(Visitor):
     def __init__(self): pass
@@ -606,7 +576,6 @@ def deserialize(tokens):
     assert expr.well_formed(), f'Decoded program should be well-formed'
     return expr
 
-
 class Serialize(Visitor):
     def __init__(self, label_zs=True):
         self.label_zs = label_zs
@@ -643,7 +612,6 @@ class Serialize(Visitor):
     def visit_Apply(self, f, bmp): return ['@'] + f.accept(self) + bmp.accept(self)
     def visit_Repeat(self, f, n): return ['!'] + f.accept(self) + n.accept(self)
 
-
 class Zs(Visitor):
     def __init__(self): pass
     def visit_Nil(self): return set()
@@ -674,7 +642,6 @@ class Zs(Visitor):
     def visit_Apply(self, f, bmp): return f.accept(self) | bmp.accept(self)
     def visit_Repeat(self, f, n): return f.accept(self) | n.accept(self)
 
-
 class Sprites(Visitor):
     def __init__(self): pass
     def visit_Nil(self): return set()
@@ -704,7 +671,6 @@ class Sprites(Visitor):
     def visit_Compose(self, f, g): return f.accept(self) | g.accept(self)
     def visit_Apply(self, f, bmp): return f.accept(self) | bmp.accept(self)
     def visit_Repeat(self, f, n): return f.accept(self) | n.accept(self)
-
 
 class SimplifyIndices(Visitor):
     def __init__(self, zs, sprites):
@@ -742,7 +708,6 @@ class SimplifyIndices(Visitor):
     def visit_Compose(self, f, g): return Compose(f.accept(self), g.accept(self))
     def visit_Apply(self, f, bmp): return Apply(f.accept(self), bmp.accept(self))
     def visit_Repeat(self, f, n): return Repeat(f.accept(self), n.accept(self))
-
 
 class WellFormed(Visitor):
     # TODO: clean up exception handling (unsafe as is)
@@ -829,7 +794,6 @@ class WellFormed(Visitor):
            f.accept(self) and n.accept(self)
         except: return False
 
-
 class Range(Visitor):
     def __init__(self, envs): self.envs = envs
     def visit_Num(self, n):
@@ -850,7 +814,6 @@ class Range(Visitor):
         y_min, y_max = y.accept(self)
         products = [x * y for x in [x_min, x_max] for y in [y_min, y_max]]
         return min(products), max(products)
-
 
 def test_eval():
     tests = [
@@ -1303,7 +1266,7 @@ def test_deserialize_breaking():
         try:
             out = deserialize(case)
             failed = False
-        except:
+        except AssertionError:
             failed = True
 
         if should_fail and not failed:

@@ -3,11 +3,10 @@ Make programs to use as training data
 """
 
 import pdb
-from math import floor, sqrt, ceil
+from math import floor, sqrt
 from random import choice, randint, shuffle
 import multiprocessing as mp
 
-import util
 from viz import viz_grid
 from grammar import *
 from bottom_up import bottom_up_generator, eval
@@ -27,16 +26,16 @@ def gen_shapes(n_shapes, a_exprs, envs, shape_types, min_zs=0, max_zs=None):
         while n_hits < n_shapes:
             color = Num(randint(1, 9))
             n_zs = min(len(shape_type.in_types), randint(min_zs, max_zs)) # cap n_zs by number of args for shape type
-            z_args = [choice(z_exprs) for _ in shape_type.in_types[:n_zs]] 
+            z_args = [choice(z_exprs) for _ in shape_type.in_types[:n_zs]]
             c_args = [choice(c_exprs) for _ in shape_type.in_types[n_zs:]]
             args = z_args + c_args
             shuffle(args)
             shape = shape_type(*args[:-1], color)
-            if shape not in shapes and all(out is not None for out in eval(shape, envs)):  
+            if shape not in shapes and all(out is not None for out in eval(shape, envs)):
                 shapes.add(shape)
                 n_hits += 1
                 print(f'{shape_type} hits: {n_hits}/{n_tries}')
-            n_tries += 1    
+            n_tries += 1
         print(f'{shape_type} hits: {n_hits}/{n_tries}')
     return shapes
 
@@ -47,9 +46,23 @@ def gen_shapes_mp(n_shapes, a_exprs, envs, shape_types, min_zs=0, max_zs=None, n
                                           envs,
                                           shape_types,
                                           min_zs,
-                                          max_zs) 
+                                          max_zs)
                                          for chunk_size in util.chunk(n_shapes, n_processes)])
     return set.union(*sets)
+
+def enum_shapes(envs, shape_types, max_zs=0):
+    assert max_zs <= LIB_SIZE
+    scene_gram = Grammar(ops=shape_types,
+                         consts=([Z(i) for i in range(max_zs)] +
+                                 [Num(i) for i in range(0, 10)]))
+    shapes = set()
+    for shape_type in shape_types:
+        expr_sz = len(shape_type.in_types) + 1
+        for shape, sz in bottom_up_generator(expr_sz, scene_gram, envs):
+            if all(out is not None for out in eval(shape, envs)):
+                shapes.add(shape)
+    print(f'Enumerated {len(shapes)} shapes.')
+    return shapes
 
 def rm_dead_code(shapes, envs):
     """
@@ -79,7 +92,7 @@ def canonical_ordering(scene):
             return 1, e.x1, e.y1, e.x2, e.y2
         elif isinstance(e, Rect):
             return 2, e.x, e.y, e.w, e.h
-    
+
     return sorted(scene, key=destructure)
 
 def gen_random_scene(shapes, envs, n_shapes):
@@ -101,7 +114,7 @@ def gen_random_scene(shapes, envs, n_shapes):
 def gen_exs(n_exs, n_shapes, shapes, envs, save_to, verbose=True):
     """
     Generates a set of (bmp set, program) pairs from an expression generator on n entities.
-    Writes the set in a stream to the file `{fprefix}_{n_shapes}.exs`
+    Writes the set in a stream to the file `{fname}_{n_shapes}.exs`
     """
     fname = f'{save_to}_{n_shapes}.exs'
     cleared = False
@@ -118,9 +131,9 @@ def gen_exs_mp(n_exs, shapes, envs, min_shapes, max_shapes, save_to):
     shapes = list(shapes)
     with mp.Pool(n_sizes) as pool:
         pool.starmap(gen_exs, [(n_exs,
-                                i, 
-                                shapes, 
-                                envs, 
+                                i,
+                                shapes,
+                                envs,
                                 save_to)
                                for i in range(min_shapes, max_shapes+1)])
 
@@ -133,11 +146,10 @@ def rand_sprite(envs, a_exprs, i=-1, color=-1):
         outs = eval(s, envs)
         if all(out is not None for out in outs):
             break
-        else: 
+        else:
             n_misses += 1
     print(f'sprite misses:', n_misses)
-    if color > 1: return Apply(Recolor(color), s)
-    else:         return s
+    return Apply(Recolor(color), s) if color > 1 else s
 
 def rand_transform(e):
     """
@@ -161,23 +173,23 @@ def viz_sprites(envs):
 def test_canonical_ordering():
     test_cases = [
         ([
-            Point(Num(0), Num(1)), 
+            Point(Num(0), Num(1)),
             Point(Num(1), Num(0))
          ],
          [
-             Point(Num(0), Num(1)), 
+             Point(Num(0), Num(1)),
              Point(Num(1), Num(0))
          ]),
         ([
-            Point(Num(2), Num(1)), 
+            Point(Num(2), Num(1)),
             Point(Num(2), Num(0))
          ],
          [
-             Point(Num(2), Num(0)), 
+             Point(Num(2), Num(0)),
              Point(Num(2), Num(1))
          ]),
         ([
-            Line(Num(2), Num(0), Num(3), Num(1)), 
+            Line(Num(2), Num(0), Num(3), Num(1)),
             Rect(Num(1), Num(0), Num(1), Num(1)),
             Point(Num(2), Num(1)),
             Rect(Num(0), Num(1), Num(2), Num(2)),
@@ -189,7 +201,7 @@ def test_canonical_ordering():
             Point(Num(0), Num(2)),
             Point(Num(2), Num(1)),
             Line(Num(0), Num(0), Num(3), Num(3)),
-            Line(Num(2), Num(0), Num(3), Num(1)), 
+            Line(Num(2), Num(0), Num(3), Num(1)),
             Rect(Num(0), Num(1), Num(2), Num(2)),
             Rect(Num(0), Num(1), Num(3), Num(2)),
             Rect(Num(1), Num(0), Num(1), Num(1)),
@@ -202,8 +214,8 @@ def test_canonical_ordering():
 
 def test_rm_dead_code():
     zs = [
-        [0, 1,],
-        [0, 2,],
+        [0, 1],
+        [0, 2],
     ]
     test_cases = [
         ([
@@ -275,18 +287,19 @@ def test_rm_dead_code():
 def load_shapes(fname):
     assert False, 'unimplemented'
 
-def make_exs(n_exs,           # number of total (bitmaps, program) pairs to make
-             n_envs,          # number of envs (bitmaps) per program
-             min_shapes,      # min number of shapes in each scene
-             max_shapes,      # max number of shapes in each scene
-             a_grammar,       # grammar for arithmetic exprs (components of shapes)
-             a_bound,         # bound on arithmetic exprs in each entity
-             shape_types,     # shape types allowed
-             fname,           # prefix to use for filenames
-             label_zs=True,   # whether to label z's with indices or not (e.g. just have 'z' instead of 'z_0') TODO: unimplemented
-             min_zs=0,        # min number of z's to allow in each entity
-             max_zs=None,
-             n_processes=1):    # max number of z's to allow in each entity
+def make_exs(n_exs,             # number of total (bitmaps, program) pairs to make
+             n_envs,            # number of envs (bitmaps) per program
+             min_shapes,        # min number of shapes in each scene
+             max_shapes,        # max number of shapes in each scene
+             a_grammar,         # grammar for arithmetic exprs (components of shapes)
+             a_bound,           # bound on arithmetic exprs in each entity
+             shape_types,       # shape types allowed
+             fname,             # prefix to use for filenames
+             enum_all_shapes=False,  # whether to randomly generate shapes or enumerate all possibilities
+             label_zs=True,     # whether to label z's with indices or not (e.g. just have 'z' instead of 'z_0') TODO
+             min_zs=0,          # min number of z's to allow in each entity
+             max_zs=None,       # max number of z's to allow in each entity
+             n_processes=1):
     print(f'Parameters: n_exs={n_exs}, n_envs={n_envs}, zs=({min_zs}, {max_zs}), ' 
           f'shape_types={shape_types}, min_shapes={min_shapes}, max_shapes={max_shapes}, ' 
           f'a_grammar={a_grammar}, a_bound={a_bound}, shape_types={shape_types}')
@@ -295,20 +308,25 @@ def make_exs(n_exs,           # number of total (bitmaps, program) pairs to make
     envs = [{'z': seed_zs(), 'sprites': seed_sprites()} for _ in range(n_envs)]
     a_exprs = [a_expr for a_expr, size in bottom_up_generator(a_bound, a_grammar, envs)]
     n_shapes = n_exs * max_shapes
-    shapes = gen_shapes_mp(n_shapes, a_exprs, envs, shape_types, min_zs, max_zs, n_processes)
+    if enum_all_shapes:
+        shapes = enum_shapes(envs, shape_types, max_zs)
+    else:
+        shapes = gen_shapes_mp(n_shapes, a_exprs, envs, shape_types, min_zs, max_zs, n_processes)
     util.save({'n_shapes': n_shapes,
                'shape_types': shape_types,
-               'shapes': shapes, 
+               'shapes': shapes,
                'zs': (min_zs, max_zs),
                'n_envs': n_envs,
-               'envs': envs, 
+               'envs': envs,
                'a_bound': a_bound,
                'a_exprs': a_exprs},
               f'{fname}.cmps',
               append=False)
 
+    exit(0)
+
     # Generate and save exprs w/ bmp outputs
-    gen_exs_mp(n_exs=n_exs, shapes=shapes, envs=envs, 
+    gen_exs_mp(n_exs=n_exs, shapes=shapes, envs=envs,
                min_shapes=min_shapes, max_shapes=max_shapes, save_to=fname)
 
 
@@ -317,6 +335,11 @@ def viz_exs(fname):
         print('tokens:', tokens)
         expr = deserialize(tokens)
         viz_grid(bmps[:9], expr)
+
+def list_cmps(fname):
+    cmps = util.load(fname)
+    for shape in cmps['shapes']:
+        print(shape)
 
 def list_exs(fname):
     for bmps, tokens in util.load_incremental(fname):
@@ -349,19 +372,41 @@ def shape_code(shape_types):
            f"{'l' if Line in shape_types else ''}" \
            f"{'r' if Rect in shape_types else ''}"
 
+def run_cfgs(cfgs):
+    for cfg in cfgs:
+        sc = shape_code(cfg['shape_types'])
+        code = f"{cfg['n_exs']}-{cfg['min_shapes']}~{cfg['max_shapes']}{sc}{cfg['max_zs']}z{cfg['n_envs']}e"
+        print(f'code: {code}')
+
+        for mode in ['train', 'test']:
+            make_exs(n_exs=cfg['n_exs'],
+                     shape_types=cfg['shape_types'],
+                     min_shapes=cfg['min_shapes'],
+                     max_shapes=cfg['max_shapes'],
+                     n_envs=cfg['n_envs'],
+                     max_zs=cfg['max_zs'],
+                     min_zs=cfg['min_zs'],
+                     a_bound=cfg['a_bound'],
+                     a_grammar=cfg['a_grammar'],
+                     fname=f'../data/{code}-{mode}',
+                     enum_all_shapes=cfg['enum_all_shapes'],
+                     n_processes=cfg['n_processes'],
+                     label_zs=cfg['label_zs'])
+
+
 if __name__ == '__main__':
     # test_rm_dead_code()
     # test_canonical_ordering()
 
-    a_gram = Grammar(ops=[Plus, Minus, Times],
-                     consts=([Z(i) for i in range(LIB_SIZE)] +
-                             [Num(i) for i in range(0, 10)]))
-    print(a_gram.ops, a_gram.consts)
-
+    a_grammar = Grammar(ops=[Plus, Minus, Times],
+                        consts=([Z(i) for i in range(LIB_SIZE)] +
+                                [Num(i) for i in range(0, 10)]))
+    print(a_grammar.ops, a_grammar.consts)
     cfgs = [
         {
-            'n_exs': 100,
+            'n_exs': 1_000_000,
             'shape_types': [Rect],
+            'enum_all_shapes': True,
             'min_shapes': 1,
             'max_shapes': 5,
             'max_zs': 1,
@@ -370,38 +415,8 @@ if __name__ == '__main__':
             'n_envs': 5,
             'label_zs': True,
             'n_processes': 1,
+            'a_grammar': a_grammar,
         },
     ]
-
-    for cfg in cfgs:
-        sc = shape_code(cfg['shape_types'])
-        code = f"{cfg['n_exs']}-{cfg['min_shapes']}~{cfg['max_shapes']}{sc}{cfg['max_zs']}z{cfg['n_envs']}e"
-        print(f'code: {code}')
-
-        for mode in ['train', 'test']:
-            make_exs(n_exs=cfg['n_exs'], 
-                     shape_types=cfg['shape_types'],
-                     min_shapes=cfg['min_shapes'], 
-                     max_shapes=cfg['max_shapes'],
-                     n_envs=cfg['n_envs'], 
-                     max_zs=cfg['max_zs'],
-                     min_zs=cfg['min_zs'],
-                     a_bound=cfg['a_bound'],
-                     a_grammar = a_gram,
-                     fname=f'../data/{code}-{mode}',
-                     n_processes=cfg['n_processes'],
-                     label_zs=cfg['label_zs'])
-
-    # list_exs(f"../data/{code}-train.exs")
-    # list_exs(f"../data/{code}-test.exs")
-
-    # u = count_uniq('../data/10k-simple-exs.dat')
-    # n = {}
-    # for k, v in u.items():
-    #     n[v] = n.get(v, []) + [k]
-    # for k, v in sorted(n.items()):
-    #     print(k, v)
-    # k_overlap, abs_overlap, n_keys, cap = compare('../data/10k-4rect-train.exs',
-    #                                               '../data/10k-4rect-test.exs')
-    # print(f'key overlap: {k_overlap}, abs overlap: {abs_overlap}, |keys|: {n_keys}, capacity: {cap}')
-
+    run_cfgs(cfgs)
+    # list_cmps(f"../data/1000000-1~5r1z5e-train.cmps")
