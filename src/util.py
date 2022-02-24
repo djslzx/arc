@@ -2,12 +2,9 @@ import torch as T
 import pickle
 import os
 from random import choice, shuffle
+from math import floor, ceil
 
 dirname = os.path.dirname(__file__)
-
-def shuffled(s):
-    shuffle(s)
-    return s
 
 def to_toks(s):
     def tonum(s):
@@ -32,6 +29,16 @@ def avg(it):
 
 def sum_sq(it):
     return sum(x*x for x in it)
+
+def chunk(n, k):
+    """
+    Returns a partition of n items into k chunks.
+
+    Output: a list of lengths, where the i-th length is the length of the i-th chunk
+    e.g. chunk(10, 3) --> [4, 3, 3]
+    """
+    return [ceil(n/k) if i < n % k else floor(n/k)
+            for i in range(k)]
 
 def chunks(l, k, n):
     size = len(l)

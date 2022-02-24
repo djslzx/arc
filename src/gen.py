@@ -7,6 +7,7 @@ from math import floor, sqrt, ceil
 from random import choice, randint, shuffle
 import multiprocessing as mp
 
+import util
 from viz import viz_grid
 from grammar import *
 from bottom_up import bottom_up_generator, eval
@@ -23,7 +24,6 @@ def gen_shapes(n_shapes, a_exprs, envs, shape_types, min_zs=0, max_zs=None):
     for shape_type in shape_types:
         n_tries = 0
         n_hits = 0
-
         while n_hits < n_shapes:
             color = Num(randint(1, 9))
             n_zs = min(len(shape_type.in_types), randint(min_zs, max_zs)) # cap n_zs by number of args for shape type
@@ -39,15 +39,15 @@ def gen_shapes(n_shapes, a_exprs, envs, shape_types, min_zs=0, max_zs=None):
         print(f'{shape_type} hits: {n_hits}/{n_tries}')
     return shapes
 
-def gen_shapes_mp(n_shapes, a_exprs, envs, shape_types, min_zs=0, max_zs=None, n_processes=8):
+def gen_shapes_mp(n_shapes, a_exprs, envs, shape_types, min_zs=0, max_zs=None, n_processes=1):
     with mp.Pool(n_processes) as pool:
-        sets = pool.starmap(gen_shapes, [(ceil(n_shapes/n_processes),
+        sets = pool.starmap(gen_shapes, [(chunk_size,
                                           a_exprs,
                                           envs,
                                           shape_types,
                                           min_zs,
                                           max_zs) 
-                                         for _ in range(n_processes)])
+                                         for chunk_size in util.chunk(n_shapes, n_processes)])
     return set.union(*sets)
 
 def rm_dead_code(shapes, envs):
@@ -106,7 +106,7 @@ def gen_exs(n_exs, n_shapes, shapes, envs, save_to, verbose=True):
     cleared = False
     for i in range(n_exs):
         scene = gen_random_scene(shapes, envs, n_shapes)
-        if verbose: print(f'scene generated [{i+1}/{n_exs}]: {scene}')
+        if verbose: print(f'scene generated [{n_shapes}][{i+1}/{n_exs}]: {scene}')
         bmps = [scene.eval(env) for env in envs]
         prog = scene.simplify_indices().serialize()
         util.save((bmps, prog), fname=fname, append=cleared, verbose=False)
@@ -116,7 +116,7 @@ def gen_exs_mp(n_exs, shapes, envs, min_shapes, max_shapes, save_to):
     n_sizes = max_shapes - min_shapes + 1
     shapes = list(shapes)
     with mp.Pool(n_sizes) as pool:
-        pool.starmap(gen_exs, [(ceil(n_exs/n_sizes), 
+        pool.starmap(gen_exs, [(n_exs,
                                 i, 
                                 shapes, 
                                 envs, 
@@ -284,7 +284,8 @@ def make_exs(n_exs,           # number of total (bitmaps, program) pairs to make
              fname,           # prefix to use for filenames
              label_zs=True,   # whether to label z's with indices or not (e.g. just have 'z' instead of 'z_0') TODO: unimplemented
              min_zs=0,        # min number of z's to allow in each entity
-             max_zs=None):    # max number of z's to allow in each entity
+             max_zs=None,
+             n_processes=1):    # max number of z's to allow in each entity
     print(f'Parameters: n_exs={n_exs}, n_envs={n_envs}, zs=({min_zs}, {max_zs}), ' 
           f'shape_types={shape_types}, min_shapes={min_shapes}, max_shapes={max_shapes}, ' 
           f'a_grammar={a_grammar}, a_bound={a_bound}, shape_types={shape_types}')
@@ -293,7 +294,7 @@ def make_exs(n_exs,           # number of total (bitmaps, program) pairs to make
     envs = [{'z': seed_zs(), 'sprites': seed_sprites()} for _ in range(n_envs)]
     a_exprs = [a_expr for a_expr, size in bottom_up_generator(a_bound, a_grammar, envs)]
     n_shapes = n_exs * max_shapes
-    shapes = gen_shapes_mp(n_shapes, a_exprs, envs, shape_types, min_zs, max_zs)
+    shapes = gen_shapes_mp(n_shapes, a_exprs, envs, shape_types, min_zs, max_zs, n_processes)
     util.save({'n_shapes': n_shapes,
                'shape_types': shape_types,
                'shapes': shapes, 
@@ -358,15 +359,16 @@ if __name__ == '__main__':
 
     cfgs = [
         {
-            'n_exs': 10,
+            'n_exs': 100,
             'shape_types': [Rect],
             'min_shapes': 1,
             'max_shapes': 5,
-            'max_zs': 4,
-            'min_zs': 4,
+            'max_zs': 1,
+            'min_zs': 0,
             'a_bound': 1,
             'n_envs': 5,
             'label_zs': True,
+            'n_processes': 1,
         },
     ]
 
@@ -386,6 +388,7 @@ if __name__ == '__main__':
                      a_bound=cfg['a_bound'],
                      a_grammar = a_gram,
                      fname=f'../data/{code}-{mode}',
+                     n_processes=cfg['n_processes'],
                      label_zs=cfg['label_zs'])
 
     # list_exs(f"../data/{code}-train.exs")
