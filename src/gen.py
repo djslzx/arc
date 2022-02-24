@@ -34,6 +34,9 @@ def gen_shapes(n_shapes, a_exprs, envs, shape_types, min_zs=0, max_zs=None):
             if shape not in shapes and all(out is not None for out in eval(shape, envs)):
                 shapes.add(shape)
                 n_hits += 1
+                if n_hits % 100 == 0:
+                    print(f'{shape_type} hits: {n_hits}/{n_tries}')
+            if n_tries % 10000 == 0:
                 print(f'{shape_type} hits: {n_hits}/{n_tries}')
             n_tries += 1
         print(f'{shape_type} hits: {n_hits}/{n_tries}')
@@ -41,12 +44,7 @@ def gen_shapes(n_shapes, a_exprs, envs, shape_types, min_zs=0, max_zs=None):
 
 def gen_shapes_mp(n_shapes, a_exprs, envs, shape_types, min_zs=0, max_zs=None, n_processes=1):
     with mp.Pool(n_processes) as pool:
-        sets = pool.starmap(gen_shapes, [(chunk_size,
-                                          a_exprs,
-                                          envs,
-                                          shape_types,
-                                          min_zs,
-                                          max_zs)
+        sets = pool.starmap(gen_shapes, [(chunk_size, a_exprs, envs, shape_types, min_zs, max_zs)
                                          for chunk_size in util.chunk(n_shapes, n_processes)])
     return set.union(*sets)
 
@@ -130,12 +128,9 @@ def gen_exs_mp(n_exs, shapes, envs, min_shapes, max_shapes, save_to):
     n_sizes = max_shapes - min_shapes + 1
     shapes = list(shapes)
     with mp.Pool(n_sizes) as pool:
-        pool.starmap(gen_exs, [(n_exs,
-                                i,
-                                shapes,
-                                envs,
-                                save_to)
-                               for i in range(min_shapes, max_shapes+1)])
+        pool.starmap(gen_exs, [(n, i, shapes, envs, save_to)
+                               for n, i in zip(util.chunk(n_exs, n_sizes),
+                                               range(min_shapes, max_shapes+1))])
 
 def rand_sprite(envs, a_exprs, i=-1, color=-1):
     i = i if 0 <= i < LIB_SIZE else randrange(1, LIB_SIZE)
@@ -414,7 +409,7 @@ if __name__ == '__main__':
             'a_bound': 1,
             'n_envs': 5,
             'label_zs': True,
-            'n_processes': 1,
+            'n_processes': 32,
             'a_grammar': a_grammar,
         },
     ]
