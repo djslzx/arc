@@ -128,9 +128,9 @@ def gen_exs_mp(n_exs, shapes, envs, min_shapes, max_shapes, save_to):
     n_sizes = max_shapes - min_shapes + 1
     shapes = list(shapes)
     with mp.Pool(n_sizes) as pool:
-        pool.starmap(gen_exs, [(n, i, shapes, envs, save_to)
-                               for n, i in zip(util.chunk(n_exs, n_sizes),
-                                               range(min_shapes, max_shapes+1))])
+        pool.starmap(gen_exs, [(n, n_shapes, shapes, envs, save_to)
+                               for n, n_shapes in zip(util.chunk(n_exs, n_sizes),
+                                                      range(min_shapes, max_shapes+1))])
 
 def rand_sprite(envs, a_exprs, i=-1, color=-1):
     i = i if 0 <= i < LIB_SIZE else randrange(1, LIB_SIZE)
@@ -317,8 +317,6 @@ def make_exs(n_exs,             # number of total (bitmaps, program) pairs to ma
                'a_exprs': a_exprs},
               f'{fname}.cmps',
               append=False)
-
-    exit(0)
 
     # Generate and save exprs w/ bmp outputs
     gen_exs_mp(n_exs=n_exs, shapes=shapes, envs=envs,
