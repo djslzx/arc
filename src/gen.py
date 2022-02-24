@@ -56,9 +56,9 @@ def enum_shapes(envs, shape_types, max_zs=0):
     shapes = set()
     for shape_type in shape_types:
         expr_sz = len(shape_type.in_types) + 1
-        for shape, sz in bottom_up_generator(expr_sz, scene_gram, envs):
-            if all(out is not None for out in eval(shape, envs)):
-                shapes.add(shape)
+        for expr, sz in bottom_up_generator(expr_sz, scene_gram, envs):
+            if isinstance(expr, shape_type) and all(out is not None for out in eval(expr, envs)):
+                shapes.add(expr)
     print(f'Enumerated {len(shapes)} shapes.')
     return shapes
 
@@ -397,7 +397,7 @@ if __name__ == '__main__':
     print(a_grammar.ops, a_grammar.consts)
     cfgs = [
         {
-            'n_exs': 1_000_000,
+            'n_exs': 1_000,
             'shape_types': [Rect],
             'enum_all_shapes': True,
             'min_shapes': 1,
