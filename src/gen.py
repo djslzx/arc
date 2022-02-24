@@ -35,6 +35,7 @@ def gen_shapes(n_shapes, a_exprs, envs, shape_types, min_zs=0, max_zs=None):
             if shape not in shapes and all(out is not None for out in eval(shape, envs)):  
                 shapes.add(shape)
                 n_hits += 1
+                print(f'{shape_type} hits: {n_hits}/{n_tries}')
             n_tries += 1    
         print(f'{shape_type} hits: {n_hits}/{n_tries}')
     return shapes
