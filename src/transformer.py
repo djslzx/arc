@@ -170,7 +170,15 @@ class ArcTransformer(nn.Module):
 
     @staticmethod
     def word_loss(expected, actual):
-        return -T.sum(T.sum(F.log_softmax(actual, dim=-1) * expected, dim=-1))
+        """
+        x = log_softmax(actual, -1) : turn logits into probabilities
+        x = (x * expected)          : pull out values from `actual` at nonzero locations in `expected`
+        x = T.sum(x, -1)            : remove zeros
+        x = T.sum(x, 0)             : take sum of log-probabilities for each example in the batch
+        x = T.mean(x)               : compute mean probability of correctly generating each sequence in the batch
+        x = -x                      : minimize loss (-mean) to maximize mean pr of
+        """
+        return -T.mean(T.sum(T.sum(F.log_softmax(actual, dim=-1) * expected, dim=0)))
     
     def train_epoch(self, dataloader, optimizer):
         self.train()
@@ -182,7 +190,7 @@ class ArcTransformer(nn.Module):
             P_expected = F.one_hot(P[:, 1:], num_classes=self.n_tokens).float().transpose(0, 1).to(device)
             out = self(B, P_input)
 
-            loss = ArcTransformer.token_loss(P_expected, out)
+            loss = ArcTransformer.word_loss(P_expected, out)
             # loss = ArcTransformer.token_loss(P_expected, out)
             optimizer.zero_grad()
             loss.backward()
@@ -200,7 +208,7 @@ class ArcTransformer(nn.Module):
                 P_input    = P[:, :-1].to(device)
                 P_expected = F.one_hot(P[:, 1:], num_classes=self.n_tokens).float().transpose(0, 1).to(device)
                 out = self(B, P_input)
-                loss = ArcTransformer.token_loss(P_expected, out)
+                loss = ArcTransformer.word_loss(P_expected, out)
                 epoch_loss += loss.detach().item()
         return epoch_loss / len(dataloader)
 
