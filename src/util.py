@@ -1,7 +1,7 @@
 import torch as T
 import pickle
 import os
-from random import choice, shuffle
+from glob import glob
 from math import floor, ceil
 
 dirname = os.path.dirname(__file__)
@@ -135,6 +135,18 @@ def load_incremental(fname, verbose=True):
                 yield pickle.load(f)
             except EOFError:
                 break
+                
+def load_multi_incremental(prefix, suffix=''):
+    """Iterate over multiple files with the prefix"""
+    files = glob(f'{prefix}*{suffix}')
+    for file in files:
+        with open(file, 'rb') as f:
+            while True:
+                try:
+                    yield pickle.load(f)
+                except EOFError:
+                    break
+
 
 if __name__ == '__main__':
     print(img_to_tensor(['_#_',
