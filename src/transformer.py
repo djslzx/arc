@@ -178,7 +178,8 @@ class ArcTransformer(nn.Module):
         x = T.mean(x)               : compute mean probability of correctly generating each sequence in the batch
         x = -x                      : minimize loss (-mean) to maximize mean pr of
         """
-        return -T.mean(T.sum(T.sum(F.log_softmax(actual, dim=-1) * expected, dim=0)))
+        log_prs = T.sum(F.log_softmax(actual, dim=-1) * expected, dim=-1)
+        return -T.mean(T.sum(log_prs, dim=0))
     
     def train_epoch(self, dataloader, optimizer):
         self.train()
@@ -190,6 +191,7 @@ class ArcTransformer(nn.Module):
             P_expected = F.one_hot(P[:, 1:], num_classes=self.n_tokens).float().transpose(0, 1).to(device)
             out = self(B, P_input)
 
+            # pdb.set_trace()
             loss = ArcTransformer.word_loss(P_expected, out)
             # loss = ArcTransformer.token_loss(P_expected, out)
             optimizer.zero_grad()
