@@ -1,5 +1,4 @@
 import pdb
-import sys
 import time
 import math
 import argparse as ap
@@ -8,9 +7,8 @@ import torch as T
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.utils.data import SubsetRandomSampler, BatchSampler, TensorDataset, DataLoader
+from torch.utils.data import TensorDataset, DataLoader
 import torch.utils.tensorboard as tb
-import matplotlib.pyplot as plt
 
 from grammar import *
 
@@ -138,10 +136,10 @@ class ArcTransformer(nn.Module):
         out = self.out(out)
         return out
 
-    def make_dataloader(self, data_loc, blind=False):
+    def make_dataloader(self, get_data, blind=False):
         B, P = [], []
-        max_p_len = max(len(p) for bmps, p in util.load_incremental(data_loc))
-        for bmps, p in util.load_incremental(data_loc):
+        max_p_len = max(len(p) for bmps, p in get_data())
+        for bmps, p in get_data():
             # process bmps
             if not blind:
                 # add channel dimension
@@ -152,7 +150,8 @@ class ArcTransformer(nn.Module):
 
             # process progs: turn into indices and add padding
             p = self.tokens_to_indices(p)
-            p = F.pad(p, pad=(0, max_p_len + 2 - len(p)), value=self.pad_token) # add 2 to compensate for START/END tokens
+            # add 2 to compensate for START/END tokens
+            p = F.pad(p, pad=(0, max_p_len + 2 - len(p)), value=self.pad_token)
             P.append(p)
 
         B = T.stack(B)
@@ -160,9 +159,19 @@ class ArcTransformer(nn.Module):
         return DataLoader(TensorDataset(B, P), batch_size=self.batch_size, shuffle=True)
 
     @staticmethod
-    def loss(expected, actual):
+    def token_loss(expected, actual):
+        """
+        log_softmax: get probabilities
+        sum at dim=-1: pull out nonzero components
+        mean: avg diff
+        negation: max the mean (a score) by minning -mean (a loss)
+        """
         return -T.mean(T.sum(F.log_softmax(actual, dim=-1) * expected, dim=-1))
-        
+
+    @staticmethod
+    def word_loss(expected, actual):
+        return -T.sum(T.sum(F.log_softmax(actual, dim=-1) * expected, dim=-1))
+    
     def train_epoch(self, dataloader, optimizer):
         self.train()
         epoch_loss = 0
@@ -172,20 +181,16 @@ class ArcTransformer(nn.Module):
             P_input    = P[:, :-1].to(device)
             P_expected = F.one_hot(P[:, 1:], num_classes=self.n_tokens).float().transpose(0, 1).to(device)
             out = self(B, P_input)
-            """
-            log_softmax: get probabilities
-            sum at dim=-1: pull out nonzero components
-            mean: avg diff
-            negation: max the mean (a score) by minning -mean (a loss)
-            """
-            loss = ArcTransformer.loss(P_expected, out)
+
+            loss = ArcTransformer.token_loss(P_expected, out)
+            # loss = ArcTransformer.token_loss(P_expected, out)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             epoch_loss += loss.detach().item()
         return epoch_loss/len(dataloader)
 
-    def validate_epoch(self, dataloader, optimizer):
+    def validate_epoch(self, dataloader):
         self.eval()
         epoch_loss = 0
         with T.no_grad():
@@ -195,11 +200,11 @@ class ArcTransformer(nn.Module):
                 P_input    = P[:, :-1].to(device)
                 P_expected = F.one_hot(P[:, 1:], num_classes=self.n_tokens).float().transpose(0, 1).to(device)
                 out = self(B, P_input)
-                loss = ArcTransformer.loss(P_expected, out)
+                loss = ArcTransformer.token_loss(P_expected, out)
                 epoch_loss += loss.detach().item()
         return epoch_loss / len(dataloader)
 
-    def sample_model(self, writer, B, P, epoch, max_length):
+    def sample_model(self, writer, B, P, step, max_length):
         self.eval()
         samples = self.sample_programs(B, P, max_length)
         expected_tokens = samples['expected tokens']
@@ -225,7 +230,7 @@ class ArcTransformer(nn.Module):
             # record program
             writer.add_text(f'program sample for {e_expr}',
                             f'tokens: {o_toks}, expr: {o_expr}',
-                            epoch)
+                            step)
             # record sampled bitmaps (if possible)
             print(f'output for program {e_expr}:')
             if not well_formed(o_expr):
@@ -247,35 +252,36 @@ class ArcTransformer(nn.Module):
                 n_non_blank += any_non_blank
                 if any_non_blank:
                     bmp_stack = T.stack(bmps)
-                    writer.add_images(f'bmp samples for {e_expr}', bmp_stack, epoch, dataformats='NCHW')
+                    writer.add_images(f'bmp samples for {e_expr}', bmp_stack, step, dataformats='NCHW')
                 else:
                     print('all bitmaps blank, skipped')
 
         # record number of well-formed/non-blank programs found
-        writer.add_scalar(f'well-formed', n_well_formed, epoch)
-        writer.add_scalar(f'non-blank', n_non_blank, epoch)
+        writer.add_scalar(f'well-formed', n_well_formed, step)
+        writer.add_scalar(f'non-blank', n_non_blank, step)
+
+    @staticmethod
+    def strip(tokens):
+        start = int(tokens[0] == 'START')
+        end = None
+        for i, tok in enumerate(tokens):
+            if tok == 'END':
+                end = i
+                break
+        return tokens[start:end]
 
     def sample_programs(self, B, P, max_length):
         assert len(B) > 0
         assert len(P) > 0
 
-        def strip(tokens):
-            start = int(tokens[0] == 'START')
-            end = None
-            for i, tok in enumerate(tokens):
-                if tok == 'END':
-                    end = i
-                    break
-            return tokens[start:end]
-
         expected_tokens = [self.indices_to_tokens(p) for p in P]
-        expected_exprs = [deserialize(strip(toks)) for toks in expected_tokens]
+        expected_exprs = [deserialize(ArcTransformer.strip(toks)) for toks in expected_tokens]
         out = self.sample(B, max_length)
         out_tokens = [self.indices_to_tokens(o) for o in out]
         out_exprs = []
         for toks in out_tokens:
             try:
-                stripped = strip(toks)
+                stripped = ArcTransformer.strip(toks)
                 d = deserialize(stripped)
                 out_exprs.append(d)
             except:
@@ -301,7 +307,7 @@ class ArcTransformer(nn.Module):
             epoch_start_t = time.time()
             tloss = self.train_epoch(tloader, optimizer)
             epoch_end_t = time.time()
-            vloss = self.validate_epoch(vloader, optimizer)
+            vloss = self.validate_epoch(vloader)
 
             print(f'[{epoch}/{epochs}] training loss: {tloss:.3f}, validation loss: {vloss:.3f};',
                   f'epoch took {epoch_end_t - epoch_start_t:.3f}s,', 
@@ -365,22 +371,19 @@ class ArcTransformer(nn.Module):
             prompt = T.cat((prompt, next_index), dim=1)
         return prompt
 
-def test_sampling(checkpoint_loc, train_data_loc, validation_data_loc, N=9, max_length=100):
+def test_sampling(checkpoint_loc, train_data_loc, N=9, max_length=100):
     # TODO: add more args / generalize
     model = ArcTransformer(N=N, H=B_H, W=B_W, lexicon=lexicon, batch_size=16).to(device)
     tloader = model.make_dataloader(train_data_loc),
     checkpoint = T.load(checkpoint_loc)
-    tloss = checkpoint['training loss']
-    vloss = checkpoint['validation loss']
-    model_state = checkpoint['model_state_dict']
+    model.load_state_dict(checkpoint['model_state_dict'])
 
-    n_envs = 7
     for B, P in tloader:
-        samples = self.sample_programs(B, P, max_length)
+        samples = model.sample_programs(B, P, max_length)
         expected_tokens = samples['expected tokens']
         expected_exprs = samples['expected exprs']
         out_tokens = samples['out tokens']
-        out_tokens = samples['out exprs']
+        out_exprs = samples['out exprs']
 
         n_matches = 0
         n_compares = len(P)
@@ -396,7 +399,7 @@ def test_sampling(checkpoint_loc, train_data_loc, validation_data_loc, N=9, max_
             print(f'matching? {matching}')
             n_matches += matching
             if not matching:
-                m = max(len(strip(x_toks)), len(strip(y_toks)))
+                m = max(len(model.strip(x_toks)), len(model.strip(y_toks)))
                 tok_matches = 0
                 for x, y in zip(x_toks[:m], y_toks[:m]):
                     tok_matches += x == y and x not in ['PAD', 'START', 'END']
@@ -405,16 +408,19 @@ def test_sampling(checkpoint_loc, train_data_loc, validation_data_loc, N=9, max_
 
         print(f'matches: {n_matches}/{n_compares} [{n_matches/n_compares * 100}%]')
 
+
 if __name__ == '__main__':
     # TODO: make N flexible - adapt to datasets with variable-size bitmap example sets
 
     p = ap.ArgumentParser(description='Sample or train a transformer')
     p.add_argument('--sample', action='store_true', help='run in sample mode')
     p.add_argument('--train', action='store_true', help='run in train mode')
-    p.add_argument('--blind', action='store_true', help='run w/o looking at bmp input') # TODO
+    p.add_argument('--blind', action='store_true', help='run w/o looking at bmp input')
     p.add_argument('--name', type=str, help='name of transformer')
     p.add_argument('--training-data', type=str)
+    p.add_argument('--training-data-multi', type=str)
     p.add_argument('--validation-data', type=str)
+    p.add_argument('--validation-data-multi', type=str)
     p.add_argument('--test-data', type=str)
     p.add_argument('-c', '--checkpoint', type=str, help='path of model checkpoint')
     p.add_argument('-n', type=int, help='value of N for transformer')
@@ -431,10 +437,11 @@ if __name__ == '__main__':
         assert a.checkpoint is not None and a.test_data is not None, \
             "Usage: transformer.py --sample -c CHECKPOINT --test-data TEST_DATA ... "
         print(f'Using {dev_name}')
-        test_sampling(a.checkpoint, a.training_data, validation_data)
+        test_sampling(a.checkpoint, a.training_data, a.validation_data)
     elif a.train:
-        assert a.training_data is not None and a.validation_data is not None \
-            and a.n is not None and a.name is not None, \
+        assert (a.training_data or a.training_data_multi) is not None and \
+               (a.validation_data or a.validation_data_multi) is not None and \
+               a.n is not None and a.name is not None, \
             "Usage: transformer.py --train --name NAME --d DATA -n N ..."
 
         print(f'Using {dev_name}')
@@ -451,8 +458,21 @@ if __name__ == '__main__':
                                N=a.n, H=B_H, W=B_W, 
                                d_model=a.model_dim,
                                batch_size=a.batch_size).to(device)
-        tloader, vloader = (model.make_dataloader(a.training_data, blind=a.blind),
-                            model.make_dataloader(a.validation_data, blind=a.blind))
+
+        def tdata():
+            if a.training_data:         return util.load_incremental(a.training_data)
+            elif a.training_data_multi: return util.load_multi_incremental(prefix=a.training_data_multi,
+                                                                           suffix='.exs')
+            else:                       raise FileNotFoundError('Training data file not found')
+        
+        def vdata():
+            if a.validation_data:         return util.load_incremental(a.validation_data)
+            elif a.validation_data_multi: return util.load_multi_incremental(prefix=a.validation_data_multi,
+                                                                             suffix='.exs')
+            else:                         raise FileNotFoundError('Validation data file not found')
+
+        tloader, vloader = (model.make_dataloader(tdata, blind=a.blind),
+                            model.make_dataloader(vdata, blind=a.blind))
         model.learn(tloader, vloader, 
                     epochs=a.epochs, 
                     learning_rate=a.learning_rate,
