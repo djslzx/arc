@@ -1,3 +1,4 @@
+import pdb
 import util
 import nltk
 import torch as T
@@ -33,7 +34,11 @@ class Expr(Visited):
         sprites = self.sprites()
         return self.accept(SimplifyIndices(zs, sprites))
     def serialize(self): return self.accept(Serialize())
-    def well_formed(self): return self.accept(WellFormed())
+    def well_formed(self):
+        try:
+            return self.accept(WellFormed())
+        except (AssertionError, AttributeError):
+            return False
     def range(self, envs): return self.accept(Range(envs))
     def __len__(self): return self.accept(Size())
     def __str__(self): return self.accept(Print())
@@ -150,15 +155,18 @@ class Point(Expr):
     def accept(self, v): return v.visit_Point(self.x, self.y, self.color)
 
 class Rect(Expr):
+    """
+    A rectangle is specified by two corners (min and max x- and y-values)
+    """
     in_types = ['int', 'int', 'int', 'int', 'int']
     out_type = 'bitmap'
-    def __init__(self, x, y, w, h, color=Num(1)):
-        self.x = x
-        self.y = y
-        self.w = w
-        self.h = h
+    def __init__(self, x_min, y_min, x_max, y_max, color=Num(1)):
+        self.x_min = x_min
+        self.y_min = y_min
+        self.x_max = x_max
+        self.y_max = y_max
         self.color = color
-    def accept(self, v): return v.visit_Rect(self.x, self.y, self.w, self.h, self.color)
+    def accept(self, v): return v.visit_Rect(self.x_min, self.y_min, self.x_max, self.y_max, self.color)
 
 class Sprite(Expr):
     in_types = ['int', 'int', 'int']
@@ -175,6 +183,7 @@ class Seq(Expr):
     def __init__(self, *bmps):
         self.bmps = bmps
     def accept(self, v): return v.visit_Seq(self.bmps)
+
 class Join(Expr):
     in_types = ['bitmap', 'bitmap']
     out_type = 'bitmap'
@@ -200,12 +209,12 @@ class Repeat(Expr):
         self.n = n
     def accept(self, v): return v.visit_Repeat(self.f, self.n)
 
-class Intersect(Expr):
-    in_types = ['bitmap']
-    out_type = 'transform'
-    def __init__(self, bmp):
-        self.bmp = bmp
-    def accept(self, v): return v.visit_Intersect(self.bmp)
+# class Intersect(Expr):
+#     in_types = ['bitmap']
+#     out_type = 'transform'
+#     def __init__(self, bmp):
+#         self.bmp = bmp
+#     def accept(self, v): return v.visit_Intersect(self.bmp)
 
 class HFlip(Expr):
     in_types = []
@@ -260,7 +269,7 @@ class Visitor:
     def visit_Sprite(self, i, x, y): self.fail('Sprite')
     def visit_Join(self, bmp1, bmp2): self.fail('Join')
     def visit_Seq(self, bmps): self.fail('Seq')
-    def visit_Intersect(self, bmp): self.fail('Intersect')
+    # def visit_Intersect(self, bmp): self.fail('Intersect')
     def visit_HFlip(self): self.fail('HFlip')
     def visit_VFlip(self): self.fail('VFlip')
     def visit_Translate(self, dx, dy): self.fail('Translate')
@@ -277,7 +286,7 @@ class Eval(Visitor):
     def make_bitmap(f):
         return T.tensor([[f((x, y))
                           for x in range(B_W)]
-                         for y in range(B_H)]).float()
+                          for y in range(B_H)]).float()
 
     @staticmethod
     def overlay(*bmps):
@@ -357,14 +366,13 @@ class Eval(Visitor):
                                                p[1] == y1 + (p[0] - x1)) * c)
         assert False, "Line must be vertical, horizontal, or diagonal"
 
-    def visit_Rect(self, x, y, w, h, color):
+    def visit_Rect(self, x_min, y_min, x_max, y_max, color):
         c = color.accept(self)
-        x, y, w, h = (x.accept(self), y.accept(self),
-                      w.accept(self), h.accept(self))
-        assert all(isinstance(v, int) for v in [x, y, w, h])
-        assert w > 0 and h > 0
-        assert 0 <= x < B_W - w and 0 <= y < B_H - h
-        return Eval.make_bitmap(lambda p: (x <= p[0] < x + w and y <= p[1] < y + h) * c)
+        x_min, y_min, x_max, y_max = (x_min.accept(self), y_min.accept(self),
+                                      x_max.accept(self), y_max.accept(self))
+        assert all(isinstance(v, int) for v in [x_min, y_min, x_max, y_max])
+        assert 0 <= x_min <= x_max < B_W and 0 <= y_min <= y_max < B_H
+        return Eval.make_bitmap(lambda p: (x_min <= p[0] <= x_max and y_min <= p[1] <= y_max) * c)
 
     def visit_Sprite(self, i, x, y):
         x, y = x.accept(self), y.accept(self)
@@ -381,16 +389,10 @@ class Eval(Visitor):
             f"Union needs two float tensors, found bmp1={bmp1}, bmp2={bmp2}"
         return Eval.overlay(bmp1, bmp2)
 
-    def visit_Intersect(self, bmp1):
-        assert False, "not implemented"
-        # bmp1 = bmp1.accept(self)
-        # assert isinstance(bmp1, T.FloatTensor), f"Intersect needs a float tensor, found bmp={bmp1}"
-        # def intersect(pt, bmp2):
-        #     print(bmp1, bmp2)
-        #     x, y = pt
-        #     c1, c2 = bmp1[y][x], bmp2[y][x]
-        #     return int(c1 > 0 and c2 > 0)
-        # return lambda bmp: Eval.make_bitmap(lambda p: intersect(p, bmp))
+    # def visit_Intersect(self, bmp1):
+    #     bmp1 = bmp1.accept(self)
+    #     assert isinstance(bmp1, T.FloatTensor), f"Intersect needs a float tensor, found bmp={bmp1}"
+    #     return lambda bmp2: Eval.make_bitmap(lambda p: int(bmp1[p[1]][p[0]] > 0 and bmp2[p[1]][p[0]] > 0))
 
     def visit_HFlip(self):
         return lambda bmp: bmp.flip(1)
@@ -444,6 +446,7 @@ class Eval(Visitor):
         return g
 
     def visit_Apply(self, f, bmp):
+        # FIXME: the semantics here don't play well with intersection
         f, bmp = f.accept(self), bmp.accept(self)
         return Eval.overlay(f(bmp), bmp)
 
@@ -462,13 +465,15 @@ class Size(Visitor):
     def visit_Point(self, x, y, color): return x.accept(self) + y.accept(self) + color.accept(self) + 1
     def visit_Line(self, x1, y1, x2, y2, color):
         return x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self) + color.accept(self) + 1
-    def visit_Rect(self, x, y, w, h, color):
-        return x.accept(self) + y.accept(self) + w.accept(self) + h.accept(self) + color.accept(self) + 1
+    def visit_Rect(self, x_min, y_min, x_max, y_max, color):
+        return x_min.accept(self) + y_min.accept(self) + \
+               x_max.accept(self) + y_max.accept(self) + \
+               color.accept(self) + 1
     def visit_Sprite(self, i, x, y):
         return x.accept(self) + y.accept(self) + 1
     def visit_Seq(self, bmps): return sum(bmp.accept(self) for bmp in bmps) + 1
     def visit_Join(self, bmp1, bmp2): return bmp1.accept(self) + bmp2.accept(self) + 1
-    def visit_Intersect(self, bmp): return bmp.accept(self) + 1
+    # def visit_Intersect(self, bmp): return bmp.accept(self) + 1
     def visit_HFlip(self): return 1
     def visit_VFlip(self): return 1
     def visit_Translate(self, dx, dy): return dx.accept(self) + dy.accept(self) + 1
@@ -493,13 +498,14 @@ class Print(Visitor):
         return f'(Point[{color.accept(self)}] {x.accept(self)} {y.accept(self)})'
     def visit_Line(self, x1, y1, x2, y2, color):
         return f'(Line[{color.accept(self)}] {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
-    def visit_Rect(self, x, y, w, h, color):
-        return f'(Rect[{color.accept(self)}] {x.accept(self)} {y.accept(self)} {w.accept(self)} {h.accept(self)})'
+    def visit_Rect(self, x_min, y_min, x_max, y_max, color):
+        return f'(Rect[{color.accept(self)}] {x_min.accept(self)} {y_min.accept(self)} ' \
+               f'{x_max.accept(self)} {y_max.accept(self)})'
     def visit_Sprite(self, i, x, y):
         return f'(Sprite_{i} {x.accept(self)} {y.accept(self)})'
     def visit_Seq(self, bmps): return '(seq ' + ' '.join([bmp.accept(self) for bmp in bmps]) + ')'
     def visit_Join(self, bmp1, bmp2): return f'(join {bmp1.accept(self)} {bmp2.accept(self)})'
-    def visit_Intersect(self, bmp): return f'(intersect {bmp.accept(self)})'
+    # def visit_Intersect(self, bmp): return f'(intersect {bmp.accept(self)})'
     def visit_HFlip(self): return 'h-flip'
     def visit_VFlip(self): return 'v-flip'
     def visit_Translate(self, dx, dy): return f'(translate {dx.accept(self)} {dy.accept(self)})'
@@ -559,21 +565,21 @@ def deserialize(tokens):
             return [Apply(t[0], t[1])] + t[2:]
         if h == '!':
             return [Repeat(t[0], t[1])] + t[2:]
-        if h == '^':
-            return [Intersect(t[0])] + t[1:]
+        # if h == '^':
+        #     return [Intersect(t[0])] + t[1:]
         if h == '{':
             i = t.index('}')
-            return [Seq(*t[:i])] + t[i+1:]
+            return [Seq(*t[:i])] + t[i + 1:]
         if h == '}':
             return tokens
         else:
             assert False, f'Failed to classify token: {h} of type {type(h)}'
 
     decoded = D(tokens)
-    assert len(decoded) == 1, f'Parsed more than one program in one token sequence'
-    expr = D(tokens)[0]
-    assert isinstance(expr, Expr), f'Decoded program should be of type Expr'
-    assert expr.well_formed(), f'Decoded program should be well-formed'
+    assert len(decoded) == 1, f'Parsed {len(decoded)} programs in one token sequence, expected one'
+    expr = decoded[0]
+    assert isinstance(expr, Expr), f'Decoded program should be of type Expr: {expr}'
+    assert expr.well_formed(), f'Decoded program should be well-formed: {expr}'
     return expr
 
 class Serialize(Visitor):
@@ -592,8 +598,9 @@ class Serialize(Visitor):
     def visit_Point(self, x, y, color): return ['P'] + color.accept(self) + x.accept(self) + y.accept(self)
     def visit_Line(self, x1, y1, x2, y2, color):
         return ['L'] + color.accept(self) + x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self)
-    def visit_Rect(self, x, y, w, h, color):
-        return ['R'] + color.accept(self) + x.accept(self) + y.accept(self) + w.accept(self) + h.accept(self)
+    def visit_Rect(self, x_min, y_min, x_max, y_max, color):
+        return ['R'] + color.accept(self) + x_min.accept(self) + y_min.accept(self) +\
+               x_max.accept(self) + y_max.accept(self)
     def visit_Sprite(self, i, x, y):
         return [f'S_{i}'] + x.accept(self) + y.accept(self)
     def visit_Seq(self, bmps):
@@ -603,7 +610,7 @@ class Serialize(Visitor):
         tokens.append('}')           # stop symbol
         return tokens
     def visit_Join(self, bmp1, bmp2): return [';'] + bmp1.accept(self) + bmp2.accept(self)
-    def visit_Intersect(self, bmp): return ['^'] + bmp.accept(self)
+    # def visit_Intersect(self, bmp): return ['^'] + bmp.accept(self)
     def visit_HFlip(self): return ['H']
     def visit_VFlip(self): return ['V']
     def visit_Translate(self, x, y): return ['T'] + x.accept(self) + y.accept(self)
@@ -627,13 +634,13 @@ class Zs(Visitor):
     def visit_Point(self, x, y, color): return x.accept(self) | y.accept(self) | color.accept(self)
     def visit_Line(self, x1, y1, x2, y2, color):
         return x1.accept(self) | y1.accept(self) | x2.accept(self) | y2.accept(self) | color.accept(self)
-    def visit_Rect(self, x, y, w, h, color):
-        return x.accept(self) | y.accept(self) | w.accept(self) | h.accept(self) | color.accept(self)
+    def visit_Rect(self, x_min, y_min, x_max, y_max, color):
+        return x_min.accept(self) | y_min.accept(self) | x_max.accept(self) | y_max.accept(self) | color.accept(self)
     def visit_Sprite(self, i, x, y):
         return x.accept(self) | y.accept(self)
     def visit_Seq(self, bmps): return set.union(*[bmp.accept(self) for bmp in bmps])
     def visit_Join(self, bmp1, bmp2): return bmp1.accept(self) | bmp2.accept(self)
-    def visit_Intersect(self, bmp): return bmp.accept(self)
+    # def visit_Intersect(self, bmp): return bmp.accept(self)
     def visit_HFlip(self): return set()
     def visit_VFlip(self): return set()
     def visit_Translate(self, x, y): return x.accept(self) | y.accept(self)
@@ -657,13 +664,13 @@ class Sprites(Visitor):
     def visit_Point(self, x, y, color): return x.accept(self) | y.accept(self) | color.accept(self)
     def visit_Line(self, x1, y1, x2, y2, color):
         return x1.accept(self) | y1.accept(self) | x2.accept(self) | y2.accept(self) | color.accept(self)
-    def visit_Rect(self, x, y, w, h, color):
-        return x.accept(self) | y.accept(self) | w.accept(self) | h.accept(self) | color.accept(self)
+    def visit_Rect(self, x_min, y_min, x_max, y_max, color):
+        return x_min.accept(self) | y_min.accept(self) | x_max.accept(self) | y_max.accept(self) | color.accept(self)
     def visit_Sprite(self, i, x, y):
         return {i} | x.accept(self) | y.accept(self)
     def visit_Seq(self, bmps): return set.union(*[bmp.accept(self) for bmp in bmps])
     def visit_Join(self, bmp1, bmp2): return bmp1.accept(self) | bmp2.accept(self)
-    def visit_Intersect(self, bmp): return bmp.accept(self)
+    # def visit_Intersect(self, bmp): return bmp.accept(self)
     def visit_HFlip(self): return set()
     def visit_VFlip(self): return set()
     def visit_Translate(self, x, y): return x.accept(self) | y.accept(self)
@@ -694,13 +701,13 @@ class SimplifyIndices(Visitor):
     def visit_Line(self, x1, y1, x2, y2, color): return Line(x1.accept(self), y1.accept(self),
                                                              x2.accept(self), y2.accept(self),
                                                              color.accept(self))
-    def visit_Rect(self, x, y, w, h, color): return Rect(x.accept(self), y.accept(self),
-                                                         w.accept(self), h.accept(self),
-                                                         color.accept(self))
+    def visit_Rect(self, x_min, y_min, x_max, y_max, color): return Rect(x_min.accept(self), y_min.accept(self),
+                                                                         x_max.accept(self), y_max.accept(self),
+                                                                         color.accept(self))
     def visit_Sprite(self, i, x, y): return Sprite(self.sprite_mapping[i], x.accept(self), y.accept(self))
     def visit_Seq(self, bmps): return Seq(*[bmp.accept(self) for bmp in bmps])
     def visit_Join(self, bmp1, bmp2): return Join(bmp1.accept(self), bmp2.accept(self))
-    def visit_Intersect(self, bmp): return Intersect(bmp.accept(self))
+    # def visit_Intersect(self, bmp): return Intersect(bmp.accept(self))
     def visit_HFlip(self): return HFlip()
     def visit_VFlip(self): return VFlip()
     def visit_Translate(self, x, y): return Translate(x.accept(self), y.accept(self))
@@ -716,83 +723,47 @@ class WellFormed(Visitor):
     def visit_Num(self, n): return isinstance(n, int)
     def visit_Z(self, i): return isinstance(i, int)
     def visit_Not(self, b): 
-        try: return b.out_type == 'bool' and b.accept(self) 
-        except: return False
-    def visit_Plus(self, x, y): 
-        try: return x.out_type == 'int' and y.out_type == 'int' and \
-           x.accept(self) and y.accept(self)
-        except: return False
-    def visit_Minus(self, x, y): 
-        try: return x.out_type == 'int' and y.out_type == 'int' and \
-           x.accept(self) and y.accept(self)
-        except: return False
-    def visit_Times(self, x, y): 
-        try: return x.out_type == 'int' and y.out_type == 'int' and \
-           x.accept(self) and y.accept(self)
-        except: return False
-    def visit_Lt(self, x, y): 
-        try: return x.out_type == 'int' and y.out_type == 'int' and \
-           x.accept(self) and y.accept(self)
-        except: return False
-    def visit_And(self, x, y): 
-        try: return x.out_type == 'bool' and y.out_type == 'bool' and \
-           x.accept(self) and y.accept(self)
-        except: return False
-    def visit_If(self, b, x, y): 
-        try: return b.out_type == 'bool' and b.accept(self) and \
-           x.accept(self) and y.accept(self)
-        except: return False
-    def visit_Point(self, x, y, color): 
-        try: return x.out_type == 'int' and y.out_type == 'int' and color.out_type == 'int' and \
+        return b.out_type == 'bool' and b.accept(self)
+    def visit_Plus(self, x, y):
+        return x.out_type == 'int' and y.out_type == 'int' and x.accept(self) and y.accept(self)
+    def visit_Minus(self, x, y):
+        return x.out_type == 'int' and y.out_type == 'int' and x.accept(self) and y.accept(self)
+    def visit_Times(self, x, y):
+        return x.out_type == 'int' and y.out_type == 'int' and x.accept(self) and y.accept(self)
+    def visit_Lt(self, x, y):
+        return x.out_type == 'int' and y.out_type == 'int' and x.accept(self) and y.accept(self)
+    def visit_And(self, x, y):
+        return x.out_type == 'bool' and y.out_type == 'bool' and x.accept(self) and y.accept(self)
+    def visit_If(self, b, x, y):
+        # x, y don't have fixed types, but they should have the same type
+        return b.out_type == 'bool' and b.accept(self) and \
+               x.out_type == y.out_type and x.accept(self) and y.accept(self)
+    def visit_Point(self, x, y, color):
+        return x.out_type == 'int' and y.out_type == 'int' and color.out_type == 'int' and \
            x.accept(self) and y.accept(self) and color.accept(self)
-        except: return False
-    def visit_Line(self, x1, y1, x2, y2, color): 
-        try: return x1.out_type == 'int' and y1.out_type == 'int' and \
-           x2.out_type == 'int' and y2.out_type == 'int' and \
-           x1.accept(self) and y1.accept(self) and \
-           x2.accept(self) and y2.accept(self) and \
-           color.out_type == 'int' and color.accept(self)
-        except: return False
-    def visit_Rect(self, x, y, w, h, color): 
-        try: return x.out_type == 'int' and y.out_type == 'int' and \
-           w.out_type == 'int' and h.out_type == 'int' and \
-           x.accept(self) and y.accept(self) and \
-           w.accept(self) and h.accept(self) and \
-           color.out_type == 'int' and color.accept(self)
-        except: return False
-    def visit_Sprite(self, i, x, y): 
-        try: return x.out_type == 'int' and y.out_type == 'int' and isinstance(i, int) and \
+    def visit_Line(self, x1, y1, x2, y2, color):
+        return all(v.out_type == 'int' and v.accept(self) for v in [x1, y1, x2, y2, color])
+    def visit_Rect(self, x_min, y_min, x_max, y_max, color):
+        return all(v.out_type == 'int' and v.accept(self) for v in [x_min, y_min, x_max, y_max, color])
+    def visit_Sprite(self, i, x, y):
+        return x.out_type == 'int' and y.out_type == 'int' and isinstance(i, int) and \
            x.accept(self) and y.accept(self)
-        except: return False
-    def visit_Seq(self, bmps): return all(bmp.accept(self) for bmp in bmps)
-    def visit_Join(self, bmp1, bmp2): 
-        try: return bmp1.out_type == 'bitmap' and bmp2.out_type == 'bitmap' and \
-           bmp1.accept(self) and bmp2.accept(self)
-        except: return False
-    def visit_Intersect(self, bmp): 
-        try: return bmp.out_type == 'bitmap' and bmp.accept(self)
-        except: return False
+    def visit_Seq(self, bmps): return all(bmp.out_type == 'bitmap' and bmp.accept(self) for bmp in bmps)
+    def visit_Join(self, bmp1, bmp2): return all(bmp.out_type == 'bitmap' and bmp.accept(self) for bmp in [bmp1, bmp2])
+    # def visit_Intersect(self, bmp):
+    #     return bmp.out_type == 'bitmap' and bmp.accept(self)
     def visit_HFlip(self): return True
     def visit_VFlip(self): return True
     def visit_Translate(self, x, y): 
-        try: return x.out_type == 'bitmap' and y.out_type == 'bitmap' and \
-           x.accept(self) and y.accept(self)
-        except: return False
-    def visit_Recolor(self, c): 
-        try: return c.out_type == 'int' and c.accept(self)
-        except: return False
-    def visit_Compose(self, f, g): 
-        try: return f.out_type == 'transform' and g.out_type == 'transform' and \
-           f.accept(self) and g.accept(self)
-        except: return False
-    def visit_Apply(self, f, bmp): 
-        try: return f.out_type == 'transform' and bmp.out_type == 'bitmap' and \
-           f.accept(self) and bmp.accept(self)
-        except: return False
-    def visit_Repeat(self, f, n): 
-        try: return f.out_type == 'transform' and n.out_type == 'int' and \
-           f.accept(self) and n.accept(self)
-        except: return False
+        return x.out_type == 'int' and y.out_type == 'int' and x.accept(self) and y.accept(self)
+    def visit_Recolor(self, c):
+        return c.out_type == 'int' and c.accept(self)
+    def visit_Compose(self, f, g):
+        return f.out_type == 'transform' and g.out_type == 'transform' and f.accept(self) and g.accept(self)
+    def visit_Apply(self, f, bmp):
+        return f.out_type == 'transform' and bmp.out_type == 'bitmap' and f.accept(self) and bmp.accept(self)
+    def visit_Repeat(self, f, n):
+        return f.out_type == 'transform' and n.out_type == 'int' and f.accept(self) and n.accept(self)
 
 class Range(Visitor):
     def __init__(self, envs): self.envs = envs
@@ -834,7 +805,7 @@ def test_eval():
             Plus(Z(0), Z(1))),
          lambda z: z[0] * z[1] if not (z[0] < z[1]) else z[0] + z[1]),
         (Rect(Num(0), Num(0),
-              Num(2), Num(3)),
+              Num(1), Num(2)),
          lambda z: util.img_to_tensor(["##__",
                                        "##__",
                                        "##__",
@@ -846,7 +817,6 @@ def test_eval():
                 out = expr.eval({"z": [x, y]})
                 expected = correct_semantics([x, y])
                 t = expr.out_type
-                # print(expr, out, expected)
                 if t in ['int', 'bool']:
                     assert out == expected, f"failed eval test:\n" \
                                             f" expr=\n{expr}\n" \
@@ -862,7 +832,7 @@ def test_eval():
 
     # (0,0), (1,1)
     expr = Rect(Num(0), Num(0),
-                Num(2), Num(2))
+                Num(1), Num(1))
     out = expr.eval({'z': []})
     expected = util.img_to_tensor(["##__",
                                    "##__",
@@ -872,7 +842,7 @@ def test_eval():
 
     # (1,0), (3,3)
     expr = Rect(Z(0), Num(0),
-                Plus(Num(2), Num(1)), Num(4))
+                Plus(Z(0), Num(2)), Num(3))
     out = expr.eval({'z': [1, 2, 3]})
     expected = util.img_to_tensor(["_###",
                                    "_###",
@@ -954,7 +924,7 @@ def test_eval_bitmap():
 
         # Joining
         (Join(Rect(Num(0), Num(0),
-                   Num(2), Num(2)),
+                   Num(1), Num(1)),
               Line(Num(2), Num(3),
                    Num(3), Num(3))),
          ["##__",
@@ -963,9 +933,9 @@ def test_eval_bitmap():
           "__##"]),
         (Apply(HFlip(),
                Join(Rect(Num(0), Num(0),
-                         Num(2), Num(2)),
+                         Num(1), Num(1)),
                     Rect(Num(2), Num(2),
-                         Num(2), Num(2)))),
+                         Num(3), Num(3)))),
          ["##__" + "_"*(B_W-8) + "__##",
           "##__" + "_"*(B_W-8) + "__##",
           "__##" + "_"*(B_W-8) + "##__",
@@ -1057,17 +1027,17 @@ def test_eval_bitmap():
           "_1_2_2__",
           "__1_2_2_",
           "___1_2_2"]),
-        # (Rect(Num(0), Num(0), Num(3), Num(3)),
-        #  ["###_",
-        #   "###_",
-        #   "###_",
-        #   "____"]),
-        # (Line(Num(0), Num(0), Num(3), Num(3)),
-        #  ["#___",
-        #   "_#__",
-        #   "__#_",
-        #   "___#"]),
-        # (Apply(Intersect(Rect(Num(0), Num(0), Num(3), Num(3))),
+        (Rect(Num(0), Num(0), Num(2), Num(2)),
+         ["###_",
+          "###_",
+          "###_",
+          "____"]),
+        (Line(Num(0), Num(0), Num(3), Num(3)),
+         ["#___",
+          "_#__",
+          "__#_",
+          "___#"]),
+        # (Apply(Intersect(Rect(Num(0), Num(0), Num(2), Num(2))),
         #        Line(Num(0), Num(0), Num(3), Num(3))),
         #  ["#__",
         #   "_#_",
@@ -1149,7 +1119,7 @@ def test_sprite():
 def test_eval_color():
     tests = [
         (Rect(Num(0), Num(0),
-              Num(2), Num(2), Num(2)),
+              Num(1), Num(1), Num(2)),
          ["22__",
           "22__",
           "____",
@@ -1175,9 +1145,9 @@ def test_eval_color():
           "____",
           "_3__"]),
         (Join(Rect(Num(0), Num(0),
-                   Num(2), Num(2), Num(1)),
+                   Num(1), Num(1), Num(1)),
               Rect(Num(2), Num(2),
-                   Num(2), Num(2), Num(6))),
+                   Num(3), Num(3), Num(6))),
          ["11__",
           "11__",
           "__66",
@@ -1195,9 +1165,9 @@ def test_eval_color():
 
 def test_zs():
     test_cases = [
-        (Rect(Num(0), Num(1), Num(3), Num(3)),
+        (Rect(Num(0), Num(1), Num(2), Num(3)),
          set()),
-        (Rect(Z(0), Z(1), Num(3), Num(3)),
+        (Rect(Z(0), Z(1), Plus(Z(0), Num(3)), Plus(Z(1), Num(3))),
          {0, 1}),
         (Rect(Z(0), Z(1), Z(2), Z(3)),
          {0, 1, 2, 3}),
@@ -1213,8 +1183,14 @@ def test_simplify_indices():
     test_cases = [
         (Seq(Z(0), Z(1), Z(3)),
          Seq(Z(0), Z(1), Z(2))),
-        (Rect(Z(0), Z(1), Num(3), Num(3)),
-         Rect(Z(0), Z(1), Num(3), Num(3))),
+        (Seq(Z(7), Z(9), Z(3)),
+         Seq(Z(1), Z(2), Z(0))),
+        (Rect(Z(2), Z(1),
+              Plus(Z(0), Num(2)),
+              Plus(Z(1), Num(3))),
+         Rect(Z(2), Z(1),
+              Plus(Z(0), Num(2)),
+              Plus(Z(1), Num(3)))),
         (Seq(Sprite(0), Sprite(1), Z(3), Z(3)),
          Seq(Sprite(0), Sprite(1), Z(0), Z(0))),
     ]
@@ -1225,19 +1201,27 @@ def test_simplify_indices():
 
 def test_serialize():
     test_cases = [
-        (Nil(), [False]),
-        (Plus(Z(0), Z(1)), ['+', 'z_0', 'z_1']),
-        (Plus(Times(Num(1), Num(0)), Minus(Num(3), Num(2))), ['+', '*', 1, 0, '-', 3, 2]),
-        (And(Not(Nil()), Nil()), ['&', '~', False, False]),
-        (Not(Lt(Num(3), Minus(Num(2), Num(7)))), ['~', '<', 3, '-', 2, 7]),
-        (If(Not(Lt(Num(3), Z(0))), Num(2), Num(5)), ['?', '~', '<', 3, 'z_0', 2, 5]),
-        (If(Lt(Z(0), Z(1)), Point(Z(0), Z(0)), Rect(Z(1), Z(1), Num(2), Num(3))),
-         ['?', '<', 'z_0', 'z_1', 'P', 1, 'z_0', 'z_0', 'R', 1, 'z_1', 'z_1', 2, 3]),
-        (Seq(Sprite(0), Sprite(1), Sprite(2), Sprite(3)),
-         ['{', 'S_0', 0, 0, 'S_1', 0, 0, 'S_2', 0, 0, 'S_3', 0, 0, '}']),
-        (Apply(Intersect(Rect(Plus(Z(0), Num(1)), Plus(Z(0), Num(1)), Num(2), Num(2))),
-                   Rect(Z(0), Z(0), Num(2), Num(2))),
-         ['@', '^', 'R', 1, '+', 'z_0', 1, '+', 'z_0', 1, 2, 2, 'R', 1, 'z_0', 'z_0', 2, 2]),
+        # (Nil(), [False]),
+        # (Plus(Z(0), Z(1)), ['+', 'z_0', 'z_1']),
+        # (Plus(Times(Num(1), Num(0)), Minus(Num(3), Num(2))), ['+', '*', 1, 0, '-', 3, 2]),
+        # (And(Not(Nil()), Nil()), ['&', '~', False, False]),
+        # (Not(Lt(Num(3), Minus(Num(2), Num(7)))), ['~', '<', 3, '-', 2, 7]),
+        # (If(Not(Lt(Num(3), Z(0))), Num(2), Num(5)), ['?', '~', '<', 3, 'z_0', 2, 5]),
+        # (If(Lt(Z(0), Z(1)),
+        #     Point(Z(0), Z(0)),
+        #     Rect(Z(1), Z(1), Num(2), Num(3))),
+        #  ['?', '<', 'z_0', 'z_1', 'P', 1, 'z_0', 'z_0', 'R', 1, 'z_1', 'z_1', 2, 3]),
+        # (Seq(Sprite(0), Sprite(1), Sprite(2), Sprite(3)),
+        #  ['{', 'S_0', 0, 0, 'S_1', 0, 0, 'S_2', 0, 0, 'S_3', 0, 0, '}']),
+        (Apply(Translate(Num(1), Num(2)),
+               Seq(Rect(Plus(Z(0), Num(1)),
+                        Plus(Z(0), Num(1)),
+                        Num(2),
+                        Num(2)),
+                   Rect(Z(0), Z(0), Num(2), Num(2)))),
+         ['@', 'T', 1, 2, '{',
+          'R', 1, '+', 'z_0', 1, '+', 'z_0', 1, 2, 2,
+          'R', 1, 'z_0', 'z_0', 2, 2, '}']),
     ]
     for expr, ans in test_cases:
         serialized = expr.serialize()
@@ -1266,7 +1250,7 @@ def test_deserialize_breaking():
         try:
             out = deserialize(case)
             failed = False
-        except AssertionError:
+        except (AssertionError, ValueError):
             failed = True
 
         if should_fail and not failed:
@@ -1282,7 +1266,6 @@ def test_well_formed():
         (Point(Num(0), Num(1)), True),
         (Point(0, 1), False),
         (Line(Num(1), Num(1), Num(3), Num(3), Num(1)), True),
-        # (),
     ]
     for expr, ans in test_cases:
         out = expr.well_formed()
@@ -1312,13 +1295,13 @@ def test_range():
 
 
 if __name__ == '__main__':
-    # test_eval()
-    # test_eval_bitmap()
-    # test_eval_color()
-    # test_sprite()
-    # test_simplify_indices()
-    # test_range()
-    # test_serialize()
+    test_eval()
+    test_eval_bitmap()
+    test_eval_color()
+    test_sprite()
+    test_simplify_indices()
+    test_range()
+    test_serialize()
     test_well_formed()
     test_deserialize_breaking()
-    # test_zs()
+    test_zs()
