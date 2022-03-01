@@ -43,7 +43,7 @@ class Expr(Visited):
         return nltk.edit_distance(str(self), str(other))
 
 class Grammar:
-    def __init__(self, ops: list[Expr], consts: list[Expr]):
+    def __init__(self, ops, consts):
         self.ops = ops
         self.consts = consts
 
