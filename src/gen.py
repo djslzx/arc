@@ -50,10 +50,10 @@ def gen_shapes_mp(n_shapes, a_exprs, envs, shape_types, min_zs=0, max_zs=None, n
                                          for chunk_size in util.chunk(n_shapes, n_processes)])
     return set.union(*sets)
 
-def enum_shapes(envs, shape_types, max_zs=0):
+def enum_shapes(envs, shape_types, min_zs=0, max_zs=0):
     assert max_zs <= LIB_SIZE
     scene_gram = Grammar(ops=shape_types,
-                         consts=([Z(i) for i in range(max_zs)] +
+                         consts=([Z(i) for i in range(min_zs, max_zs)] +
                                  [Num(i) for i in range(0, 10)]))
     shapes = set()
     for shape_type in shape_types:
@@ -97,9 +97,7 @@ def canonical_ordering(scene):
 
 def gen_random_scene(shapes, envs, n_shapes):
     """
-    Generate a random sequence of shapes.
-    - dead code removal
-    - canonical ordering
+    Generate a random sequence of shapes in canonical order with dead code removal.
     """
     # TODO: transforms
     # TODO: don't sample elements of `shapes` that have previously been used
@@ -109,17 +107,17 @@ def gen_random_scene(shapes, envs, n_shapes):
         scene.append(shape)
         scene = canonical_ordering(scene) # edit ordering before checking for overlaps
         scene = rm_dead_code(scene, envs)
-    return Seq(*scene)
+    return scene
 
 def gen_tf_exs(n_exs, n_shapes, shapes, envs, save_to, verbose=True):
     """
     Generates a set of (bmp set, program) pairs.
     """
     t = time.time()
-    fname = f'{save_to}_{n_shapes}_{t}.exs'
+    fname = f'{save_to}_{n_shapes}_{t}.tf.exs'
     cleared = False
     for i in range(n_exs):
-        scene = gen_random_scene(shapes, envs, n_shapes)
+        scene = Seq(*gen_random_scene(shapes, envs, n_shapes))
         if verbose: print(f'scene generated [{n_shapes}][{i+1}/{n_exs}]: {scene}')
         bmps = [scene.eval(env) for env in envs]
         prog = scene.simplify_indices().serialize()
@@ -282,34 +280,16 @@ def test_rm_dead_code():
         out = rm_dead_code(entities, envs)
         assert out == ans, f"Failed test: in={entities}; expected {ans}, got {out}"
     print("[+] passed test_rm_dead_code")
-
-def load_shapes(fname):
-    assert False, 'unimplemented'
-
-def make_tf_exs(n_exs,  # number of total (bitmaps, program) pairs to make
-                n_envs,  # number of envs (bitmaps) per program
-                min_shapes,  # min number of shapes in each scene
-                max_shapes,  # max number of shapes in each scene
-                a_grammar,  # grammar for arithmetic exprs (components of shapes)
-                a_bound,  # bound on arithmetic exprs in each entity
-                shape_types,  # shape types allowed
-                fname,  # prefix to use for filenames
-                enum_all_shapes=False,  # whether to randomly generate shapes or enumerate all possibilities
-                label_zs=True,  # whether to label z's with indices or not (e.g. just have 'z' instead of 'z_0') TODO
-                min_zs=0,  # min number of z's to allow in each entity
-                max_zs=None,  # max number of z's to allow in each entity
-                n_processes=1):
-    print(f'Parameters: n_exs={n_exs}, n_envs={n_envs}, zs=({min_zs}, {max_zs}), ' 
-          f'shape_types={shape_types}, min_shapes={min_shapes}, max_shapes={max_shapes}, ' 
-          f'a_grammar={a_grammar}, a_bound={a_bound}')
-
-    # Generate and save shapes
-    envs = [{'z': seed_zs(), 'sprites': seed_sprites()} for _ in range(n_envs)]
-    a_exprs = [a_expr for a_expr, size in bottom_up_generator(a_bound, a_grammar, envs)]
-    n_shapes = n_exs * max_shapes
-    if enum_all_shapes:
+    
+def make_shapes(shape_types, envs, a_exprs, n_zs, scene_sizes, fname,
+                n_shapes=None, enum=False, n_processes=1):
+    min_zs, max_zs = n_zs
+    n_envs = len(envs)
+    if enum:
         print("Enumerating all shapes...")
-        shapes = enum_shapes(envs, shape_types, max_zs)
+        shapes = enum_shapes(envs, shape_types, min_zs, max_zs)
+        n_shapes = len(shapes)
+        print(f"Enumerated {n_shapes} shapes.")
     else:
         print(f"Generating {n_shapes} shapes...")
         shapes = gen_shapes_mp(n_shapes, a_exprs, envs, shape_types, min_zs, max_zs, n_processes)
@@ -317,37 +297,93 @@ def make_tf_exs(n_exs,  # number of total (bitmaps, program) pairs to make
                'shape_types': shape_types,
                'shapes': shapes,
                'zs': (min_zs, max_zs),
+               'sizes': scene_sizes,
                'n_envs': n_envs,
                'envs': envs,
-               'a_bound': a_bound,
                'a_exprs': a_exprs},
               f'{fname}.cmps',
               append=False)
+    return shapes
+
+def make_tf_exs(n_exs, n_envs, shape_types, scene_sizes, a_grammar, a_depth, fname,
+                n_zs=(0, 0), enum_all_shapes=False, label_zs=True, n_processes=1):
+    min_shapes, max_shapes = scene_sizes
+    min_zs, max_zs = n_zs
+    print(f'Parameters: n_exs={n_exs}, n_envs={n_envs}, zs=({min_zs}, {max_zs}), '
+          f'shape_types={shape_types}, min_shapes={min_shapes}, max_shapes={max_shapes}, ' 
+          f'a_grammar={a_grammar}, a_depth={a_depth}')
+
+    # Generate and save shapes
+    envs = [{'z': seed_zs(), 'sprites': seed_sprites()} for _ in range(n_envs)]
+    a_exprs = [a_expr for a_expr, size in bottom_up_generator(a_depth, a_grammar, envs)]
+    shapes = make_shapes(shape_types=shape_types, envs=envs, a_exprs=a_exprs, n_zs=n_zs, scene_sizes=scene_sizes,
+                         fname=f'{fname}.tf', n_shapes=n_exs * max_shapes, enum=enum_all_shapes, n_processes=n_processes)
 
     # Generate and save exprs w/ bmp outputs
     gen_tf_exs_mp(n_exs=n_exs, shapes=shapes, envs=envs,
                   min_shapes=min_shapes, max_shapes=max_shapes, save_to=fname)
 
-def make_discrim_exs(n_exs, n_envs, shape_src, shape_range, fname, n_processes=1):
+def make_discrim_exs(n_exs, n_envs, shape_types, scene_sizes, a_grammar, a_depth, fname,
+                     n_zs=(0, 0), enum_all_shapes=False, n_processes=1):
     """
     Generate training examples for the discriminator.
-    Examples take the form ((B1, B2), y) where y is a scalar measuring the likelihood of bitmap sets B1 and B2
-    being generated by the same function.
+    
+    Examples take the form ((B1, B2), Y) where Y.
+    Let P1 and P2 be the programs generating B1 and B2, respectively.
+    Y's components are as follows:
+     - a 0/1 value: 1 if P1 == P2, 0 otherwise
+     - a 0/1 value: 1 if P1 is a prefix of P2, 0 otherwise
+     - a scalar: if P1 is a prefix of P2, the number of lines that need to be added to P1 to get P2; negative otherwise
+     # - a 0/1 value: 1 if P1 is a subset of P2, negative otherwise
+     # - a scalar: the number of lines needed to turn P1 into P2 if P1 is a subset of P2; negative otherwise
+     # - a scalar measuring the likelihood of bitmap sets B1 and B2 being generated by the same function
     """
-    min_shapes, max_shapes = shape_range
-
-    # Load shapes
-    shapes = util.load_incremental(shape_src)['shapes']
+    min_shapes, max_shapes = scene_sizes
+    n_sizes = max_shapes - min_shapes + 1
+    assert n_exs % (2 * n_sizes) == 0, \
+        f'number of training examples should be divisible by the number of shapes in each scene times 2'
+    
+    # Make envs and arithmetic exprs
+    envs1 = [{'z': seed_zs(), 'sprites': seed_sprites()} for _ in range(n_envs)]
+    envs2 = [{'z': seed_zs(), 'sprites': seed_sprites()} for _ in range(n_envs)]
+    a_exprs = [a_expr for a_expr, size in bottom_up_generator(a_depth, a_grammar, envs1 + envs2)]
+    shapes = make_shapes(shape_types=shape_types, envs=envs1+envs2, a_exprs=a_exprs, n_zs=n_zs, scene_sizes=scene_sizes,
+                         fname=f'{fname}.discrim', n_shapes=n_exs * max_shapes, enum=enum_all_shapes, n_processes=n_processes)
 
     # Generate pos/neg examples
     # - pos: use two different env sets on the same program
     # - neg: use the same env set on two different programs
-    envs1 = [{'z': seed_zs(), 'sprites': seed_sprites()} for _ in range(n_envs)]
-    envs2 = [{'z': seed_zs(), 'sprites': seed_sprites()} for _ in range(n_envs)]
     
-    # generate programs by picking from the shapes set
-    # Generate and save exprs w/ bmp outputs
-    pass
+    fname = f'{fname}.discrim.exs'
+    shapes = list(shapes)
+    scenes = [] # store lists of objs
+    for size in range(min_shapes, max_shapes+1):
+        for i in range(n_exs//(2 * n_sizes)):
+            scenes.append(gen_random_scene(shapes, envs1 + envs2, size))
+    shuffle(scenes)
+    
+    # positive examples
+    cleared = False
+    for scene in scenes:
+        prog = Seq(*scene)
+        bmps1, bmps2 = prog.eval(envs1), prog.eval(envs2)
+        util.save(((bmps1, bmps2), [1, 1, 0]), fname, append=cleared, verbose=not cleared)
+        cleared = True
+    # negative examples
+    for scene in scenes[:len(scenes)//2]:
+        prog1 = Seq(*scene)
+        for i in range(1, len(scene)):
+            # prefix program
+            prog2 = Seq(*scene[:i])
+            bmps1, bmps2 = prog1.eval(envs1), prog2.eval(envs2)
+            util.save(((bmps1, bmps2), [0, 1, len(scene) - i]), fname, append=cleared, verbose=not cleared)
+            
+            # completely different program
+            scene2 = choice(scenes)
+            if scene2 == scene or all(obj in scene for obj in scene2): continue
+            prog2 = Seq(*scene2)
+            bmps1, bmps2 = prog1.eval(envs1), prog2.eval(envs2)
+            util.save(((bmps1, bmps2), [0, 0, -1]), fname, append=cleared, verbose=not cleared)
 
 def viz_exs(fname):
     for bmps, tokens in util.load_incremental(fname):
@@ -386,54 +422,87 @@ def compare(f1, f2):
             abs_overlap += min(d1[e], d2[e])
     return key_overlap, abs_overlap, n_keys, val_capacity
 
-def shape_code(shape_types):
-    return f"{'p' if Point in shape_types else ''}" \
-           f"{'l' if Line in shape_types else ''}" \
-           f"{'r' if Rect in shape_types else ''}"
 
 def run_cfgs(cfgs):
+    def shape_code(shape_types):
+        return f"{'p' if Point in shape_types else ''}" \
+               f"{'l' if Line in shape_types else ''}" \
+               f"{'r' if Rect in shape_types else ''}"
+
+    def n_code(sizes):
+        a, b = min(sizes), max(sizes)
+        if a == b:
+            return str(a)
+        else:
+            return f'{a}~{b}'
+    
     for cfg in cfgs:
-        sc = shape_code(cfg['shape_types'])
-        code = f"{cfg['n_exs']}-{cfg['min_shapes']}~{cfg['max_shapes']}{sc}{cfg['max_zs']}z{cfg['n_envs']}e"
+        sh_code = shape_code(cfg['shape_types'])
+        sz_code = n_code(cfg['scene_sizes'])
+        z_code = n_code(cfg['n_zs'])
+        code = f"{cfg['n_exs']}-{sz_code}{sh_code}{z_code}z{cfg['n_envs']}e"
         print(f'code: {code}')
 
-        for mode in ['train', 'test']:
-            make_tf_exs(n_exs=cfg['n_exs'],
-                        shape_types=cfg['shape_types'],
-                        min_shapes=cfg['min_shapes'],
-                        max_shapes=cfg['max_shapes'],
-                        n_envs=cfg['n_envs'],
-                        max_zs=cfg['max_zs'],
-                        min_zs=cfg['min_zs'],
-                        a_bound=cfg['a_bound'],
-                        a_grammar=cfg['a_grammar'],
-                        fname=f'../data/{code}-{mode}',
-                        enum_all_shapes=cfg['enum_all_shapes'],
-                        n_processes=cfg['n_processes'],
-                        label_zs=cfg['label_zs'])
-
+        if cfg['type'] == 'generator':
+            for mode in ['train', 'test']:
+                make_tf_exs(n_exs=cfg['n_exs'],
+                            n_envs=cfg['n_envs'],
+                            shape_types=cfg['shape_types'],
+                            scene_sizes=cfg['scene_sizes'],
+                            n_zs=cfg['n_zs'],
+                            a_grammar=cfg['a_grammar'],
+                            a_depth=cfg['a_depth'],
+                            fname=f'../data/{code}-{mode}',
+                            enum_all_shapes=cfg['enum_all_shapes'],
+                            n_processes=cfg['n_processes'],
+                            label_zs=cfg['label_zs'])
+        elif cfg['type'] == 'discriminator':
+            for mode in ['train', 'test']:
+                make_discrim_exs(n_exs=cfg['n_exs'],
+                                 n_envs=cfg['n_envs'],
+                                 shape_types=cfg['shape_types'],
+                                 scene_sizes=cfg['scene_sizes'],
+                                 n_zs=cfg['n_zs'],
+                                 a_grammar=cfg['a_grammar'],
+                                 a_depth=cfg['a_depth'],
+                                 fname=f'../data/{code}-{mode}',
+                                 enum_all_shapes=cfg['enum_all_shapes'],
+                                 n_processes=cfg['n_processes'])
+        else:
+            assert False, f"Expected configuration type to be discrim or gen, but found {cfg['type']}."
 
 if __name__ == '__main__':
     # test_rm_dead_code()
     # test_canonical_ordering()
-    a_grammar = Grammar(ops=[Plus, Minus, Times],
-                        consts=([Z(i) for i in range(LIB_SIZE)] +
-                                [Num(i) for i in range(0, 10)]))
-    print(a_grammar.ops, a_grammar.consts)
+    g = Grammar(ops=[Plus, Minus, Times],
+                consts=([Z(i) for i in range(LIB_SIZE)] + [Num(i) for i in range(0, 10)]))
+    print(g.ops, g.consts)
     cfgs = [
+        # {
+        #     'type': 'generator',
+        #     'n_exs': 10,
+        #     'shape_types': [Rect],
+        #     'enum_all_shapes': False,
+        #     'scene_sizes': (1, 5),
+        #     'n_zs': (0, 0),
+        #     'n_envs': 1,
+        #     'label_zs': True,
+        #     'a_grammar': g,
+        #     'a_depth': 1,
+        #     'n_processes': 32,
+        # },
         {
-            'n_exs': 1_000_000,
+            'type': 'discriminator',
+            'n_exs': 10,
             'shape_types': [Rect],
-            'enum_all_shapes': True,
-            'min_shapes': 1,
-            'max_shapes': 5,
-            'max_zs': 1,
-            'min_zs': 0,
-            'a_bound': 1,
-            'n_envs': 5,
-            'label_zs': True,
+            'enum_all_shapes': False,
+            'scene_sizes': (1, 5),
+            'n_zs': (0, 0),
+            'n_envs': 1,
+            'a_grammar': g,
+            'a_depth': 1,
             'n_processes': 32,
-            'a_grammar': a_grammar,
         },
     ]
     run_cfgs(cfgs)
+    # list_exs('../data/10-1~5r0z1e-test.discrim.exs')

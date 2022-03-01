@@ -1,21 +1,21 @@
 # TODO
 - multithreaded example generation
-  - [ ] chain multiple generators together (write into files whose names are randomly generated)
-  - [ ] write to tar files, then merge the tar files
+  - [x] chain multiple generators together (write into files whose names are randomly generated)
   - [x] load examples from multiple files (chain together into a single iterable)
 - training larger models on more data
-  - [ ] generate 1m examples with no randomness (no z's)
+  - [x] generate 1m examples with no randomness (no z's)
   - [x] start training large model on 100k, 1m examplees
 - housekeeping/optimization
-  - [ ] change rect representation to two corners
+  - [x] change rect representation to two corners
   - [ ] adjust tensorboard writer global step: batch no, not epoch
   - [x] compute per-seq loss instead of per-tok loss
 - overfitting
-  - [ ] try reducing model size to 512 or 1024
+  - [x] try reducing model size to 512 or 1024
   - [ ] look into regularization methods
   - [ ] try a different architecture (RNN: GRU instead of LSTM)
   - 
 - discriminator
-  - [ ] generate training data for discriminator
-    - sets of bitmaps: ((B_1, B_2), [01])
-    - class 0 if bitmaps drawn from different programs; class 1 if bitmaps drawn from the same program 
+  - [x] generate training data for discriminator
+    - sets of bitmaps: ((B_1, B_2), Y)
+- correctness
+  - [ ] check if counting z's counts unique z's or the number of z expressions

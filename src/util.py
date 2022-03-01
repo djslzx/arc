@@ -136,16 +136,24 @@ def load_incremental(fname, verbose=True):
             except EOFError:
                 break
                 
-def load_multi_incremental(prefix, suffix=''):
+def load_multi_incremental(prefix, suffix, verbose=False):
     """Iterate over multiple files with the prefix"""
     files = glob(f'{prefix}*{suffix}')
-    for file in files:
-        with open(file, 'rb') as f:
-            while True:
-                try:
-                    yield pickle.load(f)
-                except EOFError:
-                    break
+    if verbose:
+        print("Globbed files: [")
+        for file in files:
+            print(f"  {file}")
+        print("]")
+    
+    def gen():
+        for file in files:
+            with open(file, 'rb') as f:
+                while True:
+                    try:
+                        yield pickle.load(f)
+                    except EOFError:
+                        break
+    return gen()
 
 
 if __name__ == '__main__':

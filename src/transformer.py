@@ -191,7 +191,6 @@ class ArcTransformer(nn.Module):
             P_expected = F.one_hot(P[:, 1:], num_classes=self.n_tokens).float().transpose(0, 1).to(device)
             out = self(B, P_input)
 
-            # pdb.set_trace()
             loss = ArcTransformer.word_loss(P_expected, out)
             # loss = ArcTransformer.token_loss(P_expected, out)
             optimizer.zero_grad()
@@ -319,8 +318,9 @@ class ArcTransformer(nn.Module):
             epoch_end_t = time.time()
             vloss = self.validate_epoch(vloader)
 
-            print(f'[{epoch}/{epochs}] training loss: {tloss:.3f}, validation loss: {vloss:.3f};',
-                  f'epoch took {epoch_end_t - epoch_start_t:.3f}s,', 
+            print(f'[{epoch}/{epochs}] training loss: {tloss:.3f}, validation loss: {vloss:.3f}; '
+                  f'epoch took {epoch_end_t - epoch_start_t:.3f}s '
+                  f'on {len(tloader)} batch{"es" if len(tloader) > 1 else ""} of size {self.batch_size}, '
                   f'{epoch_end_t -start_t:.3f}s total')
             writer.add_scalar('training loss', tloss, epoch)
             writer.add_scalar('validation loss', vloss, epoch)
@@ -470,20 +470,24 @@ if __name__ == '__main__':
                                batch_size=a.batch_size).to(device)
 
         def tdata():
-            if a.training_data:         return util.load_incremental(a.training_data)
-            elif a.training_data_multi: return util.load_multi_incremental(prefix=a.training_data_multi,
-                                                                           suffix='.exs')
-            else:                       raise FileNotFoundError('Training data file not found')
+            if a.training_data:
+                return util.load_incremental(a.training_data)
+            elif a.training_data_multi:
+                return util.load_multi_incremental(prefix=a.training_data_multi, suffix='.exs')
+            else:
+                raise FileNotFoundError('Training data file not found')
         
         def vdata():
-            if a.validation_data:         return util.load_incremental(a.validation_data)
-            elif a.validation_data_multi: return util.load_multi_incremental(prefix=a.validation_data_multi,
-                                                                             suffix='.exs')
-            else:                         raise FileNotFoundError('Validation data file not found')
+            if a.validation_data:
+                return util.load_incremental(a.validation_data)
+            elif a.validation_data_multi:
+                return util.load_multi_incremental(prefix=a.validation_data_multi, suffix='.exs')
+            else:
+                raise FileNotFoundError('Validation data file not found')
 
         tloader, vloader = (model.make_dataloader(tdata, blind=a.blind),
                             model.make_dataloader(vdata, blind=a.blind))
-        model.learn(tloader, vloader, 
+        model.learn(tloader, vloader,
                     epochs=a.epochs, 
                     learning_rate=a.learning_rate,
                     threshold=a.threshold, 
