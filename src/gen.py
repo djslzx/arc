@@ -5,7 +5,9 @@ Make programs to use as training data
 import pdb
 from math import floor, sqrt
 from random import choice, randint, shuffle
+import time
 import multiprocessing as mp
+import itertools as it
 
 from viz import viz_grid
 from grammar import *
@@ -89,7 +91,7 @@ def canonical_ordering(scene):
         elif isinstance(e, Line):
             return 1, e.x1, e.y1, e.x2, e.y2
         elif isinstance(e, Rect):
-            return 2, e.x1, e.y1, e.x2, e.y2
+            return 2, e.x_min, e.y_min, e.x_max, e.y_max
 
     return sorted(scene, key=destructure)
 
@@ -109,12 +111,12 @@ def gen_random_scene(shapes, envs, n_shapes):
         scene = rm_dead_code(scene, envs)
     return Seq(*scene)
 
-def gen_exs(n_exs, n_shapes, shapes, envs, save_to, verbose=True):
+def gen_tf_exs(n_exs, n_shapes, shapes, envs, save_to, verbose=True):
     """
-    Generates a set of (bmp set, program) pairs from an expression generator on n entities.
-    Writes the set in a stream to the file `{fname}_{n_shapes}.exs`
+    Generates a set of (bmp set, program) pairs.
     """
-    fname = f'{save_to}_{n_shapes}.exs'
+    t = time.time()
+    fname = f'{save_to}_{n_shapes}_{t}.exs'
     cleared = False
     for i in range(n_exs):
         scene = gen_random_scene(shapes, envs, n_shapes)
@@ -124,13 +126,15 @@ def gen_exs(n_exs, n_shapes, shapes, envs, save_to, verbose=True):
         util.save((bmps, prog), fname=fname, append=cleared, verbose=False)
         cleared = True
 
-def gen_exs_mp(n_exs, shapes, envs, min_shapes, max_shapes, save_to):
+def gen_tf_exs_mp(n_exs, shapes, envs, min_shapes, max_shapes, save_to, n_processes=1):
     n_sizes = max_shapes - min_shapes + 1
     shapes = list(shapes)
-    with mp.Pool(n_sizes) as pool:
-        pool.starmap(gen_exs, [(n, n_shapes, shapes, envs, save_to)
-                               for n, n_shapes in zip(util.chunk(n_exs, n_sizes),
-                                                      range(min_shapes, max_shapes+1))])
+    with mp.Pool(n_processes * n_sizes) as pool:
+        pool.starmap(gen_tf_exs, [(n_scenes, n_shapes, shapes, envs, save_to)
+                                  for n_scenes, n_shapes in
+                                  zip(util.chunk(n_exs, n_sizes * n_processes),
+                                      it.chain.from_iterable([k] * n_processes
+                                                             for k in range(min_shapes, max_shapes+1)))])
 
 def rand_sprite(envs, a_exprs, i=-1, color=-1):
     i = i if 0 <= i < LIB_SIZE else randrange(1, LIB_SIZE)
@@ -304,8 +308,10 @@ def make_tf_exs(n_exs,  # number of total (bitmaps, program) pairs to make
     a_exprs = [a_expr for a_expr, size in bottom_up_generator(a_bound, a_grammar, envs)]
     n_shapes = n_exs * max_shapes
     if enum_all_shapes:
+        print("Enumerating all shapes...")
         shapes = enum_shapes(envs, shape_types, max_zs)
     else:
+        print(f"Generating {n_shapes} shapes...")
         shapes = gen_shapes_mp(n_shapes, a_exprs, envs, shape_types, min_zs, max_zs, n_processes)
     util.save({'n_shapes': n_shapes,
                'shape_types': shape_types,
@@ -319,8 +325,8 @@ def make_tf_exs(n_exs,  # number of total (bitmaps, program) pairs to make
               append=False)
 
     # Generate and save exprs w/ bmp outputs
-    gen_exs_mp(n_exs=n_exs, shapes=shapes, envs=envs,
-               min_shapes=min_shapes, max_shapes=max_shapes, save_to=fname)
+    gen_tf_exs_mp(n_exs=n_exs, shapes=shapes, envs=envs,
+                  min_shapes=min_shapes, max_shapes=max_shapes, save_to=fname)
 
 def make_discrim_exs(n_exs, n_envs, shape_src, shape_range, fname, n_processes=1):
     """
@@ -340,15 +346,8 @@ def make_discrim_exs(n_exs, n_envs, shape_src, shape_range, fname, n_processes=1
     envs2 = [{'z': seed_zs(), 'sprites': seed_sprites()} for _ in range(n_envs)]
     
     # generate programs by picking from the shapes set
-    
-
-
     # Generate and save exprs w/ bmp outputs
-    gen_exs_mp(n_exs=n_exs, shapes=shapes, envs=envs,
-               min_shapes=min_shapes, max_shapes=max_shapes, save_to=fname)
-
     pass
-
 
 def viz_exs(fname):
     for bmps, tokens in util.load_incremental(fname):
@@ -423,9 +422,9 @@ if __name__ == '__main__':
     print(a_grammar.ops, a_grammar.consts)
     cfgs = [
         {
-            'n_exs': 5,
+            'n_exs': 1_000_000,
             'shape_types': [Rect],
-            'enum_all_shapes': False,
+            'enum_all_shapes': True,
             'min_shapes': 1,
             'max_shapes': 5,
             'max_zs': 1,
