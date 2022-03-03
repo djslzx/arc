@@ -149,10 +149,10 @@ class ArcTransformer(nn.Module):
             B.append(bmps)
 
             # process progs: turn into indices and add padding
-            p = self.tokens_to_indices(p)
+            indices = self.tokens_to_indices(p)
             # add 2 to compensate for START/END tokens
-            p = F.pad(p, pad=(0, max_p_len + 2 - len(p)), value=self.pad_token)
-            P.append(p)
+            padded_indices = F.pad(indices, pad=(0, max_p_len + 2 - len(indices)), value=self.pad_token)
+            P.append(padded_indices)
 
         B = T.stack(B)
         P = T.stack(P)
@@ -381,15 +381,12 @@ class ArcTransformer(nn.Module):
             prompt = T.cat((prompt, next_index), dim=1)
         return prompt
 
-def test_sampling(checkpoint_loc, train_data_loc, N=9, max_length=100):
-    # TODO: add more args / generalize
-    model = ArcTransformer(N=N, H=B_H, W=B_W, lexicon=lexicon, batch_size=16).to(device)
-    tloader = model.make_dataloader(train_data_loc),
+def test_sampling(model, checkpoint_loc, dataloader, max_p_len):
     checkpoint = T.load(checkpoint_loc)
     model.load_state_dict(checkpoint['model_state_dict'])
 
-    for B, P in tloader:
-        samples = model.sample_programs(B, P, max_length)
+    for B, P in dataloader:
+        samples = model.sample_programs(B, P, max_length=max_p_len)
         expected_tokens = samples['expected tokens']
         expected_exprs = samples['expected exprs']
         out_tokens = samples['out tokens']
@@ -397,8 +394,7 @@ def test_sampling(checkpoint_loc, train_data_loc, N=9, max_length=100):
 
         n_matches = 0
         n_compares = len(P)
-        for x_toks, x_expr, y_toks, y_expr in zip(expected_tokens, expected_exprs, 
-                                                  out_tokens, out_exprs):
+        for x_toks, x_expr, y_toks, y_expr in zip(expected_tokens, expected_exprs, out_tokens, out_exprs):
             print(f'expected tokens : {x_toks}')
             print(f'expected exprs: {x_expr}')
             print('-----')
@@ -422,18 +418,16 @@ def test_sampling(checkpoint_loc, train_data_loc, N=9, max_length=100):
 if __name__ == '__main__':
     # TODO: make N flexible - adapt to datasets with variable-size bitmap example sets
 
-    p = ap.ArgumentParser(description='Sample or train a transformer')
+    p = ap.ArgumentParser(description='Train or sample from a model')
+    p.add_argument('name', type=str, help='name of model')
+    p.add_argument('n', type=int, help='value of N for transformer')
     p.add_argument('--sample', action='store_true', help='run in sample mode')
     p.add_argument('--train', action='store_true', help='run in train mode')
     p.add_argument('--blind', action='store_true', help='run w/o looking at bmp input')
-    p.add_argument('--name', type=str, help='name of transformer')
-    p.add_argument('--training-data', type=str)
-    p.add_argument('--training-data-multi', type=str)
-    p.add_argument('--validation-data', type=str)
-    p.add_argument('--validation-data-multi', type=str)
-    p.add_argument('--test-data', type=str)
+    p.add_argument('--training-data', type=str, help='path of training data')
+    p.add_argument('--validation-data', type=str, help='path of validation data')
+    p.add_argument('--test-data', type=str, help='path of test data')
     p.add_argument('-c', '--checkpoint', type=str, help='path of model checkpoint')
-    p.add_argument('-n', type=int, help='value of N for transformer')
     p.add_argument('-d', '--model-dim', type=int, default=512, help='model dimension')
     p.add_argument('-l', '--learning-rate', type=float, default=10 ** -4, help='learning rate')
     p.add_argument('-e', '--epochs', type=int, default=1_000_000, help='num epochs to train')
@@ -443,55 +437,39 @@ if __name__ == '__main__':
     p.add_argument('--log-freq', type=int, default=1, help='num hours between logging model/optimizer params')
 
     a = p.parse_args()
-    if a.sample:
-        assert a.checkpoint is not None and a.test_data is not None, \
-            "Usage: transformer.py --sample -c CHECKPOINT --test-data TEST_DATA ... "
-        print(f'Using {dev_name}')
-        test_sampling(a.checkpoint, a.training_data, a.validation_data)
-    elif a.train:
-        assert (a.training_data or a.training_data_multi) is not None and \
-               (a.validation_data or a.validation_data_multi) is not None and \
-               a.n is not None and a.name is not None, \
-            "Usage: transformer.py --train --name NAME --d DATA -n N ..."
 
-        print(f'Using {dev_name}')
-        lexicon = ([i for i in range(0, 10)] + 
-                   [f'z_{i}' for i in range(LIB_SIZE)] + 
+    def wrap_dataloader(loc):
+        def suffix(s):
+            return '' if s.endswith('.exs') else '.exs'
+        return lambda: util.load_multi_incremental(prefix=loc, suffix=suffix(loc))
+
+    if a.sample or a.train:
+        lexicon = ([i for i in range(0, 10)] +
+                   [f'z_{i}' for i in range(LIB_SIZE)] +
                    [f'S_{i}' for i in range(LIB_SIZE)] +
                    ['~', '+', '-', '*', '<', '&', '?',
-                    'P', 'L', 'R', 
-                    'H', 'V', 'T', '#', 'o', '@', '!', '{', '}',])
+                    'P', 'L', 'R',
+                    'H', 'V', 'T', '#', 'o', '@', '!', '{', '}', ])
         print(f'lexicon: {lexicon}')
-
-        model = ArcTransformer(name=a.name, 
-                               lexicon=lexicon, 
-                               N=a.n, H=B_H, W=B_W, 
+        print(f'Using {dev_name}')
+        model = ArcTransformer(name=a.name,
+                               lexicon=lexicon,
+                               N=a.n, H=B_H, W=B_W,
                                d_model=a.model_dim,
                                batch_size=a.batch_size).to(device)
-
-        def tdata():
-            if a.training_data:
-                return util.load_incremental(a.training_data)
-            elif a.training_data_multi:
-                return util.load_multi_incremental(prefix=a.training_data_multi, suffix='.exs')
-            else:
-                raise FileNotFoundError('Training data file not found')
         
-        def vdata():
-            if a.validation_data:
-                return util.load_incremental(a.validation_data)
-            elif a.validation_data_multi:
-                return util.load_multi_incremental(prefix=a.validation_data_multi, suffix='.exs')
-            else:
-                raise FileNotFoundError('Validation data file not found')
-
-        tloader, vloader = (model.make_dataloader(tdata, blind=a.blind),
-                            model.make_dataloader(vdata, blind=a.blind))
-        model.learn(tloader, vloader,
-                    epochs=a.epochs, 
-                    learning_rate=a.learning_rate,
-                    threshold=a.threshold, 
-                    sample_freq=a.sample_freq,
-                    log_freq=a.log_freq)
+        if a.sample and a.checkpoint and a.test_data:
+            dataloader = model.make_dataloader(wrap_dataloader(a.test_data), blind=a.blind)
+            test_sampling(model, checkpoint_loc=a.checkpoint, dataloader=dataloader, max_p_len=50)
+        
+        elif a.train and (a.training_data or a.training_data_multi) and (a.validation_data or a.validation_data_multi):
+            tloader = model.make_dataloader(wrap_dataloader(a.training_data), blind=a.blind)
+            vloader = model.make_dataloader(wrap_dataloader(a.validation_data), blind=a.blind)
+            model.learn(tloader, vloader,
+                        epochs=a.epochs,
+                        learning_rate=a.learning_rate,
+                        threshold=a.threshold,
+                        sample_freq=a.sample_freq,
+                        log_freq=a.log_freq)
     else:
         p.print_help()
