@@ -1,4 +1,7 @@
 import pdb
+import random
+import itertools
+
 import util
 import nltk
 import torch as T
@@ -29,6 +32,37 @@ class Expr(Visited):
     def eval(self, env={}): return self.accept(Eval(env))
     def zs(self): return self.accept(Zs())
     def sprites(self): return self.accept(Sprites())
+    def count_leaves(self):
+        def leaf_f(type, *args): return 1
+        def node_f(type, *children): return sum(children)
+        return self.accept(Map(node_f, leaf_f))
+    def leaves(self):
+        def leaf_f(type, *args):
+            return [[type(*args)]]
+        def node_f(type, *children):
+            return [[type] + path
+                    for child in children
+                    for path in child]
+        return self.accept(Map(node_f, leaf_f))
+    def perturb_leaves(self, p, range=(0, 2)):
+        n_perturbed = 0
+        # range = self.range(envs=[])
+        def perturb(expr):
+            nonlocal n_perturbed
+            if random.random() < p:
+                n_perturbed += 1
+                return expr.accept(Perturb(range))
+            else:
+                return expr
+        def leaf_f(type, *args):
+            return perturb(type(*args))
+        def node_f(type, *children):
+            try:
+                return perturb(type(*children))
+            except UnimplementedError:
+                return type(*children)
+        return self.accept(Map(node_f, leaf_f))
+        
     def simplify_indices(self):
         zs = self.zs()
         sprites = self.sprites()
@@ -250,9 +284,9 @@ class Compose(Expr):
         self.g = g
     def accept(self, v): return v.visit_Compose(self.f, self.g)
 
+class UnimplementedError(Exception): pass
 class Visitor:
-
-    def fail(self, s): assert False, f"Visitor subclass `{type(self).__name__}` should implement `visit_{s}`"
+    def fail(self, s): raise UnimplementedError(f"`visit_{s}` unimplemented for `{type(self).__name__}`")
     def visit_Nil(self): self.fail('Nil')
     def visit_Num(self, n): self.fail('Num')
     def visit_Z(self, i): self.fail('Z')
@@ -265,7 +299,7 @@ class Visitor:
     def visit_If(self, b, x, y): self.fail('If')
     def visit_Point(self, x, y, color): self.fail('Point')
     def visit_Line(self, x1, y1, x2, y2, color): self.fail('Line')
-    def visit_Rect(self, x, y, w, h, color): self.fail('Rect')
+    def visit_Rect(self, x_min, y_min, x_max, y_max, color): self.fail('Rect')
     def visit_Sprite(self, i, x, y): self.fail('Sprite')
     def visit_Join(self, bmp1, bmp2): self.fail('Join')
     def visit_Seq(self, bmps): self.fail('Seq')
@@ -765,6 +799,55 @@ class WellFormed(Visitor):
     def visit_Repeat(self, f, n):
         return f.out_type == 'transform' and n.out_type == 'int' and f.accept(self) and n.accept(self)
 
+class Perturb(Visitor):
+    def __init__(self, range): self.range = range
+    def visit_Nil(self): return Not(Nil())
+    def visit_Num(self, n): return Num(n + random.choice([-1, 1]) * random.randint(*self.range))
+    def visit_Z(self, i): return Z(random.randint(0, LIB_SIZE - 1))
+    def visit_HFlip(self): return VFlip()
+    def visit_VFlip(self): return HFlip()
+    def visit_Plus(self, x, y):
+        return Minus(x, y) if random.randint(0, 1) > 0 else Times(x, y)
+    def visit_Minus(self, x, y):
+        return Times(x, y) if random.randint(0, 1) > 0 else Plus(x, y) 
+    def visit_Times(self, x, y):
+        return Plus(x, y) if random.randint(0, 1) > 0 else Minus(x, y)
+
+class Map(Visitor):
+    def __init__(self, node_f, leaf_f):
+        self.node_f = node_f
+        self.leaf_f = leaf_f
+    def visit_Nil(self): return self.leaf_f(Nil)
+    def visit_Num(self, n): return self.leaf_f(Num, n)
+    def visit_Z(self, i): return self.leaf_f(Z, i)
+    def visit_Not(self, b): return self.node_f(Not, b.accept(self))
+    def visit_Plus(self, x, y): return self.node_f(Plus, x.accept(self), y.accept(self))
+    def visit_Minus(self, x, y): return self.node_f(Minus, x.accept(self), y.accept(self))
+    def visit_Times(self, x, y): return self.node_f(Times, x.accept(self), y.accept(self))
+    def visit_Lt(self, x, y): return self.node_f(Lt, x.accept(self), y.accept(self))
+    def visit_And(self, x, y): return self.node_f(And, x.accept(self), y.accept(self))
+    def visit_If(self, b, x, y): return self.node_f(If, x.accept(self), y.accept(self))
+    def visit_Point(self, x, y, color): return self.node_f(Point, x.accept(self), y.accept(self), color.accept(self))
+    def visit_Line(self, x1, y1, x2, y2, color): return self.node_f(Line, 
+                                                                    x1.accept(self), y1.accept(self), 
+                                                                    x2.accept(self), y2.accept(self), 
+                                                                    color.accept(self))
+    def visit_Rect(self, x_min, y_min, x_max, y_max, color): return self.node_f(Rect,
+                                                                                x_min.accept(self), y_min.accept(self),
+                                                                                x_max.accept(self), y_max.accept(self),
+                                                                                color.accept(self))
+    def visit_Sprite(self, i, x, y): return self.node_f(Sprite, i, x.accept(self), y.accept(self))
+    def visit_Join(self, bmp1, bmp2): return self.node_f(Join, bmp1.accept(self), bmp2.accept(self))
+    def visit_Seq(self, bmps): return self.node_f(Seq, *[bmp.accept(self) for bmp in bmps])
+    # def visit_Intersect(self, bmp): self.fail('Intersect')
+    def visit_HFlip(self): return self.leaf_f(HFlip)
+    def visit_VFlip(self): return self.leaf_f(VFlip)
+    def visit_Translate(self, dx, dy): return self.node_f(Translate, dx.accept(self), dy.accept(self))
+    def visit_Recolor(self, c): return self.node_f(Recolor, c.accept(self))
+    def visit_Compose(self, f, g): return self.node_f(Compose, f.accept(self), g.accept(self))
+    def visit_Apply(self, f, bmp): return self.node_f(Apply, f.accept(self), bmp.accept(self))
+    def visit_Repeat(self, f, n): return self.node_f(Repeat, f.accept(self), n.accept(self))
+
 class Range(Visitor):
     def __init__(self, envs): self.envs = envs
     def visit_Num(self, n):
@@ -785,6 +868,10 @@ class Range(Visitor):
         y_min, y_max = y.accept(self)
         products = [x * y for x in [x_min, x_max] for y in [y_min, y_max]]
         return min(products), max(products)
+    def visit_Rect(self, x_min, y_min, x_max, y_max, color):
+        vals = list(itertools.chain.from_iterable(v.accept(self) for v in [x_min, y_min, x_max, y_max, color]))
+        print(vals)
+        return min(vals), max(vals)
 
 def test_eval():
     tests = [
@@ -1053,7 +1140,6 @@ def test_eval_bitmap():
             f" out=\n{out}"
     print(" [+] passed test_eval_bitmap")
 
-
 def test_sprite():
     tests = [
         ([["2___",
@@ -1293,15 +1379,51 @@ def test_range():
         assert out == (lo, hi), f"test_range failed: in={expr}, expected={(lo, hi)}, actual={out}"
     print(" [+] passed test_range")
 
+def test_leaves():
+    cases = [
+        (Num(0), [[Num(0)]]),
+        (Plus(Num(0), Num(1)), [[Plus, Num(0)], [Plus, Num(1)]]),
+        (Times(Num(1), Num(1)), [[Times, Num(1)], [Times, Num(1)]]),
+        (Plus(Times(Num(3), Num(2)),
+              Minus(Num(3), Num(1))),
+         [[Plus, Times, Num(3)],
+          [Plus, Times, Num(2)],
+          [Plus, Minus, Num(3)],
+          [Plus, Minus, Num(1)]]),
+    ]
+    for expr, ans in cases:
+        leaves = expr.leaves()
+        n_leaves = expr.count_leaves()
+        # print(expr, out)
+        assert n_leaves == len(ans), f"count_leaves failed: in={expr}, expected={len(ans)}, actual={n_leaves}"
+        assert leaves == ans, f"leaves failed: in={expr}, expected={ans}, actual={leaves}"
+    print(" [+] passed test_leaves")
+
+def test_perturb_leaves():
+    cases = [
+        Num(0),
+        Plus(Num(0), Num(1)),
+        Times(Num(1), Num(1)),
+        Plus(Times(Num(3), Num(2)), Minus(Num(3), Num(1))),
+        Rect(Num(0), Num(1), Num(3), Num(3)),
+    ]
+    for expr in cases:
+        size = expr.count_leaves()
+        out = expr.perturb_leaves(1)
+        print(expr, out)
+        # assert out != expr, f"perturb_leaves failed: in={expr}, out={out}"
+    print(" [+] passed test_perturb_leaves")
 
 if __name__ == '__main__':
-    test_eval()
-    test_eval_bitmap()
-    test_eval_color()
-    test_sprite()
-    test_simplify_indices()
-    test_range()
-    test_serialize()
-    test_well_formed()
-    test_deserialize_breaking()
-    test_zs()
+    # test_eval()
+    # test_eval_bitmap()
+    # test_eval_color()
+    # test_sprite()
+    # test_simplify_indices()
+    # test_range()
+    # test_serialize()
+    # test_well_formed()
+    # test_deserialize_breaking()
+    # test_zs()
+    test_leaves()
+    test_perturb_leaves()
