@@ -226,7 +226,7 @@ class ArcTransformer(nn.Module):
 
         def well_formed(expr):
             try:
-                if expr is not None:
+                if expr is not None:  # expr is None when parsing incomplete
                     return True
             except: pass        # handle weird exceptions
             return False
@@ -279,26 +279,31 @@ class ArcTransformer(nn.Module):
                 break
         return tokens[start:end]
 
-    def sample_programs(self, B, P, max_length):
-        assert len(B) > 0
-        assert len(P) > 0
-
-        expected_tokens = [self.indices_to_tokens(p) for p in P]
-        expected_exprs = [deserialize(ArcTransformer.strip(toks)) for toks in expected_tokens]
+    def sample_tokens(self, B, P, max_length):
+        assert len(B) > 0 and len(P) > 0, f'len(B)={len(B)}, len(P)={len(P)}'
+        expected_tok_vecs = [self.indices_to_tokens(p) for p in P]
         out = self.sample(B, max_length)
-        out_tokens = [self.indices_to_tokens(o) for o in out]
-        out_exprs = []
-        for toks in out_tokens:
-            try:
-                stripped = ArcTransformer.strip(toks)
-                d = deserialize(stripped)
-                out_exprs.append(d)
-            except:
-                out_exprs.append(None)
+        out_tok_vecs = [self.indices_to_tokens(o) for o in out]
+        return expected_tok_vecs, out_tok_vecs
+    
+    def sample_programs(self, B, P, max_length):
+        assert len(B) > 0 and len(P) > 0, f'len(B)={len(B)}, len(P)={len(P)}'
+
+        def tok_vecs_to_exprs(tok_vecs):
+            for tok_vec in tok_vecs:
+                try:
+                    yield deserialize(ArcTransformer.strip(tok_vec))
+                except:
+                    yield None
+
+        expected_tok_vecs, out_tok_vecs = self.sample_tokens(B, P, max_length)
+        expected_exprs = list(tok_vecs_to_exprs(expected_tok_vecs))
+        out_exprs = list(tok_vecs_to_exprs(out_tok_vecs))
+        assert(len(out_exprs) == len(expected_exprs))
         return {
-            'expected tokens': expected_tokens,
+            'expected tokens': expected_tok_vecs,
             'expected exprs':  expected_exprs,
-            'out tokens':      out_tokens,
+            'out tokens':      out_tok_vecs,
             'out exprs':       out_exprs,
         }
 
@@ -414,6 +419,12 @@ def test_sampling(model, checkpoint_loc, dataloader, max_p_len):
 
         print(f'matches: {n_matches}/{n_compares} [{n_matches/n_compares * 100}%]')
 
+def recover_model(checkpoint, name, N, H, W, d_model, batch_size, lexicon=LEXICON):
+    model = ArcTransformer(name=name, lexicon=lexicon, N=N, H=H, W=W, d_model=d_model, batch_size=batch_size).to(device)
+    checkpoint = T.load(checkpoint)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    return model
+
 
 if __name__ == '__main__':
     # TODO: make N flexible - adapt to datasets with variable-size bitmap example sets
@@ -438,11 +449,6 @@ if __name__ == '__main__':
 
     a = p.parse_args()
 
-    def wrap_dataloader(loc):
-        def suffix(s):
-            return '' if s.endswith('.exs') else '.exs'
-        return lambda: util.load_multi_incremental(prefix=loc, suffix=suffix(loc))
-
     if a.sample or a.train:
         lexicon = ([i for i in range(0, 10)] +
                    [f'z_{i}' for i in range(LIB_SIZE)] +
@@ -459,12 +465,12 @@ if __name__ == '__main__':
                                batch_size=a.batch_size).to(device)
         
         if a.sample and a.checkpoint and a.test_data:
-            dataloader = model.make_dataloader(wrap_dataloader(a.test_data), blind=a.blind)
+            dataloader = model.make_dataloader(util.load_multi_incremental(a.test_data), blind=a.blind)
             test_sampling(model, checkpoint_loc=a.checkpoint, dataloader=dataloader, max_p_len=50)
         
-        elif a.train and (a.training_data or a.training_data_multi) and (a.validation_data or a.validation_data_multi):
-            tloader = model.make_dataloader(wrap_dataloader(a.training_data), blind=a.blind)
-            vloader = model.make_dataloader(wrap_dataloader(a.validation_data), blind=a.blind)
+        elif a.train and a.training_data and a.validation_data:
+            tloader = model.make_dataloader(lambda: util.load_multi_incremental(a.training_data), blind=a.blind)
+            vloader = model.make_dataloader(lambda: util.load_multi_incremental(a.validation_data), blind=a.blind)
             model.learn(tloader, vloader,
                         epochs=a.epochs,
                         learning_rate=a.learning_rate,

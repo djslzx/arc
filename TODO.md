@@ -19,8 +19,11 @@
 - discriminator
   - [x] generate training data for discriminator
     - sets of bitmaps: ((B_1, B_2), Y)
-    - [ ] generate examples by selecting a program P, then generating perturbations on P
+    - [x] generate examples by selecting a program P, then generating perturbations on P
       - [x] implement program perturbations
+    - [ ] generate perturbed programs by running trained model on program prompts and saving the result
   - [ ] write discriminator in same class as transformer 
 - correctness
   - [ ] check if counting z's counts unique z's or the number of z expressions
+- style
+  - [ ] split generator files into separate dir 

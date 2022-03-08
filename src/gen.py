@@ -12,7 +12,7 @@ import itertools as it
 from viz import viz_grid
 from grammar import *
 from bottom_up import bottom_up_generator, eval
-
+from transformer import recover_model
 
 def gen_shapes(n_shapes, a_exprs, envs, shape_types, min_zs=0, max_zs=None):
     z_exprs, c_exprs = util.split(a_exprs, lambda a: a.zs())
@@ -27,7 +27,7 @@ def gen_shapes(n_shapes, a_exprs, envs, shape_types, min_zs=0, max_zs=None):
         n_hits = 0
         while n_hits < n_shapes:
             color = Num(randint(1, 9))
-            n_zs = min(len(shape_type.in_types), randint(min_zs, max_zs)) # cap n_zs by number of args for shape type
+            n_zs = min(len(shape_type.in_types), randint(min_zs, max_zs))  # cap n_zs by number of args for shape type
             z_args = [choice(z_exprs) for _ in shape_type.in_types[:n_zs]]
             c_args = [choice(c_exprs) for _ in shape_type.in_types[n_zs:]]
             args = z_args + c_args
@@ -105,7 +105,7 @@ def gen_random_scene(shapes, envs, n_shapes):
     while len(scene) < n_shapes:
         shape = choice(shapes)
         scene.append(shape)
-        scene = canonical_ordering(scene) # edit ordering before checking for overlaps
+        scene = canonical_ordering(scene)  # edit ordering before checking for overlaps
         scene = rm_dead_code(scene, envs)
     return scene
 
@@ -317,14 +317,15 @@ def make_tf_exs(n_exs, n_envs, shape_types, scene_sizes, a_grammar, a_depth, fna
     envs = [{'z': seed_zs(), 'sprites': seed_sprites()} for _ in range(n_envs)]
     a_exprs = [a_expr for a_expr, size in bottom_up_generator(a_depth, a_grammar, envs)]
     shapes = make_shapes(shape_types=shape_types, envs=envs, a_exprs=a_exprs, n_zs=n_zs, scene_sizes=scene_sizes,
-                         fname=f'{fname}.tf', n_shapes=n_exs * max_shapes, enum=enum_all_shapes, n_processes=n_processes)
+                         fname=f'{fname}.tf', n_shapes=n_exs * max_shapes, enum=enum_all_shapes,
+                         n_processes=n_processes)
 
     # Generate and save exprs w/ bmp outputs
     gen_tf_exs_mp(n_exs=n_exs, shapes=shapes, envs=envs,
                   min_shapes=min_shapes, max_shapes=max_shapes, save_to=fname)
 
-def make_discrim_exs(n_exs, n_envs, shape_types, scene_sizes, a_grammar, a_depth, fname,
-                     n_zs=(0, 0), enum_all_shapes=False, n_processes=1):
+def make_discrim_exs_combi(n_exs, n_envs, shape_types, scene_sizes, a_grammar, a_depth, fname,
+                           n_zs=(0, 0), enum_all_shapes=False, n_processes=1):
     """
     Generate training examples for the discriminator.
     
@@ -348,15 +349,16 @@ def make_discrim_exs(n_exs, n_envs, shape_types, scene_sizes, a_grammar, a_depth
     envs2 = [{'z': seed_zs(), 'sprites': seed_sprites()} for _ in range(n_envs)]
     a_exprs = [a_expr for a_expr, size in bottom_up_generator(a_depth, a_grammar, envs1 + envs2)]
     shapes = make_shapes(shape_types=shape_types, envs=envs1+envs2, a_exprs=a_exprs, n_zs=n_zs, scene_sizes=scene_sizes,
-                         fname=f'{fname}.discrim', n_shapes=n_exs * max_shapes, enum=enum_all_shapes, n_processes=n_processes)
+                         fname=f'{fname}.discrim', n_shapes=n_exs * max_shapes, enum=enum_all_shapes,
+                         n_processes=n_processes)
 
     # Generate pos/neg examples
     # - pos: use two different env sets on the same program
     # - neg: use the same env set on two different programs
     
-    fname = f'{fname}.discrim.exs'
+    fname = f'{fname}.combi.discrim.exs'
     shapes = list(shapes)
-    scenes = [] # store lists of objs
+    scenes = []  # store lists of objs
     for size in range(min_shapes, max_shapes+1):
         for i in range(n_exs//(2 * n_sizes)):
             scenes.append(gen_random_scene(shapes, envs1 + envs2, size))
@@ -384,6 +386,85 @@ def make_discrim_exs(n_exs, n_envs, shape_types, scene_sizes, a_grammar, a_depth
             prog2 = Seq(*scene2)
             bmps1, bmps2 = prog1.eval(envs1), prog2.eval(envs2)
             util.save(((bmps1, bmps2), [0, 0, -1]), fname, append=cleared, verbose=not cleared)
+
+def get_lines(seq):
+    try:
+        return seq.bmps
+    except AttributeError:
+        return None
+
+def is_prefix(e1, e2):
+    """Checks whether e1 is a prefix of e2"""
+    e1_lines = get_lines(e1)
+    e2_lines = get_lines(e2)
+    if not e1_lines or not e2_lines:  # make sure both exprs are Seqs
+        return False
+    if len(e1_lines) > len(e2_lines):  # make sure |e1| <= |e2|
+        return False
+    for l1, l2 in zip(e1_lines, e2_lines):
+        if l1 != l2:
+            return False
+    return True
+
+def prefix_dist(e1, e2):
+    """
+    If e1 is a prefix of e2, count the number of lines that need to be added to e1 to get e2.
+    Undefined behavior when e1 is not a prefix of e2.
+    """
+    e1_lines = get_lines(e1)
+    e2_lines = get_lines(e2)
+    if not e1_lines or not e2_lines:  # make sure both exprs are Seqs
+        return -1
+    return len(e2_lines) - len(e1_lines)
+
+def eval_expr(expr, env):
+    try:
+        return expr.eval(env).unsqueeze(0)
+    except (AssertionError, AttributeError):
+        return T.zeros(B_H, B_W).unsqueeze(0)
+
+def make_discrim_ex(e_expr, o_expr, envs):
+    # Determine relationship between expected_exprs and out_exprs
+    
+    assert isinstance(e_expr, Seq), "Found an input expression that isn't a Seq"
+
+    equal = e_expr == o_expr
+    prefix = is_prefix(o_expr, e_expr)
+    dist = prefix_dist(o_expr, e_expr)
+    
+    e_bmps = T.stack([eval_expr(e_expr, env) for env in envs])
+    o_bmps = T.stack([eval_expr(o_expr, env) for env in envs])
+    bmps = T.cat((e_bmps, o_bmps))
+    
+    example = (bmps, [equal, prefix, dist], e_expr, o_expr)
+    return example
+
+def make_discrim_exs_model_perturb(shapes_loc, model_checkpoint, data_glob, fname,
+                                   N, d_model, batch_size, max_p_len=50, n_processes=1):
+    """Read in reference examples and perturb them by running the model"""
+
+    # Load in trained model, data
+    model = recover_model(model_checkpoint, f'{fname}-model', N=N, H=B_H, W=B_W, d_model=d_model, batch_size=batch_size)
+    dataloader = model.make_dataloader(lambda: util.load_multi_incremental(data_glob))
+
+    # Read in environments from shapes file
+    envs = util.load(shapes_loc)['envs']
+    assert len(envs) == model.N
+    
+    # Generate examples by using inference on model
+    out_fname = f'{fname}.model-perturbed.discrim.exs'
+    cleared = False
+    for B, P in dataloader:
+        d = model.sample_programs(B, P, max_length=max_p_len)
+        e_exprs, o_exprs = d['expected exprs'], d['out exprs']
+
+        with mp.Pool(n_processes) as pool:
+            exs = pool.starmap(make_discrim_ex,
+                               ((e_expr, o_expr, envs) for e_expr, o_expr in zip(e_exprs, o_exprs)))
+        for ex in exs:
+            print(f"Generated example: {ex}")
+            util.save(ex, out_fname, append=cleared, verbose=not cleared)
+            cleared = True
 
 def viz_exs(fname):
     for bmps, tokens in util.load_incremental(fname):
@@ -422,8 +503,7 @@ def compare(f1, f2):
             abs_overlap += min(d1[e], d2[e])
     return key_overlap, abs_overlap, n_keys, val_capacity
 
-
-def run_cfgs(cfgs):
+def run_configs(configs):
     def shape_code(shape_types):
         return f"{'p' if Point in shape_types else ''}" \
                f"{'l' if Line in shape_types else ''}" \
@@ -436,12 +516,13 @@ def run_cfgs(cfgs):
         else:
             return f'{a}~{b}'
     
-    for cfg in cfgs:
-        sh_code = shape_code(cfg['shape_types'])
-        sz_code = n_code(cfg['scene_sizes'])
-        z_code = n_code(cfg['n_zs'])
-        code = f"{cfg['n_exs']}-{sz_code}{sh_code}{z_code}z{cfg['n_envs']}e"
-        print(f'code: {code}')
+    for cfg in configs:
+        if 'fname' not in cfg:
+            sh_code = shape_code(cfg['shape_types'])
+            sz_code = n_code(cfg['scene_sizes'])
+            z_code = n_code(cfg['n_zs'])
+            code = f"{cfg['n_exs']}-{sz_code}{sh_code}{z_code}z{cfg['n_envs']}e"
+            print(f'code: {code}')
 
         if cfg['type'] == 'generator':
             for mode in ['train', 'test']:
@@ -456,20 +537,35 @@ def run_cfgs(cfgs):
                             enum_all_shapes=cfg['enum_all_shapes'],
                             n_processes=cfg['n_processes'],
                             label_zs=cfg['label_zs'])
-        elif cfg['type'] == 'discriminator':
+        elif cfg['type'] == 'discriminator subset':
             for mode in ['train', 'test']:
-                make_discrim_exs(n_exs=cfg['n_exs'],
-                                 n_envs=cfg['n_envs'],
-                                 shape_types=cfg['shape_types'],
-                                 scene_sizes=cfg['scene_sizes'],
-                                 n_zs=cfg['n_zs'],
-                                 a_grammar=cfg['a_grammar'],
-                                 a_depth=cfg['a_depth'],
-                                 fname=f'../data/{code}-{mode}',
-                                 enum_all_shapes=cfg['enum_all_shapes'],
-                                 n_processes=cfg['n_processes'])
+                make_discrim_exs_combi(
+                    n_exs=cfg['n_exs'],
+                    n_envs=cfg['n_envs'],
+                    shape_types=cfg['shape_types'],
+                    scene_sizes=cfg['scene_sizes'],
+                    n_zs=cfg['n_zs'],
+                    a_grammar=cfg['a_grammar'],
+                    a_depth=cfg['a_depth'],
+                    fname=f'../data/{code}-{mode}',
+                    enum_all_shapes=cfg['enum_all_shapes'],
+                    n_processes=cfg['n_processes']
+                )
+        elif cfg['type'] == 'discriminator model perturb':
+            make_discrim_exs_model_perturb(
+                shapes_loc=cfg['shapes_loc'],
+                model_checkpoint=cfg['model_checkpoint'],
+                data_glob=cfg['data_glob'],
+                fname=cfg['fname'],
+                N=cfg['N'],
+                d_model=cfg['d_model'],
+                batch_size=cfg['batch_size'],
+                max_p_len=cfg.get('max_p_len', 50),
+                n_processes=cfg.get('n_processes', 1)
+            )
         else:
-            assert False, f"Expected configuration type to be discrim or gen, but found {cfg['type']}."
+            assert False, f"Found unexpected configuration type: {cfg['type']}."
+
 
 if __name__ == '__main__':
     # test_rm_dead_code()
@@ -480,7 +576,7 @@ if __name__ == '__main__':
     cfgs = [
         # {
         #     'type': 'generator',
-        #     'n_exs': 10,
+        #     'n_exs': 100,
         #     'shape_types': [Rect],
         #     'enum_all_shapes': False,
         #     'scene_sizes': (1, 5),
@@ -489,10 +585,23 @@ if __name__ == '__main__':
         #     'label_zs': True,
         #     'a_grammar': g,
         #     'a_depth': 1,
-        #     'n_processes': 32,
+        #     'n_processes': 8,
         # },
         {
-            'type': 'discriminator',
+            'type': 'discriminator model perturb',
+            'shape_types': [Rect],
+            'shapes_loc': '../data/100-1~5r0z1e-test.tf.cmps',
+            'model_checkpoint': '../models/tf_model_1mil-1~5r0z1e_123.pt',
+            'data_glob': '../data/100-1~5r0z1e-test_*.tf.exs',
+            'N': 1,
+            'd_model': 1024,
+            'batch_size': 16,
+            'fname': 'model-perturb-test',
+            'max_p_len': 50,
+            'n_processes': 16,
+        },
+        {
+            'type': 'discriminator subset',
             'n_exs': 10,
             'shape_types': [Rect],
             'enum_all_shapes': False,
@@ -504,5 +613,6 @@ if __name__ == '__main__':
             'n_processes': 32,
         },
     ]
-    run_cfgs(cfgs)
+    run_configs(cfgs)
     # list_exs('../data/10-1~5r0z1e-test.discrim.exs')
+    

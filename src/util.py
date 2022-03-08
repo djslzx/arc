@@ -136,9 +136,9 @@ def load_incremental(fname, verbose=True):
             except EOFError:
                 break
                 
-def load_multi_incremental(prefix, suffix, verbose=False):
+def load_multi_incremental(file_glob, verbose=False):
     """Iterate over multiple files with the prefix"""
-    files = glob(f'{prefix}*{suffix}')
+    files = glob(file_glob)
     if verbose:
         print("Globbed files: [")
         for file in files:
