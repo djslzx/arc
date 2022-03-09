@@ -391,31 +391,7 @@ def get_lines(seq):
     try:
         return seq.bmps
     except AttributeError:
-        return None
-
-def is_prefix(e1, e2):
-    """Checks whether e1 is a prefix of e2"""
-    e1_lines = get_lines(e1)
-    e2_lines = get_lines(e2)
-    if not e1_lines or not e2_lines:  # make sure both exprs are Seqs
-        return False
-    if len(e1_lines) > len(e2_lines):  # make sure |e1| <= |e2|
-        return False
-    for l1, l2 in zip(e1_lines, e2_lines):
-        if l1 != l2:
-            return False
-    return True
-
-def prefix_dist(e1, e2):
-    """
-    If e1 is a prefix of e2, count the number of lines that need to be added to e1 to get e2.
-    Undefined behavior when e1 is not a prefix of e2.
-    """
-    e1_lines = get_lines(e1)
-    e2_lines = get_lines(e2)
-    if not e1_lines or not e2_lines:  # make sure both exprs are Seqs
-        return -1
-    return len(e2_lines) - len(e1_lines)
+        return []
 
 def eval_expr(expr, env):
     try:
@@ -424,13 +400,13 @@ def eval_expr(expr, env):
         return T.zeros(B_H, B_W).unsqueeze(0)
 
 def make_discrim_ex(e_expr, o_expr, envs):
-    # Determine relationship between expected_exprs and out_exprs
-    
     assert isinstance(e_expr, Seq), "Found an input expression that isn't a Seq"
 
     equal = e_expr == o_expr
-    prefix = is_prefix(o_expr, e_expr)
-    dist = prefix_dist(o_expr, e_expr)
+    e_lines = get_lines(e_expr)
+    o_lines = get_lines(o_expr)
+    prefix = util.is_prefix(o_lines, e_lines)
+    dist = len(e_lines) - len(o_lines)
     
     e_bmps = T.stack([eval_expr(e_expr, env) for env in envs])
     o_bmps = T.stack([eval_expr(o_expr, env) for env in envs])
@@ -525,7 +501,7 @@ def run_configs(configs):
             print(f'code: {code}')
 
         if cfg['type'] == 'generator':
-            for mode in ['train', 'test']:
+            for mode in cfg['modes']:
                 make_tf_exs(n_exs=cfg['n_exs'],
                             n_envs=cfg['n_envs'],
                             shape_types=cfg['shape_types'],
@@ -538,7 +514,7 @@ def run_configs(configs):
                             n_processes=cfg['n_processes'],
                             label_zs=cfg['label_zs'])
         elif cfg['type'] == 'discriminator subset':
-            for mode in ['train', 'test']:
+            for mode in cfg['modes']:
                 make_discrim_exs_combi(
                     n_exs=cfg['n_exs'],
                     n_envs=cfg['n_envs'],
@@ -552,17 +528,18 @@ def run_configs(configs):
                     n_processes=cfg['n_processes']
                 )
         elif cfg['type'] == 'discriminator model perturb':
-            make_discrim_exs_model_perturb(
-                shapes_loc=cfg['shapes_loc'],
-                model_checkpoint=cfg['model_checkpoint'],
-                data_glob=cfg['data_glob'],
-                fname=cfg['fname'],
-                N=cfg['N'],
-                d_model=cfg['d_model'],
-                batch_size=cfg['batch_size'],
-                max_p_len=cfg.get('max_p_len', 50),
-                n_processes=cfg.get('n_processes', 1)
-            )
+            for mode in cfg['modes']:
+                make_discrim_exs_model_perturb(
+                    shapes_loc=cfg['shapes_loc'],
+                    model_checkpoint=cfg['model_checkpoint'],
+                    data_glob=cfg['data_glob'],
+                    fname=f"{cfg['fname']}-{mode}",
+                    N=cfg['N'],
+                    d_model=cfg['d_model'],
+                    batch_size=cfg['batch_size'],
+                    max_p_len=cfg.get('max_p_len', 50),
+                    n_processes=cfg.get('n_processes', 1)
+                )
         else:
             assert False, f"Found unexpected configuration type: {cfg['type']}."
 
@@ -574,44 +551,47 @@ if __name__ == '__main__':
                 consts=([Z(i) for i in range(LIB_SIZE)] + [Num(i) for i in range(0, 10)]))
     print(g.ops, g.consts)
     cfgs = [
-        # {
-        #     'type': 'generator',
-        #     'n_exs': 100,
-        #     'shape_types': [Rect],
-        #     'enum_all_shapes': False,
-        #     'scene_sizes': (1, 5),
-        #     'n_zs': (0, 0),
-        #     'n_envs': 1,
-        #     'label_zs': True,
-        #     'a_grammar': g,
-        #     'a_depth': 1,
-        #     'n_processes': 8,
-        # },
         {
-            'type': 'discriminator model perturb',
-            'shape_types': [Rect],
-            'shapes_loc': '../data/100-1~5r0z1e-test.tf.cmps',
-            'model_checkpoint': '../models/tf_model_1mil-1~5r0z1e_123.pt',
-            'data_glob': '../data/100-1~5r0z1e-test_*.tf.exs',
-            'N': 1,
-            'd_model': 1024,
-            'batch_size': 16,
-            'fname': 'model-perturb-test',
-            'max_p_len': 50,
-            'n_processes': 16,
-        },
-        {
-            'type': 'discriminator subset',
-            'n_exs': 10,
+            'type': 'generator',
+            'modes': ['test'],
+            'n_exs': 1000,
             'shape_types': [Rect],
             'enum_all_shapes': False,
             'scene_sizes': (1, 5),
             'n_zs': (0, 0),
             'n_envs': 1,
+            'label_zs': True,
             'a_grammar': g,
             'a_depth': 1,
-            'n_processes': 32,
+            'n_processes': 8,
         },
+        # {
+        #     'type': 'discriminator model perturb',
+        #     'modes': ['train', 'test'],
+        #     'shape_types': [Rect],
+        #     'shapes_loc': '../data/100-1~5r0z1e-test.tf.cmps',
+        #     'model_checkpoint': '../models/tf_model_1mil-1~5r0z1e_123.pt',
+        #     'data_glob': '../data/100-1~5r0z1e-test_*.tf.exs',
+        #     'N': 1,
+        #     'd_model': 1024,
+        #     'batch_size': 16,
+        #     'fname': 'model-perturb-test',
+        #     'max_p_len': 50,
+        #     'n_processes': 16,
+        # },
+        # {
+        #     'type': 'discriminator subset',
+        #     'modes': ['test'],
+        #     'n_exs': 10,
+        #     'shape_types': [Rect],
+        #     'enum_all_shapes': False,
+        #     'scene_sizes': (1, 5),
+        #     'n_zs': (0, 0),
+        #     'n_envs': 1,
+        #     'a_grammar': g,
+        #     'a_depth': 1,
+        #     'n_processes': 32,
+        # },
     ]
     run_configs(cfgs)
     # list_exs('../data/10-1~5r0z1e-test.discrim.exs')

@@ -16,6 +16,7 @@
     - [x] try reducing model size to 512 or 1024
     - [ ] look into regularization methods
     - [ ] try a different architecture (RNN: GRU instead of LSTM)   
+  - [x] collect stats on hits/misses for perturbed programs
 - discriminator
   - [x] generate training data for discriminator
     - sets of bitmaps: ((B_1, B_2), Y)

@@ -56,9 +56,13 @@ def viz_sample(xs, ys, title='', text='', save=False):
     '''Visualize an nx2 grid of input/output pairs'''
     f, ax = plt.subplots(len(xs), 2)
     plt.figtext(0.5, 0.01, text, wrap=True, horizontalalignment='center', fontsize=9)
-    for i, (x, y) in enumerate(zip(xs, ys)):
-        show(ax[i, 0], x)
-        show(ax[i, 1], y)
+    if len(xs) == 1:
+        show(ax[0], xs[0])
+        show(ax[1], ys[0])
+    else:
+        for i, (x, y) in enumerate(zip(xs, ys)):
+            show(ax[i, 0], x)
+            show(ax[i, 1], y)
     output()
 
 def viz_mult(ts, text=''):

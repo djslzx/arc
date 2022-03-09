@@ -6,6 +6,14 @@ from math import floor, ceil
 
 dirname = os.path.dirname(__file__)
 
+def is_prefix(l1, l2):
+    if len(l1) > len(l2):
+        return False
+    for x1, x2 in zip(l1, l2):
+        if x1 != x2:
+            return False
+    return True
+
 def to_toks(s):
     def tonum(s):
         try: return int(s)

@@ -11,6 +11,7 @@ from torch.utils.data import TensorDataset, DataLoader
 import torch.utils.tensorboard as tb
 
 from grammar import *
+import viz
 
 # dev_name = 'cpu'
 dev_name = 'cuda:0' if T.cuda.is_available() else 'cpu'
@@ -425,6 +426,86 @@ def recover_model(checkpoint, name, N, H, W, d_model, batch_size, lexicon=LEXICO
     model.load_state_dict(checkpoint['model_state_dict'])
     return model
 
+def get_lines(seq):
+    try:
+        return seq.bmps
+    except AttributeError:
+        return []
+
+def eval_expr(expr, env):
+    try:
+        return expr.eval(env).unsqueeze(0)
+    except (AssertionError, AttributeError):
+        return T.zeros(B_H, B_W).unsqueeze(0)
+    
+def track_stats(model, dataloader, envs, max_length=50):
+    """
+    Track the number of matches out of total (B, P) pairs, and measure distance between guessed bitmaps
+    and ground-truth bitmaps.
+    
+    Track accuracy/distance by program size (number of objects in scene).
+    """
+    stats = {}
+    
+    def update(k, n, v):
+        if k not in stats:
+            stats[k] = {n: 0 for n in range(1, 6)}
+        else:
+            stats[k][n] += v
+    
+    def updates(d, n):
+        for k, v in d.items():
+            update(k, n, v)
+    
+    for B, P in dataloader:
+        sample = model.sample_programs(B, P, max_length)
+        e_exprs, o_exprs = sample['expected exprs'], sample['out exprs']
+        for e_expr, o_expr in zip(e_exprs, o_exprs):
+            e_lines = get_lines(e_expr)
+            o_lines = get_lines(o_expr)
+            e_len = len(e_lines)
+            o_len = len(o_lines)
+            max_len = max(o_len, e_len)
+            
+            matching = int(o_expr == e_expr)
+            prefix = int(util.is_prefix(o_lines, e_lines))
+            n_common = len(set.intersection(set(e_lines), set(o_lines)))
+            len_diff = o_len - e_len
+            o_bmps = T.stack([eval_expr(o_expr, env) for env in envs])
+            e_bmps = T.stack([eval_expr(e_expr, env) for env in envs])
+            bmps_diff = (o_bmps == e_bmps).logical_not().sum()
+            bmps_colorblind_diff = ((o_bmps > 0) == (e_bmps > 0)).logical_not().sum()
+            
+            updates({
+                'n_exprs': 1,
+                'matches': matching,
+                'prefixes': prefix,
+                'overlap': n_common/max_len,
+                'len diff': len_diff,
+                'bmp color-aware diff': bmps_diff,
+                'bmp color-blind diff': bmps_colorblind_diff,
+            }, e_len)
+            
+            if o_expr != e_expr:
+                print(e_expr)
+                print(o_expr)
+                print(f'n_common={n_common}/{max_len}, len_diff={len_diff}, '
+                      f'bmp diff={bmps_diff}, bmp colorblind diff={bmps_colorblind_diff}')
+                print()
+                # if bmps_diff > 0 and bmps_nonzero_diff == 0:
+                #     viz.viz_sample(xs=e_bmps, ys=o_bmps, text=f'expected (left): {e_expr}, out (right): {o_expr}')
+
+    print("totals:")
+    for k in stats.keys():
+        print(f'  {k}: {sum(stats[k].values())}')
+    print()
+
+    print("by size:")
+    for n in range(1, 6):
+        print(f'  n={n}:')
+        for k in stats.keys():
+            print(f'    {k}: {stats[k][n]}')
+    print()
 
 if __name__ == '__main__':
     # TODO: make N flexible - adapt to datasets with variable-size bitmap example sets
@@ -434,10 +515,12 @@ if __name__ == '__main__':
     p.add_argument('n', type=int, help='value of N for transformer')
     p.add_argument('--sample', action='store_true', help='run in sample mode')
     p.add_argument('--train', action='store_true', help='run in train mode')
+    p.add_argument('--test', action='store_true', help='evaluate model')
     p.add_argument('--blind', action='store_true', help='run w/o looking at bmp input')
     p.add_argument('--training-data', type=str, help='path of training data')
     p.add_argument('--validation-data', type=str, help='path of validation data')
     p.add_argument('--test-data', type=str, help='path of test data')
+    p.add_argument('--envs', type=str, help='path of envs/shape data')
     p.add_argument('-c', '--checkpoint', type=str, help='path of model checkpoint')
     p.add_argument('-d', '--model-dim', type=int, default=512, help='model dimension')
     p.add_argument('-l', '--learning-rate', type=float, default=10 ** -4, help='learning rate')
@@ -449,7 +532,7 @@ if __name__ == '__main__':
 
     a = p.parse_args()
 
-    if a.sample or a.train:
+    if a.sample or a.train or a.test:
         lexicon = ([i for i in range(0, 10)] +
                    [f'z_{i}' for i in range(LIB_SIZE)] +
                    [f'S_{i}' for i in range(LIB_SIZE)] +
@@ -465,7 +548,7 @@ if __name__ == '__main__':
                                batch_size=a.batch_size).to(device)
         
         if a.sample and a.checkpoint and a.test_data:
-            dataloader = model.make_dataloader(util.load_multi_incremental(a.test_data), blind=a.blind)
+            dataloader = model.make_dataloader(lambda: util.load_multi_incremental(a.test_data), blind=a.blind)
             test_sampling(model, checkpoint_loc=a.checkpoint, dataloader=dataloader, max_p_len=50)
         
         elif a.train and a.training_data and a.validation_data:
@@ -477,5 +560,11 @@ if __name__ == '__main__':
                         threshold=a.threshold,
                         sample_freq=a.sample_freq,
                         log_freq=a.log_freq)
+        elif a.test and a.checkpoint and a.test_data and a.envs:
+            checkpoint = T.load(a.checkpoint)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            envs = util.load(a.envs)['envs']
+            dataloader = model.make_dataloader(lambda: util.load_multi_incremental(a.test_data), blind=a.blind)
+            track_stats(model, dataloader, envs)
     else:
         p.print_help()
