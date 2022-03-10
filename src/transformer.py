@@ -454,16 +454,16 @@ def track_stats(model, dataloader, envs, max_length=50):
             
             updates({
                 'n_exprs': 1,
-                'matches': matching,
-                'prefixes': prefix,
+                'n_matches': matching,
+                'n_prefixes': prefix,
                 'overlap': n_common/max_len,
                 'len diff': len_diff,
-                'bmp color-aware diff': bmps_diff,
-                'bmp color-blind diff': bmps_colorblind_diff,
+                'bmp color-aware diff': bmps_diff/(B_H * B_W),
+                'bmp color-blind diff': bmps_colorblind_diff/(B_H * B_W),
             }, e_len)
             
             if o_expr != e_expr:
-                print(i, j)
+                print(f'[{i+1}/{len(dataloader)}: {j+1}/{model.batch_size}]')
                 print(e_expr)
                 print(o_expr)
                 print(f'n_common={n_common}/{max_len}, len_diff={len_diff}, '
@@ -472,16 +472,34 @@ def track_stats(model, dataloader, envs, max_length=50):
                 # if bmps_diff > 0 and bmps_nonzero_diff == 0:
                 #     viz.viz_sample(xs=e_bmps, ys=o_bmps, text=f'expected (left): {e_expr}, out (right): {o_expr}')
 
+    def percentage(x, n):
+        return f'{x/n * 100:.2f}%'
+    
+    # TODO: std devs on any mean-tracking (look into incremental std dev computation)
+    # TODO: track relationship with mispredictions and the amt of randomness (number of z's) in the expression
+    # TODO: at every misprediction, log features of the misprediction then use the log of mispredictions
+    #       to build performance summary instead of logging mispredictions by their features (e.g. n)
+    
     print("totals:")
+    n_exprs = sum(stats['n_exprs'].values())
     for k in stats.keys():
-        print(f'  {k}: {sum(stats[k].values())}')
+        v = sum(stats[k].values())
+        if k.startswith('n_'):
+            print(f'  {k}: {v}')
+        else:
+            print(f'  {k}: {percentage(v, n_exprs)}')
     print()
 
     print("by size:")
     for n in range(1, 6):
         print(f'  n={n}:')
+        n_exprs_for_size = stats['n_exprs'][n]
         for k in stats.keys():
-            print(f'    {k}: {stats[k][n]}')
+            v = stats[k][n]
+            if k.startswith('n_'):
+                print(f'    {k}: {v}')
+            else:
+                print(f'    {k}: {percentage(v, n_exprs_for_size)}')
     print()
 
 def train_models(training_data_loc, test_data_loc, batch_size=64):
@@ -530,15 +548,15 @@ if __name__ == '__main__':
 
     print(f'lexicon: {LEXICON}')
     print(f'Using {dev_name}')
-    test_model(
-        name='1mil-0z-test',
-        d_model=1024, N=5, batch_size=16,
-        data_loc='../data/10-1~5r0~1z5e-tf/*.tf.exs',
-        checkpoint_loc='../models/tf_model_1mil-1~5r0z1e_123.pt',
-        envs_loc='../data/10-1~5r0~1z5e-tf/*.cmps',
-    )
-    # train_models(
-    #     training_data_loc='../data/10000-1~5r0z1e-train*.tf.exs',
-    #     test_data_loc='../data/10000-1~5r0z1e-test*.tf.exs'
+    # test_model(
+    #     name='1mil-0z-test',
+    #     d_model=1024, N=5, batch_size=16,
+    #     data_loc='../data/10-1~5r0~1z5e-tf/*.tf.exs',
+    #     checkpoint_loc='../models/tf_model_1mil-1~5r0z1e_123.pt',
+    #     envs_loc='../data/10-1~5r0~1z5e-tf/*.cmps',
     # )
+    train_models(
+        training_data_loc='../data/10-1~5r0~1z5e-train*.tf.exs',
+        test_data_loc='../data/10-1~5r0~1z5e-test*.tf.exs',
+    )
     
