@@ -326,6 +326,10 @@ class ArcTransformer(nn.Module):
             epoch_end_t = time.time()
             vloss = self.validate_epoch(vloader)
 
+            if vloss < min_vloss:
+                print(f"Achieved new minimum validation loss: {min_vloss} -> {vloss}")
+                min_vloss = vloss
+            
             print(f'[{epoch}/{epochs}] training loss: {tloss:.3f}, validation loss: {vloss:.3f}; '
                   f'epoch took {epoch_end_t - epoch_start_t:.3f}s '
                   f'on {len(tloader)} batch{"es" if len(tloader) > 1 else ""} of size {self.batch_size}, '
@@ -352,10 +356,6 @@ class ArcTransformer(nn.Module):
             
             # exit when validation error starts ticking back up
             if vloss >= min_vloss + vloss_margin: break
-
-            if vloss < min_vloss:
-                print(f"Achieved new minimum validation loss: {min_vloss} -> {vloss}")
-                min_vloss = vloss
 
         T.save({
             'epoch': epoch,
@@ -502,7 +502,7 @@ def track_stats(model, dataloader, envs, max_length=50):
                 print(f'    {k}: {percentage(v, n_exprs_for_size)}')
     print()
 
-def train_models(training_data_loc, test_data_loc, batch_size=64):
+def train_models(training_data_loc, test_data_loc, batch_size=64, vloss_margin=1):
     N = 5
     for d_model, learning_rate_exp in it.product([256, 512, 1024], [-4, -5, -6]):
         learning_rate = 10 ** learning_rate_exp
@@ -526,6 +526,7 @@ def train_models(training_data_loc, test_data_loc, batch_size=64):
             threshold=10 ** -3,
             sample_freq=3,  # epochs btwn samples (bmp/txt)
             log_freq=3,  # hours btwn logs
+            vloss_margin=vloss_margin,
         )
 
 def test_model(name, d_model, N, batch_size, data_loc, envs_loc, checkpoint_loc):
@@ -556,7 +557,8 @@ if __name__ == '__main__':
     #     envs_loc='../data/10-1~5r0~1z5e-tf/*.cmps',
     # )
     train_models(
-        training_data_loc='../data/10-1~5r0~1z5e-train*.tf.exs',
-        test_data_loc='../data/10-1~5r0~1z5e-test*.tf.exs',
+        training_data_loc='../data/10-r5e/train/*.tf.exs',
+        test_data_loc='../data/10-r5e/test/*.tf.exs',
+        vloss_margin=3,
     )
     
