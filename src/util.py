@@ -3,6 +3,7 @@ import pickle
 import os
 from glob import glob
 from math import floor, ceil
+from pathlib import Path
 
 dirname = os.path.dirname(__file__)
 
@@ -125,11 +126,12 @@ def save(data, fname, append=False, verbose=True):
     path = to_abspath(fname)
     if verbose: print(f'Saving to {path}...')
     mode = 'ab' if append else 'wb'
+    Path(path).parent.mkdir(exist_ok=True)  # make parent dir if it doesn't already exist
     with open(path, mode) as f:
         pickle.dump(data, f)
 
 def load(fname, verbose=True):
-    path = to_abspath(fname)
+    path = glob(to_abspath(fname))[0]
     if verbose: print(f'Loading from {path}...')
     with open(path, 'rb') as f:
         return pickle.load(f)
