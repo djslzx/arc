@@ -126,7 +126,7 @@ def save(data, fname, append=False, verbose=True):
     path = to_abspath(fname)
     if verbose: print(f'Saving to {path}...')
     mode = 'ab' if append else 'wb'
-    Path(path).parent.mkdir(exist_ok=True)  # make parent dir if it doesn't already exist
+    Path(path).parent.mkdir(parents=True, exist_ok=True)  # make parent dir if it doesn't already exist
     with open(path, mode) as f:
         pickle.dump(data, f)
 
