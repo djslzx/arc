@@ -1,7 +1,7 @@
 import pdb
 import time
 import math
-import argparse as ap
+import itertools as it
 
 import torch as T
 import torch.nn as nn
@@ -308,7 +308,8 @@ class ArcTransformer(nn.Module):
             'out exprs':       out_exprs,
         }
 
-    def learn(self, tloader, vloader, epochs, learning_rate=10 ** -4, threshold=0, sample_freq=10, log_freq=1):
+    def learn(self, tloader, vloader, epochs, learning_rate=10 ** -4, threshold=0, vloss_margin=1,
+              sample_freq=10, log_freq=1):
         self.to(device)
         optimizer = T.optim.Adam(self.parameters(), lr=learning_rate)
         writer = tb.SummaryWriter(comment=f'_{self.name}')
@@ -317,6 +318,7 @@ class ArcTransformer(nn.Module):
 
         it = iter(vloader)
         sample_B, sample_P = it.next()
+        min_vloss = T.inf
 
         for epoch in range(1, epochs+1):
             epoch_start_t = time.time()
@@ -345,8 +347,15 @@ class ArcTransformer(nn.Module):
             if epoch % sample_freq == 0:
                 self.sample_model(writer, sample_B, sample_P, epoch, max_length=50)
 
-            # exit when error is within threshold
+            # exit when error is within threshold of 0
             if vloss <= threshold or tloss <= threshold: break
+            
+            # exit when validation error starts ticking back up
+            if vloss >= min_vloss + vloss_margin: break
+
+            if vloss < min_vloss:
+                print(f"Achieved new minimum validation loss: {min_vloss} -> {vloss}")
+                min_vloss = vloss
 
         T.save({
             'epoch': epoch,
@@ -387,42 +396,9 @@ class ArcTransformer(nn.Module):
             prompt = T.cat((prompt, next_index), dim=1)
         return prompt
 
-def test_sampling(model, checkpoint_loc, dataloader, max_p_len):
-    checkpoint = T.load(checkpoint_loc)
-    model.load_state_dict(checkpoint['model_state_dict'])
-
-    for B, P in dataloader:
-        samples = model.sample_programs(B, P, max_length=max_p_len)
-        expected_tokens = samples['expected tokens']
-        expected_exprs = samples['expected exprs']
-        out_tokens = samples['out tokens']
-        out_exprs = samples['out exprs']
-
-        n_matches = 0
-        n_compares = len(P)
-        for x_toks, x_expr, y_toks, y_expr in zip(expected_tokens, expected_exprs, out_tokens, out_exprs):
-            print(f'expected tokens : {x_toks}')
-            print(f'expected exprs: {x_expr}')
-            print('-----')
-            print(f'actual tokens: {y_toks}')
-            print(f'actual exprs: {y_expr}')
-            print('-----')
-            matching = x_expr == y_expr
-            print(f'matching? {matching}')
-            n_matches += matching
-            if not matching:
-                m = max(len(model.strip(x_toks)), len(model.strip(y_toks)))
-                tok_matches = 0
-                for x, y in zip(x_toks[:m], y_toks[:m]):
-                    tok_matches += x == y and x not in ['PAD', 'START', 'END']
-                print(f'token matches: {tok_matches}/{m}')
-            print()
-
-        print(f'matches: {n_matches}/{n_compares} [{n_matches/n_compares * 100}%]')
-
-def recover_model(checkpoint, name, N, H, W, d_model, batch_size, lexicon=LEXICON):
+def recover_model(checkpoint_loc, name, N, H, W, d_model, batch_size, lexicon=LEXICON):
     model = ArcTransformer(name=name, lexicon=lexicon, N=N, H=H, W=W, d_model=d_model, batch_size=batch_size).to(device)
-    checkpoint = T.load(checkpoint)
+    checkpoint = T.load(checkpoint_loc)
     model.load_state_dict(checkpoint['model_state_dict'])
     return model
 
@@ -457,10 +433,10 @@ def track_stats(model, dataloader, envs, max_length=50):
         for k, v in d.items():
             update(k, n, v)
     
-    for B, P in dataloader:
+    for i, (B, P) in enumerate(dataloader):
         sample = model.sample_programs(B, P, max_length)
         e_exprs, o_exprs = sample['expected exprs'], sample['out exprs']
-        for e_expr, o_expr in zip(e_exprs, o_exprs):
+        for j, (e_expr, o_expr) in enumerate(zip(e_exprs, o_exprs)):
             e_lines = get_lines(e_expr)
             o_lines = get_lines(o_expr)
             e_len = len(e_lines)
@@ -487,6 +463,7 @@ def track_stats(model, dataloader, envs, max_length=50):
             }, e_len)
             
             if o_expr != e_expr:
+                print(i, j)
                 print(e_expr)
                 print(o_expr)
                 print(f'n_common={n_common}/{max_len}, len_diff={len_diff}, '
@@ -507,64 +484,61 @@ def track_stats(model, dataloader, envs, max_length=50):
             print(f'    {k}: {stats[k][n]}')
     print()
 
+def train_models(training_data_loc, test_data_loc, batch_size=64):
+    N = 5
+    for d_model, learning_rate_exp in it.product([256, 512, 1024], [-4, -5, -6]):
+        learning_rate = 10 ** learning_rate_exp
+        name = f'{d_model}m{learning_rate}lr'
+        model = ArcTransformer(
+            name=name,
+            lexicon=LEXICON,
+            N=N, H=B_H, W=B_W,
+            d_model=d_model,
+            batch_size=batch_size,
+        ).to(device)
+        
+        # train models
+        tloader = model.make_dataloader(lambda: util.load_multi_incremental(training_data_loc), blind=False)
+        vloader = model.make_dataloader(lambda: util.load_multi_incremental(test_data_loc), blind=False)
+        model.learn(
+            tloader=tloader,
+            vloader=vloader,
+            epochs=1_000_000,
+            learning_rate=learning_rate,
+            threshold=10 ** -3,
+            sample_freq=3,  # epochs btwn samples (bmp/txt)
+            log_freq=3,  # hours btwn logs
+        )
+
+def test_model(name, d_model, N, batch_size, data_loc, envs_loc, checkpoint_loc):
+    model = ArcTransformer(
+        name=name,
+        lexicon=LEXICON,
+        N=N, H=B_H, W=B_W,
+        d_model=d_model,
+        batch_size=batch_size,
+    ).to(device)
+    checkpoint = T.load(checkpoint_loc)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    envs = util.load(envs_loc)['envs']
+    dataloader = model.make_dataloader(lambda: util.load_multi_incremental(data_loc))
+    track_stats(model, dataloader, envs)
+
+
 if __name__ == '__main__':
     # TODO: make N flexible - adapt to datasets with variable-size bitmap example sets
 
-    p = ap.ArgumentParser(description='Train or sample from a model')
-    p.add_argument('name', type=str, help='name of model')
-    p.add_argument('n', type=int, help='value of N for transformer')
-    p.add_argument('--sample', action='store_true', help='run in sample mode')
-    p.add_argument('--train', action='store_true', help='run in train mode')
-    p.add_argument('--test', action='store_true', help='evaluate model')
-    p.add_argument('--blind', action='store_true', help='run w/o looking at bmp input')
-    p.add_argument('--training-data', type=str, help='path of training data')
-    p.add_argument('--validation-data', type=str, help='path of validation data')
-    p.add_argument('--test-data', type=str, help='path of test data')
-    p.add_argument('--envs', type=str, help='path of envs/shape data')
-    p.add_argument('-c', '--checkpoint', type=str, help='path of model checkpoint')
-    p.add_argument('-d', '--model-dim', type=int, default=512, help='model dimension')
-    p.add_argument('-l', '--learning-rate', type=float, default=10 ** -4, help='learning rate')
-    p.add_argument('-e', '--epochs', type=int, default=1_000_000, help='num epochs to train')
-    p.add_argument('-b', '--batch-size', type=int, default=16, help='batch size for training')
-    p.add_argument('--threshold', type=float, default=10 ** -4, help='threshold for exiting with low loss')
-    p.add_argument('--sample-freq', type=int, default=100, help='num epochs between img/text samples')
-    p.add_argument('--log-freq', type=int, default=1, help='num hours between logging model/optimizer params')
-
-    a = p.parse_args()
-
-    if a.sample or a.train or a.test:
-        lexicon = ([i for i in range(0, 10)] +
-                   [f'z_{i}' for i in range(LIB_SIZE)] +
-                   [f'S_{i}' for i in range(LIB_SIZE)] +
-                   ['~', '+', '-', '*', '<', '&', '?',
-                    'P', 'L', 'R',
-                    'H', 'V', 'T', '#', 'o', '@', '!', '{', '}', ])
-        print(f'lexicon: {lexicon}')
-        print(f'Using {dev_name}')
-        model = ArcTransformer(name=a.name,
-                               lexicon=lexicon,
-                               N=a.n, H=B_H, W=B_W,
-                               d_model=a.model_dim,
-                               batch_size=a.batch_size).to(device)
-        
-        if a.sample and a.checkpoint and a.test_data:
-            dataloader = model.make_dataloader(lambda: util.load_multi_incremental(a.test_data), blind=a.blind)
-            test_sampling(model, checkpoint_loc=a.checkpoint, dataloader=dataloader, max_p_len=50)
-        
-        elif a.train and a.training_data and a.validation_data:
-            tloader = model.make_dataloader(lambda: util.load_multi_incremental(a.training_data), blind=a.blind)
-            vloader = model.make_dataloader(lambda: util.load_multi_incremental(a.validation_data), blind=a.blind)
-            model.learn(tloader, vloader,
-                        epochs=a.epochs,
-                        learning_rate=a.learning_rate,
-                        threshold=a.threshold,
-                        sample_freq=a.sample_freq,
-                        log_freq=a.log_freq)
-        elif a.test and a.checkpoint and a.test_data and a.envs:
-            checkpoint = T.load(a.checkpoint)
-            model.load_state_dict(checkpoint['model_state_dict'])
-            envs = util.load(a.envs)['envs']
-            dataloader = model.make_dataloader(lambda: util.load_multi_incremental(a.test_data), blind=a.blind)
-            track_stats(model, dataloader, envs)
-    else:
-        p.print_help()
+    print(f'lexicon: {LEXICON}')
+    print(f'Using {dev_name}')
+    test_model(
+        name='1mil-0z-test',
+        d_model=1024, N=5, batch_size=16,
+        data_loc='../data/10-1~5r0~1z5e-tf/*.tf.exs',
+        checkpoint_loc='../models/tf_model_1mil-1~5r0z1e_123.pt',
+        envs_loc='../data/10-1~5r0~1z5e-tf/*.cmps',
+    )
+    # train_models(
+    #     training_data_loc='../data/10000-1~5r0z1e-train*.tf.exs',
+    #     test_data_loc='../data/10000-1~5r0z1e-test*.tf.exs'
+    # )
+    
