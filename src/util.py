@@ -131,7 +131,9 @@ def save(data, fname, append=False, verbose=True):
         pickle.dump(data, f)
 
 def load(fname, verbose=True):
-    path = glob(to_abspath(fname))[0]
+    abspath = to_abspath(fname)
+    assert glob(abspath), f'Found empty glob: {abspath} -> {glob(abspath)}'
+    path = glob(abspath)[0]
     if verbose: print(f'Loading from {path}...')
     with open(path, 'rb') as f:
         return pickle.load(f)
@@ -149,6 +151,7 @@ def load_incremental(fname, verbose=True):
 def load_multi_incremental(file_glob, verbose=False):
     """Iterate over multiple files with the prefix"""
     files = glob(file_glob)
+    assert files, f'Found empty file glob: {file_glob} -> {files}'
     if verbose:
         print("Globbed files: [")
         for file in files:
