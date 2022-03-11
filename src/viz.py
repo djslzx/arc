@@ -66,7 +66,7 @@ def viz_sample(xs, ys, title='', text='', save=False):
     output()
 
 def viz_mult(ts, text=''):
-    f, ax = plt.subplots(len(ts), 1)
+    f, ax = plt.subplots(1, len(ts))
     plt.figtext(0.5, 0.01, text, wrap=True, horizontalalignment='center', fontsize=9)
     for i, t in enumerate(ts):
         show(ax[i], t)
