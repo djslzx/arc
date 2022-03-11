@@ -423,7 +423,7 @@ def make_discrim_ex(e_expr, o_expr, envs):
     return example
 
 def make_discrim_exs_model_perturb(shapes_loc, model_checkpoint_loc, data_glob, dir_name,
-                                   N, d_model, batch_size, max_p_len=50, n_processes=1):
+                                   N, d_model, batch_size, max_p_len=50, n_processes=1, verbose=False):
     """Read in reference examples and perturb them by running the model"""
     # Load in trained model, data
     model = recover_model(checkpoint_loc=model_checkpoint_loc,
@@ -446,7 +446,8 @@ def make_discrim_exs_model_perturb(shapes_loc, model_checkpoint_loc, data_glob, 
             exs = pool.starmap(make_discrim_ex,
                                ((e_expr, o_expr, envs) for e_expr, o_expr in zip(e_exprs, o_exprs)))
         for ex in exs:
-            print(f"Generated example: {ex}")
+            if verbose and ex[-1] != ex[-2]:
+                print(f"Generated example: {ex[-2]} -> {ex[-1]}")
             util.save(ex, fname, append=cleared, verbose=not cleared)
             cleared = True
 
@@ -557,10 +558,11 @@ if __name__ == '__main__':
     # )
     for mode in ['train', 'test']:
         make_discrim_exs_model_perturb(
-            shapes_loc='../data/100-r0~1z5e/test/*.cmps',
+            shapes_loc='../data/100-r0~1z5e-nonblank/test/*.cmps',
             model_checkpoint_loc='../models/tf_model_1mil-1~5r0~1z5e_96.pt',
-            data_glob='../data/100-r0~1z5e/test/*.tf.exs',
-            dir_name=f'../data/model-perturb-test-100-r0~1z5e-{mode}',
-            N=1, d_model=1024, batch_size= 16, max_p_len=50,
-            n_processes=16
+            data_glob='../data/100-r0~1z5e-nonblank/test/*.tf.exs',
+            dir_name=f'../data/model-perturb-test-100-r0~1z5e/{mode}',
+            N=5, d_model=1024, batch_size=16, max_p_len=50,
+            n_processes=16,
+            verbose=True
         )

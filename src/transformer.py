@@ -35,7 +35,9 @@ class PositionalEncoding(nn.Module):
         self.register_buffer('pe', pe)
 
     def forward(self, x):
-        # x: (sequence length, batch size) ***
+        # x: (sequence length, batch size)
+        # x.size(0) -> sequence length
+        # self.pe[x.size(0)] -> get positional encoding up to seq length
         return self.dropout(x + self.pe[:x.size(0)])
 
 
@@ -59,7 +61,7 @@ class ArcTransformer(nn.Module):
         self.batch_size = batch_size
 
         # program embedding
-        lexicon             = lexicon + ["START", "END", "PAD"] # add start/end tokens to lex
+        lexicon             = lexicon + ["START", "END", "PAD"]  # add start/end tokens to lex
         self.lexicon        = lexicon
         self.n_tokens       = len(lexicon)
         self.token_to_index = {s: i for i, s in enumerate(lexicon)}
@@ -90,6 +92,12 @@ class ArcTransformer(nn.Module):
         self.transformer = nn.Transformer(self.d_model,
                                           num_encoder_layers=6,
                                           num_decoder_layers=6)
+
+        # value function
+        # two sets of bmps in; convolve using conv_stack; MLP to score vector
+        self.value_fn = nn.Sequential(
+        
+        )
 
         # output linear+softmax
         self.out = nn.Linear(self.d_model, self.n_tokens)
@@ -316,8 +324,7 @@ class ArcTransformer(nn.Module):
         start_t = time.time()
         checkpoint_no = 1       # only checkpoint after first 5 hr period
 
-        it = iter(vloader)
-        sample_B, sample_P = it.next()
+        sample_B, sample_P = iter(vloader).next()
         min_vloss = T.inf
 
         for epoch in range(1, epochs+1):
