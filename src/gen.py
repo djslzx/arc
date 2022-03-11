@@ -9,7 +9,7 @@ import time
 import multiprocessing as mp
 import itertools as it
 
-from viz import viz_grid
+import viz
 from grammar import *
 from bottom_up import bottom_up_generator, eval
 from transformer import recover_model
@@ -20,6 +20,9 @@ def gen_shapes(n_shapes, a_exprs, envs, shape_types, min_zs=0, max_zs=None):
     if min_zs is None: min_zs = max_zs
     assert max_zs <= len(z_exprs), f'Expected max_zs <= |zs|, but found max_zs={max_zs}, |zs|={len(z_exprs)}'
     assert min_zs <= max_zs, f'Expected min_zs <= max_zs, but found min_zs={min_zs}, max_zs={max_zs}'
+
+    def is_blank(bmp):
+        return (bmp == 0).all()
 
     shapes = set()
     for shape_type in shape_types:
@@ -33,7 +36,8 @@ def gen_shapes(n_shapes, a_exprs, envs, shape_types, min_zs=0, max_zs=None):
             args = z_args + c_args
             shuffle(args)
             shape = shape_type(*args[:-1], color)
-            if shape not in shapes and all(out is not None for out in eval(shape, envs)):
+            if shape not in shapes and all(out is not None and not is_blank(out)
+                                           for out in eval(shape, envs)):
                 shapes.add(shape)
                 n_hits += 1
                 if n_hits % 100 == 0:
@@ -161,11 +165,6 @@ def rand_transform(e):
     # else:
     #     t = t(*t_args)
     assert False, "not implemented"
-
-def viz_sprites(envs):
-    k = floor(sqrt(LIB_SIZE))
-    for env in envs:
-        viz_grid(env['sprites'][:k**2], text=f'sprites[:{k**2}]')
 
 def test_canonical_ordering():
     test_cases = [
@@ -403,9 +402,9 @@ def get_lines(seq):
 
 def eval_expr(expr, env):
     try:
-        return expr.eval(env).unsqueeze(0)
+        return expr.eval(env)
     except (AssertionError, AttributeError):
-        return T.zeros(B_H, B_W).unsqueeze(0)
+        return T.zeros(B_H, B_W)
 
 def make_discrim_ex(e_expr, o_expr, envs):
     assert isinstance(e_expr, Seq), "Found an input expression that isn't a Seq"
@@ -418,7 +417,7 @@ def make_discrim_ex(e_expr, o_expr, envs):
     
     e_bmps = T.stack([eval_expr(e_expr, env) for env in envs])
     o_bmps = T.stack([eval_expr(o_expr, env) for env in envs])
-    bmps = T.cat((e_bmps, o_bmps))
+    bmps = T.cat((e_bmps, o_bmps)).unsqueeze(0)
     
     example = (bmps, [equal, prefix, dist], e_expr, o_expr)
     return example
@@ -482,6 +481,28 @@ def compare(f1, f2):
             abs_overlap += min(d1[e], d2[e])
     return key_overlap, abs_overlap, n_keys, val_capacity
 
+def test_shape_blankness(shapes_loc):
+    log = util.load(shapes_loc)
+    shapes = log['shapes']
+    envs = log['envs']
+
+    print(f"envs: {[env['z'] for env in envs]}")
+    for shape in shapes:  # Rect(Num(0), Z(2), Num(4), Num(5))
+        print(shape)
+        # if shape.zs(): viz.viz_mult([eval_expr(shape, env) for env in envs], text=f'{shape}')
+        for env in envs:
+            assert not (eval_expr(shape, env) == 0).all(), \
+                f"Found blank shape: {shape} w/ zs {env['z']}"
+    
+    print(" [+] passed test_shape_blankness")
+
+def test_expr_shape_blankness(exs_loc, envs_loc):
+    envs = util.load(envs_loc)['envs']
+    exs = util.load_multi_incremental(exs_loc)
+    
+    for B, P in exs:
+        print(P)
+
 def make_name_code(n_exs, scene_sizes, shape_types, n_zs, n_envs):
     
     def shape_code(shape_types):
@@ -509,29 +530,37 @@ if __name__ == '__main__':
     g = Grammar(ops=[Plus, Minus, Times],
                 consts=([Z(i) for i in range(LIB_SIZE)] + [Num(i) for i in range(0, 10)]))
     print(g.ops, g.consts)
-    for mode in ['train', 'test']:
-        make_tf_exs(
-            dir_name=f'../data/100-r5e/{mode}',
-            n_exs=100,
-            n_envs=5,
-            shape_types=[Rect],
-            scene_sizes=(1, 5),
-            a_grammar=g,
-            a_depth=1,
-            n_zs=(0, 1),
-            enum_all_shapes=False,
-            label_zs=True,
-            n_processes=8,
-        )
-    # make_discrim_exs_combi(n_exs=10, n_envs=1, shape_types=[Rect], scene_sizes=(1, 5), a_grammar=g, a_depth=1,
-    #                        n_zs=(0, 0), enum_all_shapes=False, n_processes=16)
     # for mode in ['train', 'test']:
-    #     make_discrim_exs_model_perturb(
-    #         shapes_loc='../data/10-1~5r0z1e-test.tf.cmps',
-    #         model_checkpoint_loc='../models/tf_model_1mil-1~5r0z1e_123.pt',
-    #         data_glob='../data/10-1~5r0z1e-test_*.tf.exs',
-    #         fname=f'../data/model-perturb-test-100-1~5r0z1e-{mode}',
-    #         N=1, d_model=1024, batch_size= 16, max_p_len=50,
-    #         n_processes=16
+    #     make_tf_exs(
+    #         dir_name=f'../data/100-r0~1z5e-nonblank/{mode}',
+    #         n_exs=100,
+    #         shape_types=[Rect],
+    #         scene_sizes=(1, 5),
+    #         n_envs=5,
+    #         n_zs=(0, 1),
+    #         enum_all_shapes=False,
+    #         label_zs=True,
+    #         a_grammar=g,
+    #         a_depth=1,
+    #         n_processes=8,
     #     )
-    #
+    # make_discrim_exs_combi(
+    #     n_exs=10,
+    #     shape_types=[Rect],
+    #     scene_sizes=(1, 5),
+    #     n_envs=1,
+    #     n_zs=(0, 0),
+    #     a_grammar=g,
+    #     a_depth=1,
+    #     enum_all_shapes=False,
+    #     n_processes=16
+    # )
+    for mode in ['train', 'test']:
+        make_discrim_exs_model_perturb(
+            shapes_loc='../data/100-r0~1z5e/test/*.cmps',
+            model_checkpoint_loc='../models/tf_model_1mil-1~5r0~1z5e_96.pt',
+            data_glob='../data/100-r0~1z5e/test/*.tf.exs',
+            dir_name=f'../data/model-perturb-test-100-r0~1z5e-{mode}',
+            N=1, d_model=1024, batch_size= 16, max_p_len=50,
+            n_processes=16
+        )

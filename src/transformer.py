@@ -398,7 +398,7 @@ class ArcTransformer(nn.Module):
 
 def recover_model(checkpoint_loc, name, N, H, W, d_model, batch_size, lexicon=LEXICON):
     model = ArcTransformer(name=name, lexicon=lexicon, N=N, H=H, W=W, d_model=d_model, batch_size=batch_size).to(device)
-    checkpoint = T.load(checkpoint_loc)
+    checkpoint = T.load(checkpoint_loc, map_location=device)
     model.load_state_dict(checkpoint['model_state_dict'])
     return model
 
@@ -410,11 +410,11 @@ def get_lines(seq):
 
 def eval_expr(expr, env):
     try:
-        return expr.eval(env).unsqueeze(0)
+        return expr.eval(env)
     except (AssertionError, AttributeError):
-        return T.zeros(B_H, B_W).unsqueeze(0)
+        return T.zeros(B_H, B_W)
     
-def track_stats(model, dataloader, envs, max_length=50):
+def track_stats(model, dataloader, envs, max_length=50, visualize=False):
     """
     Track the number of matches out of total (B, P) pairs, and measure distance between guessed bitmaps
     and ground-truth bitmaps.
@@ -432,6 +432,8 @@ def track_stats(model, dataloader, envs, max_length=50):
     def updates(d, n):
         for k, v in d.items():
             update(k, n, v)
+
+    print(f"envs: {[env['z'] for env in envs]}")
     
     for i, (B, P) in enumerate(dataloader):
         sample = model.sample_programs(B, P, max_length)
@@ -447,8 +449,8 @@ def track_stats(model, dataloader, envs, max_length=50):
             prefix = int(util.is_prefix(o_lines, e_lines))
             n_common = len(set.intersection(set(e_lines), set(o_lines)))
             len_diff = o_len - e_len
-            o_bmps = T.stack([eval_expr(o_expr, env) for env in envs])
-            e_bmps = T.stack([eval_expr(e_expr, env) for env in envs])
+            o_bmps = T.cat([eval_expr(o_expr, env) for env in envs])
+            e_bmps = T.cat([eval_expr(e_expr, env) for env in envs])
             bmps_diff = (o_bmps == e_bmps).logical_not().sum()
             bmps_colorblind_diff = ((o_bmps > 0) == (e_bmps > 0)).logical_not().sum()
             
@@ -469,8 +471,22 @@ def track_stats(model, dataloader, envs, max_length=50):
                 print(f'n_common={n_common}/{max_len}, len_diff={len_diff}, '
                       f'bmp diff={bmps_diff}, bmp colorblind diff={bmps_colorblind_diff}')
                 print()
-                # if bmps_diff > 0 and bmps_nonzero_diff == 0:
-                #     viz.viz_sample(xs=e_bmps, ys=o_bmps, text=f'expected (left): {e_expr}, out (right): {o_expr}')
+                if visualize and bmps_diff > 0:
+                    all_e_bmps = [e_bmps]
+                    for e_obj in e_lines:
+                        e_obj_bmps = [eval_expr(e_obj, env) for env in envs]
+                        all_e_bmps.append(T.cat(e_obj_bmps))
+                    all_o_bmps = [o_bmps]
+                    for o_obj in o_lines:
+                        o_obj_bmps = [eval_expr(o_obj, env) for env in envs]
+                        all_o_bmps.append(T.cat(o_obj_bmps))
+
+                    text = f'expected (left) [{e_len}]: {e_expr}\n' \
+                           f'out (right) [{o_len}]: {o_expr}\n' \
+                           f'bmp diff={bmps_diff}, bmp colorblind diff={bmps_colorblind_diff}'
+                    viz.viz_mult(all_e_bmps + all_o_bmps, text=text)
+                    # viz.viz_sample(xs=all_e_bmps, ys=all_o_bmps,
+                    #                text=text)
 
     def percentage(x, n):
         return f'{x/n * 100:.2f}%'
@@ -529,19 +545,12 @@ def train_models(training_data_loc, test_data_loc, batch_size=64, vloss_margin=1
             vloss_margin=vloss_margin,
         )
 
-def test_model(name, d_model, N, batch_size, data_loc, envs_loc, checkpoint_loc):
-    model = ArcTransformer(
-        name=name,
-        lexicon=LEXICON,
-        N=N, H=B_H, W=B_W,
-        d_model=d_model,
-        batch_size=batch_size,
-    ).to(device)
-    checkpoint = T.load(checkpoint_loc)
-    model.load_state_dict(checkpoint['model_state_dict'])
+def test_model(name, d_model, N, batch_size, data_loc, envs_loc, checkpoint_loc, visualize=False):
+    model = recover_model(checkpoint_loc=checkpoint_loc, name=name,
+                          N=N, H=B_H, W=B_W, d_model=d_model, batch_size=batch_size)
     envs = util.load(envs_loc)['envs']
     dataloader = model.make_dataloader(lambda: util.load_multi_incremental(data_loc))
-    track_stats(model, dataloader, envs)
+    track_stats(model, dataloader, envs, visualize=visualize)
 
 
 if __name__ == '__main__':
@@ -549,16 +558,22 @@ if __name__ == '__main__':
 
     print(f'lexicon: {LEXICON}')
     print(f'Using {dev_name}')
-    # test_model(
-    #     name='1mil-0z-test',
-    #     d_model=1024, N=5, batch_size=16,
-    #     data_loc='../data/10-1~5r0~1z5e-tf/*.tf.exs',
-    #     checkpoint_loc='../models/tf_model_1mil-1~5r0z1e_123.pt',
-    #     envs_loc='../data/10-1~5r0~1z5e-tf/*.cmps',
-    # )
-    train_models(
-        training_data_loc='../data/10-r5e/train/*.tf.exs',
-        test_data_loc='../data/10-r5e/test/*.tf.exs',
-        vloss_margin=3,
+    test_model(
+        name='1mil-0~1z-test',
+        d_model=1024,
+        batch_size=8,
+        checkpoint_loc='../models/tf_model_1mil-1~5r0~1z5e_96.pt',
+        N=5,
+        data_loc='../data/100-r0~1z5e-nonblank/test/*.tf.exs',
+        envs_loc='../data/100-r0~1z5e-nonblank/test/*.cmps',
+        visualize=True,
+        # N=1,
+        # data_loc='../data/100-r0z1e/test/*.tf.exs',
+        # envs_loc='../data/100-r0z1e/test/*.cmps',
     )
+    # train_models(
+    #     training_data_loc='../data/10-r5e/train/*.tf.exs',
+    #     test_data_loc='../data/10-r5e/test/*.tf.exs',
+    #     vloss_margin=3,
+    # )
     
