@@ -527,9 +527,9 @@ def track_stats(model, dataloader, envs, max_length=50, visualize=False):
 
 def train_models(training_data_loc, test_data_loc, batch_size=32, vloss_margin=1):
     N = 5
-    for d_model, learning_rate_exp in it.product([256, 512, 1024], [-4, -5, -6]):
+    for learning_rate_exp, d_model in it.product([-4, -5, -6], [256, 512, 1024]):
         # filter completed runs
-        if (d_model, learning_rate_exp) in [(256, -4), (256, -5)]:
+        if (learning_rate_exp, d_model) in [(-4, 256), (-5, 256)]:
             continue
 
         learning_rate = 10 ** learning_rate_exp
@@ -584,8 +584,8 @@ if __name__ == '__main__':
     #     # envs_loc='../data/100-r0z1e/test/*.cmps',
     # )
     train_models(
-        training_data_loc='/home/djl328/arc/data/1mil/1000000-1~5r0~1z5e-train_*.tf.exs',
-        test_data_loc='/home/djl328/arc/data/1mil/1000000-1~5r0~1z5e-test_*.tf.exs',
-        batch_size=32,
+        training_data_loc='/home/djl328/arc/data/1mil/r0~1z5e/*-train_*.tf.exs',
+        test_data_loc='/home/djl328/arc/data/1mil/r0~1z5e/*-test_*.tf.exs',
+        batch_size=16,
         vloss_margin=2,
     )
