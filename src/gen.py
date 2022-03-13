@@ -1,7 +1,7 @@
 """
 Make programs to use as training data
 """
-
+import gc
 import pdb
 from math import floor, sqrt
 from random import choice, randint, shuffle
@@ -21,9 +21,6 @@ def gen_shapes(n_shapes, a_exprs, envs, shape_types, min_zs=0, max_zs=None):
     assert max_zs <= len(z_exprs), f'Expected max_zs <= |zs|, but found max_zs={max_zs}, |zs|={len(z_exprs)}'
     assert min_zs <= max_zs, f'Expected min_zs <= max_zs, but found min_zs={min_zs}, max_zs={max_zs}'
 
-    def is_blank(bmp):
-        return (bmp == 0).all()
-
     shapes = set()
     for shape_type in shape_types:
         n_tries = 0
@@ -36,8 +33,7 @@ def gen_shapes(n_shapes, a_exprs, envs, shape_types, min_zs=0, max_zs=None):
             args = z_args + c_args
             shuffle(args)
             shape = shape_type(*args[:-1], color)
-            if shape not in shapes and all(out is not None and not is_blank(out)
-                                           for out in eval(shape, envs)):
+            if shape not in shapes and all(out is not None for out in eval(shape, envs)):
                 shapes.add(shape)
                 n_hits += 1
                 if n_hits % 100 == 0:
@@ -442,10 +438,8 @@ def make_discrim_exs_model_perturb(shapes_loc, model_checkpoint_loc, data_glob, 
         d = model.sample_programs(B, P, max_length=max_p_len)
         e_exprs, o_exprs = d['expected exprs'], d['out exprs']
 
-        with mp.Pool(n_processes) as pool:
-            exs = pool.starmap(make_discrim_ex,
-                               ((e_expr, o_expr, envs) for e_expr, o_expr in zip(e_exprs, o_exprs)))
-        for ex in exs:
+        for e_expr, o_expr in zip(e_exprs, o_exprs):
+            ex = make_discrim_ex(e_expr, o_expr, envs)
             if verbose and ex[-1] != ex[-2]:
                 print(f"Generated example: {ex[-2]} -> {ex[-1]}")
             util.save(ex, fname, append=cleared, verbose=not cleared)
@@ -556,6 +550,7 @@ if __name__ == '__main__':
     #     enum_all_shapes=False,
     #     n_processes=16
     # )
+    gc.set_debug(gc.DEBUG_LEAK)
     for mode in ['train', 'test']:
         make_discrim_exs_model_perturb(
             model_checkpoint_loc='/home/djl328/arc/models/256m-5lr/tf_model_256m-5lr_33.pt',

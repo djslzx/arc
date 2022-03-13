@@ -2,7 +2,7 @@
 - generator
   - examine generator performance
     - [x] fix test_sampling
-    - [ ] track stats on what kinds of programs the model has the most trouble with
+    - [x] track stats on what kinds of programs the model has the most trouble with
   - multithreaded example generation
     - [x] chain multiple generators together (write into files whose names are randomly generated)
     - [x] load examples from multiple files (chain together into a single iterable)
@@ -22,9 +22,9 @@
     - sets of bitmaps: ((B_1, B_2), Y)
     - [x] generate examples by selecting a program P, then generating perturbations on P
       - [x] implement program perturbations
-    - [ ] generate perturbed programs by running trained model on program prompts and saving the result
+    - [x] generate perturbed programs by running trained model on program prompts and saving the result
   - [ ] write discriminator in same class as transformer 
 - correctness
-  - [ ] check if counting z's counts unique z's or the number of z expressions
+  - [x] check if counting z's counts unique z's or the number of z expressions
 - style
   - [ ] split generator files into separate dir 
