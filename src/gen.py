@@ -558,11 +558,11 @@ if __name__ == '__main__':
     # )
     for mode in ['train', 'test']:
         make_discrim_exs_model_perturb(
-            shapes_loc='../data/100-r0~1z5e-nonblank/test/*.cmps',
-            model_checkpoint_loc='../models/tf_model_1mil-1~5r0~1z5e_96.pt',
-            data_glob='../data/100-r0~1z5e-nonblank/test/*.tf.exs',
-            dir_name=f'../data/model-perturb-test-100-r0~1z5e/{mode}',
-            N=5, d_model=1024, batch_size=16, max_p_len=50,
+            model_checkpoint_loc='/home/djl328/arc/models/256m-5lr/tf_model_256m-5lr_33.pt',
+            shapes_loc='/home/djl328/arc/data/1mil/r0~1z5e/*test.tf.cmps',
+            data_glob='/home/djl328/arc/data/1mil/r0~1z5e/*test*.tf.exs',
+            dir_name=f'/home/djl328/arc/data/1mil/perturbed-r0~1z5e/{mode}',
+            N=5, d_model=256, batch_size=32, max_p_len=50,
             n_processes=16,
             verbose=True
         )
