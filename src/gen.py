@@ -1,9 +1,8 @@
 """
 Make programs to use as training data
 """
-import gc
 import pdb
-from math import floor, sqrt
+import math
 from random import choice, randint, shuffle
 import time
 import multiprocessing as mp
@@ -402,20 +401,44 @@ def eval_expr(expr, env):
     except (AssertionError, AttributeError):
         return T.zeros(B_H, B_W)
 
-def make_discrim_ex(e_expr, o_expr, envs):
-    assert isinstance(e_expr, Seq), "Found an input expression that isn't a Seq"
+def enum_envs():
+    for z in it.product(*[range(Z_LO, Z_HI+1) for _ in range(LIB_SIZE)]):
+        yield {'z': z}
 
-    equal = e_expr == o_expr
-    e_lines = get_lines(e_expr)
-    o_lines = get_lines(o_expr)
-    prefix = util.is_prefix(o_lines, e_lines)
-    dist = len(e_lines) - len(o_lines)
+def compute_likelihood(observed_bitmaps, fitted_program):
+    """
+    Compute log P(B | p) = sum{b in B} log sum{z in Z} I[p(z) = b] - |B| log |Z|, where
+      - `p`: working program (fitted_program)
+      - `Z`: set of all sources of randomness (envs)
+      - `B`: bitmaps observed by model
+    """
+    sampled_bitmaps = [fitted_program(env) for env in enum_envs()]
+    n_envs = ((Z_HI - Z_LO + 1) ** LIB_SIZE)
+    n_bitmaps = len(observed_bitmaps)
+    score = 0
+    for observed_bitmap in observed_bitmaps:
+        n_matches = 0
+        for sampled_bitmap in sampled_bitmaps:
+            n_matches += T.equal(sampled_bitmap, observed_bitmap)
+        score += math.log(n_matches)
+    return score - n_bitmaps * math.log(n_envs)
+
+def make_discrim_ex(source_program, fitted_program, envs):
+    assert isinstance(source_program, Seq), "Found an input expression that isn't a Seq"
+
+    equal = source_program == fitted_program
+    lines_true = get_lines(source_program)
+    lines_fitted = get_lines(fitted_program)
+    prefix = util.is_prefix(lines_fitted, lines_true)
+    dist = len(lines_true) - len(lines_fitted)
     
-    e_bmps = T.stack([eval_expr(e_expr, env) for env in envs])
-    o_bmps = T.stack([eval_expr(o_expr, env) for env in envs])
-    bmps = T.cat((e_bmps, o_bmps)).unsqueeze(0)
+    observed_bitmaps = T.stack([eval_expr(source_program, env) for env in envs])
+    sampled_bitmaps = T.stack([eval_expr(fitted_program, env) for env in envs])
+    bmps = T.cat((observed_bitmaps, sampled_bitmaps)).unsqueeze(0)
+
+    likelihood = compute_likelihood(observed_bitmaps, fitted_program)
     
-    example = (bmps, [equal, prefix, dist], e_expr, o_expr)
+    example = (bmps, [equal, prefix, dist, likelihood], source_program, fitted_program)
     return example
 
 def make_discrim_exs_model_perturb(shapes_loc, model_checkpoint_loc, data_glob, dir_name,
@@ -436,10 +459,10 @@ def make_discrim_exs_model_perturb(shapes_loc, model_checkpoint_loc, data_glob, 
     cleared = False
     for B, P in dataloader:
         d = model.sample_programs(B, P, max_length=max_p_len)
-        e_exprs, o_exprs = d['expected exprs'], d['out exprs']
+        source_programs, fitted_programs = d['expected exprs'], d['out exprs']
 
-        for e_expr, o_expr in zip(e_exprs, o_exprs):
-            ex = make_discrim_ex(e_expr, o_expr, envs)
+        for source_program, fitted_program in zip(source_programs, fitted_programs):
+            ex = make_discrim_ex(source_program, fitted_program, envs)
             if verbose and ex[-1] != ex[-2]:
                 print(f"Generated example: {ex[-2]} -> {ex[-1]}")
             util.save(ex, fname, append=cleared, verbose=not cleared)
@@ -550,7 +573,6 @@ if __name__ == '__main__':
     #     enum_all_shapes=False,
     #     n_processes=16
     # )
-    gc.set_debug(gc.DEBUG_LEAK)
     for mode in ['train', 'test']:
         make_discrim_exs_model_perturb(
             shapes_loc='../data/100-r0~1z5e-nonblank/test/*.cmps',
