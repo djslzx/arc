@@ -1,13 +1,10 @@
 import pdb
-import random
-import itertools
-
-import util
-import nltk
+import itertools as it
 import torch as T
 import torch.nn.functional as F
-from random import randrange
-from ant import make_sprite
+import util
+import random
+import ant
 
 # bitmap size constants
 B_W = 8
@@ -82,10 +79,6 @@ class Expr(Visited):
     def range(self, envs): return self.accept(Range(envs))
     def __len__(self): return self.accept(Size())
     def __str__(self): return self.accept(Print())
-    def dist_to(self, other):
-        """Edit distance to transform self into other"""
-        # TODO: make this better
-        return nltk.edit_distance(str(self), str(other))
 
 class Grammar:
     def __init__(self, ops, consts):
@@ -96,9 +89,9 @@ def seed_zs(lo=Z_LO, hi=Z_HI, n_zs=LIB_SIZE):
     return (T.rand(n_zs) * (hi - lo) - lo).long()
 
 def seed_sprites(n_sprites=LIB_SIZE):
-    return T.stack([make_sprite(w=randrange(2, B_W//2),
-                                h=randrange(2, B_H//2),
-                                W=B_W, H=B_H)
+    return T.stack([ant.make_sprite(w=random.randrange(2, B_W//2),
+                                    h=random.randrange(2, B_H//2),
+                                    W=B_W, H=B_H)
                     for _ in range(n_sprites)])
 
 class Nil(Expr):
@@ -875,7 +868,7 @@ class Range(Visitor):
         products = [x * y for x in [x_min, x_max] for y in [y_min, y_max]]
         return min(products), max(products)
     def visit_Rect(self, x_min, y_min, x_max, y_max, color):
-        vals = list(itertools.chain.from_iterable(v.accept(self) for v in [x_min, y_min, x_max, y_max, color]))
+        vals = list(it.chain.from_iterable(v.accept(self) for v in [x_min, y_min, x_max, y_max, color]))
         print(vals)
         return min(vals), max(vals)
 
