@@ -65,7 +65,11 @@ class Expr(Visited):
             except UnimplementedError:
                 return type(*children)
         return self.accept(Map(node_f, leaf_f))
-        
+    def lines(self):
+        try:
+            return self.bmps
+        except AttributeError:
+            return []
     def simplify_indices(self):
         zs = self.zs()
         sprites = self.sprites()

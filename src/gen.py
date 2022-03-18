@@ -3,17 +3,26 @@ Make programs to use as training data
 """
 import pdb
 import math
-from random import choice, randint, shuffle
 import time
 import multiprocessing as mp
-import itertools as it
 
-import viz
 from grammar import *
 from bottom_up import bottom_up_generator, eval
 from transformer import recover_model
 
-def gen_shapes(n_shapes, a_exprs, envs, shape_types, min_zs=0, max_zs=None):
+def gen_random_shape(shape_type, c_exprs: list[Expr], z_exprs: list[Expr], z_range: tuple[int, int]):
+    in_types = shape_type.in_types
+    # NOTE: this exploits the fact that all shapes have arguments of the same type (Nums).
+    # If this doesn't hold, the below code won't work.
+    assert all(t == 'int' for t in in_types)
+    n_zs = min(len(in_types), random.randint(*z_range))  # cap n_zs by number of args for shape type
+    z_args = [random.choice(z_exprs) for _ in range(n_zs)]
+    c_args = [random.choice(c_exprs) for _ in range(len(in_types) - n_zs)]
+    args = z_args + c_args
+    random.shuffle(args)
+    return shape_type(*args)
+
+def gen_shapes(n_shapes, a_exprs, envs, shape_types, min_zs, max_zs, verbose=True):
     z_exprs, c_exprs = util.split(a_exprs, lambda a: a.zs())
     if max_zs is None: max_zs = len(z_exprs)
     if min_zs is None: min_zs = max_zs
@@ -25,19 +34,13 @@ def gen_shapes(n_shapes, a_exprs, envs, shape_types, min_zs=0, max_zs=None):
         n_tries = 0
         n_hits = 0
         while n_hits < n_shapes:
-            color = Num(randint(1, 9))
-            n_zs = min(len(shape_type.in_types), randint(min_zs, max_zs))  # cap n_zs by number of args for shape type
-            z_args = [choice(z_exprs) for _ in shape_type.in_types[:n_zs]]
-            c_args = [choice(c_exprs) for _ in shape_type.in_types[n_zs:]]
-            args = z_args + c_args
-            shuffle(args)
-            shape = shape_type(*args[:-1], color)
+            shape = gen_random_shape(shape_type, c_exprs, z_exprs, (min_zs, max_zs))
             if shape not in shapes and all(out is not None for out in eval(shape, envs)):
                 shapes.add(shape)
                 n_hits += 1
-                if n_hits % 100 == 0:
+                if verbose and n_hits % 1000 == 0:
                     print(f'{shape_type} hits: {n_hits}/{n_tries}')
-            if n_tries % 10000 == 0:
+            if verbose and n_tries % 10000 == 0:
                 print(f'{shape_type} hits: {n_hits}/{n_tries}')
             n_tries += 1
         print(f'{shape_type} hits: {n_hits}/{n_tries}')
@@ -102,7 +105,7 @@ def gen_random_scene(shapes, envs, n_shapes):
     # TODO: don't sample elements of `shapes` that have previously been used
     scene = []
     while len(scene) < n_shapes:
-        shape = choice(shapes)
+        shape = random.choice(shapes)
         scene.append(shape)
         scene = canonical_ordering(scene)  # edit ordering before checking for overlaps
         scene = rm_dead_code(scene, envs)
@@ -134,11 +137,11 @@ def gen_tf_exs_mp(n_exs, shapes, envs, min_shapes, max_shapes, save_dir, n_proce
                                                              for k in range(min_shapes, max_shapes+1)))])
 
 def rand_sprite(envs, a_exprs, i=-1, color=-1):
-    i = i if 0 <= i < LIB_SIZE else randrange(1, LIB_SIZE)
-    color = color if isinstance(color, Num) and 1 <= color.n <= Z_HI else Num(randint(1, Z_HI))
+    i = i if 0 <= i < LIB_SIZE else random.randrange(1, LIB_SIZE)
+    color = color if isinstance(color, Num) and 1 <= color.n <= Z_HI else Num(random.randint(1, Z_HI))
     n_misses = 0
     while True:
-        s = Sprite(i, choice(a_exprs), choice(a_exprs))
+        s = Sprite(i, random.choice(a_exprs), random.choice(a_exprs))
         outs = eval(s, envs)
         if all(out is not None for out in outs):
             break
@@ -147,134 +150,20 @@ def rand_sprite(envs, a_exprs, i=-1, color=-1):
     print(f'sprite misses:', n_misses)
     return Apply(Recolor(color), s) if color > 1 else s
 
-def rand_transform(e):
+def rand_transform():
     """
     Return a random (nontrivial) transformation of e
     """
     # # Transform
-    # n = choice(a_exprs)
-    # t = choice(transforms)
-    # t_args = [choice(a_exprs) for _ in t.in_types]
+    # n = random.choice(a_exprs)
+    # t = random.choice(transforms)
+    # t_args = [random.choice(a_exprs) for _ in t.in_types]
     # if any(n.eval(env) > 0 for env in envs):
     #     t = Repeat(t(*t_args), n)
     # else:
     #     t = t(*t_args)
     assert False, "not implemented"
 
-def test_canonical_ordering():
-    test_cases = [
-        ([
-            Point(Num(0), Num(1)),
-            Point(Num(1), Num(0))
-         ],
-         [
-             Point(Num(0), Num(1)),
-             Point(Num(1), Num(0))
-         ]),
-        ([
-            Point(Num(2), Num(1)),
-            Point(Num(2), Num(0))
-         ],
-         [
-             Point(Num(2), Num(0)),
-             Point(Num(2), Num(1))
-         ]),
-        ([
-            Line(Num(2), Num(0), Num(3), Num(1)),
-            Rect(Num(1), Num(0), Num(1), Num(1)),
-            Point(Num(2), Num(1)),
-            Rect(Num(0), Num(1), Num(2), Num(2)),
-            Rect(Num(0), Num(1), Num(3), Num(2)),
-            Point(Num(0), Num(2)),
-            Line(Num(0), Num(0), Num(3), Num(3)),
-         ],
-         [
-            Point(Num(0), Num(2)),
-            Point(Num(2), Num(1)),
-            Line(Num(0), Num(0), Num(3), Num(3)),
-            Line(Num(2), Num(0), Num(3), Num(1)),
-            Rect(Num(0), Num(1), Num(2), Num(2)),
-            Rect(Num(0), Num(1), Num(3), Num(2)),
-            Rect(Num(1), Num(0), Num(1), Num(1)),
-         ]),
-    ]
-    for entities, ans in test_cases:
-        out = canonical_ordering(entities)
-        assert out == ans, f'Failed test: expected {ans}, got {out}'
-    print("[+] passed test_canonical_ordering")
-
-def test_rm_dead_code():
-    zs = [
-        [0, 1],
-        [0, 2],
-    ]
-    test_cases = [
-        ([
-            ["1_",
-             "1_"],
-        ],
-         [Sprite(0)],
-         [Sprite(0)]),
-        ([
-            ["1_",
-             "1_"],
-            ["22",
-             "22"],
-          ],
-         [Sprite(0), Sprite(1)],
-         [Sprite(0), Sprite(1)]),
-        ([
-            ["1_",
-             "1_"],
-            ["2_",
-             "2_"],
-          ],
-         [Sprite(0), Sprite(1)],
-         [Sprite(0)]),
-        ([
-            ["11",
-             "1_"],
-            ["__",
-             "_2"],
-            ["33",
-             "33"],
-          ],
-         [Sprite(0), Sprite(1), Sprite(2)],
-         [Sprite(0), Sprite(1)]),
-        ([],
-         [Rect(Num(0), Num(0), Num(2), Num(2)),
-          Rect(Num(0), Num(0), Num(2), Num(2))],
-         [Rect(Num(0), Num(0), Num(2), Num(2))]),
-        ([],
-         [Rect(Num(0), Num(0), Num(2), Num(2)),
-          Line(Num(0), Num(0), Num(1), Num(1))],
-         [Rect(Num(0), Num(0), Num(2), Num(2))]),
-        ([],
-         [Line(Num(0), Num(0), Num(1), Num(1), color=Num(1)),
-          Rect(Num(0), Num(0), Num(2), Num(2), color=Num(1))],
-         [Rect(Num(0), Num(0), Num(2), Num(2), color=Num(1))]),
-        ([],
-         [Line(Num(0), Num(0), Num(1), Num(1), color=Num(1)),
-          Rect(Num(0), Num(0), Num(2), Num(2), color=Num(2))],
-         [Line(Num(0), Num(0), Num(1), Num(1), color=Num(1)),
-          Rect(Num(0), Num(0), Num(2), Num(2), color=Num(2))]),
-        ([],
-         [Rect(Z(0), Z(0), Num(2), Num(2)), Point(Z(0), Plus(Z(0), Num(1)))],
-         [Rect(Z(0), Z(0), Num(2), Num(2))]),
-        ([],
-         [Rect(Z(0), Z(1), Num(2), Num(2)), Point(Z(0), Z(1))],
-         [Rect(Z(0), Z(1), Num(2), Num(2))]),
-        ([],
-         [Rect(Z(0), Z(0), Num(2), Num(2)), Point(Z(0), Plus(Z(1), Num(1)))],
-         [Rect(Z(0), Z(0), Num(2), Num(2)), Point(Z(0), Plus(Z(1), Num(1)))]),
-    ]
-    for lib, entities, ans in test_cases:
-        lib = [util.img_to_tensor(b, w=B_W, h=B_H) for b in lib]
-        envs = [{'z': z, 'sprites': lib} for z in zs]
-        out = rm_dead_code(entities, envs)
-        assert out == ans, f"Failed test: in={entities}; expected {ans}, got {out}"
-    print("[+] passed test_rm_dead_code")
-    
 def make_shapes(shape_types, envs, a_exprs, n_zs, scene_sizes, save_dir,
                 n_shapes=None, enum=False, n_processes=1):
     min_zs, max_zs = n_zs
@@ -322,79 +211,6 @@ def make_tf_exs(n_exs, n_envs, shape_types, scene_sizes, a_grammar, a_depth,
     gen_tf_exs_mp(n_exs=n_exs, shapes=shapes, envs=envs,
                   min_shapes=min_shapes, max_shapes=max_shapes, save_dir=dir_name)
 
-def make_discrim_exs_combi(n_exs, n_envs, shape_types, scene_sizes, a_grammar, a_depth,
-                           dir_name=None, n_zs=(0, 0), enum_all_shapes=False, n_processes=1):
-    """
-    Generate training examples for the discriminator.
-    
-    Examples take the form ((B1, B2), Y) where Y.
-    Let P1 and P2 be the programs generating B1 and B2, respectively.
-    Y's components are as follows:
-     - a 0/1 value: 1 if P1 == P2, 0 otherwise
-     - a 0/1 value: 1 if P1 is a prefix of P2, 0 otherwise
-     - a scalar: if P1 is a prefix of P2, the number of lines that need to be added to P1 to get P2; negative otherwise
-     # - a 0/1 value: 1 if P1 is a subset of P2, negative otherwise
-     # - a scalar: the number of lines needed to turn P1 into P2 if P1 is a subset of P2; negative otherwise
-     # - a scalar measuring the likelihood of bitmap sets B1 and B2 being generated by the same function
-    """
-    if dir_name is None:
-        code = make_name_code(n_exs=n_exs, scene_sizes=scene_sizes, shape_types=shape_types, n_zs=n_zs, n_envs=n_envs)
-        dir_name = f'../data/{code}-discrim-combi'
-
-    min_shapes, max_shapes = scene_sizes
-    n_sizes = max_shapes - min_shapes + 1
-    assert n_exs % (2 * n_sizes) == 0, \
-        f'number of training examples should be divisible by the number of shapes in each scene times 2'
-    
-    # Make envs and arithmetic exprs
-    envs1 = [{'z': seed_zs(), 'sprites': seed_sprites()} for _ in range(n_envs)]
-    envs2 = [{'z': seed_zs(), 'sprites': seed_sprites()} for _ in range(n_envs)]
-    a_exprs = [a_expr for a_expr, size in bottom_up_generator(a_depth, a_grammar, envs1 + envs2)]
-    shapes = make_shapes(shape_types=shape_types, envs=envs1+envs2, a_exprs=a_exprs, n_zs=n_zs, scene_sizes=scene_sizes,
-                         save_dir=dir_name, n_shapes=n_exs * max_shapes, enum=enum_all_shapes,
-                         n_processes=n_processes)
-
-    # Generate pos/neg examples
-    # - pos: use two different env sets on the same program
-    # - neg: use the same env set on two different programs
-    
-    fname = f'{dir_name}/discrim-combi.exs'
-    shapes = list(shapes)
-    scenes = []  # store lists of objs
-    for size in range(min_shapes, max_shapes+1):
-        for i in range(n_exs//(2 * n_sizes)):
-            scenes.append(gen_random_scene(shapes, envs1 + envs2, size))
-    shuffle(scenes)
-    
-    # positive examples
-    cleared = False
-    for scene in scenes:
-        prog = Seq(*scene)
-        bmps1, bmps2 = prog.eval(envs1), prog.eval(envs2)
-        util.save(((bmps1, bmps2), [1, 1, 0]), fname, append=cleared, verbose=not cleared)
-        cleared = True
-    # negative examples
-    for scene in scenes[:len(scenes)//2]:
-        prog1 = Seq(*scene)
-        for i in range(1, len(scene)):
-            # prefix program
-            prog2 = Seq(*scene[:i])
-            bmps1, bmps2 = prog1.eval(envs1), prog2.eval(envs2)
-            util.save(((bmps1, bmps2), [0, 1, len(scene) - i]), fname, append=cleared, verbose=not cleared)
-            
-            # completely different program
-            scene2 = choice(scenes)
-            if scene2 == scene or all(obj in scene for obj in scene2): continue
-            prog2 = Seq(*scene2)
-            bmps1, bmps2 = prog1.eval(envs1), prog2.eval(envs2)
-            util.save(((bmps1, bmps2), [0, 0, -1]), fname, append=cleared, verbose=not cleared)
-
-def get_lines(seq):
-    try:
-        return seq.bmps
-    except AttributeError:
-        return []
-
 def eval_expr(expr, env):
     try:
         return expr.eval(env)
@@ -427,8 +243,8 @@ def make_discrim_ex(source_program, fitted_program, envs):
     assert isinstance(source_program, Seq), "Found an input expression that isn't a Seq"
 
     equal = source_program == fitted_program
-    lines_true = get_lines(source_program)
-    lines_fitted = get_lines(fitted_program)
+    lines_true = source_program.lines()
+    lines_fitted = fitted_program.lines()
     prefix = util.is_prefix(lines_fitted, lines_true)
     dist = len(lines_true) - len(lines_fitted)
     
@@ -468,36 +284,138 @@ def make_discrim_exs_model_perturb(shapes_loc, model_checkpoint_loc, data_glob, 
             util.save(ex, fname, append=cleared, verbose=not cleared)
             cleared = True
 
-def list_cmps(fname):
-    cmps = util.load(fname)
-    for shape in cmps['shapes']:
-        print(shape)
+def gen_teacher_forcing_data(programs: list[Expr]):
+    """
+    Given example programs, then splits these into teacher-forcing training data.
+    
+    For each program f = [l1, l2, ..., lk], generate the following examples:
+    - [] -> l1
+    - [l1] -> l2
+    - [l1, l2] -> l3
+    ...
+    - [l1, ..., li] -> l{i+1}
+    """
+    raise UnimplementedError
+    for program in programs:
+        lines = program.lines()
+        for i in range(len(lines)):
+            f_i = lines[:i]
+            d_i = lines[i+1]
+            yield f_i, d_i
 
-def list_exs(fname):
-    for bmps, tokens in util.load_incremental(fname):
-        print(deserialize(tokens), f'{len(bmps)} bitmaps')
+def test_canonical_ordering():
+    test_cases = [
+        ([
+             Point(Num(0), Num(1)),
+             Point(Num(1), Num(0))
+         ],
+         [
+             Point(Num(0), Num(1)),
+             Point(Num(1), Num(0))
+         ]),
+        ([
+             Point(Num(2), Num(1)),
+             Point(Num(2), Num(0))
+         ],
+         [
+             Point(Num(2), Num(0)),
+             Point(Num(2), Num(1))
+         ]),
+        ([
+             Line(Num(2), Num(0), Num(3), Num(1)),
+             Rect(Num(1), Num(0), Num(1), Num(1)),
+             Point(Num(2), Num(1)),
+             Rect(Num(0), Num(1), Num(2), Num(2)),
+             Rect(Num(0), Num(1), Num(3), Num(2)),
+             Point(Num(0), Num(2)),
+             Line(Num(0), Num(0), Num(3), Num(3)),
+         ],
+         [
+             Point(Num(0), Num(2)),
+             Point(Num(2), Num(1)),
+             Line(Num(0), Num(0), Num(3), Num(3)),
+             Line(Num(2), Num(0), Num(3), Num(1)),
+             Rect(Num(0), Num(1), Num(2), Num(2)),
+             Rect(Num(0), Num(1), Num(3), Num(2)),
+             Rect(Num(1), Num(0), Num(1), Num(1)),
+         ]),
+    ]
+    for entities, ans in test_cases:
+        out = canonical_ordering(entities)
+        assert out == ans, f'Failed test: expected {ans}, got {out}'
+    print("[+] passed test_canonical_ordering")
 
-def count_uniq(fname):
-    d = {}
-    for bmps, tokens in util.load_incremental(fname):
-        for e in deserialize(tokens).bmps:
-            d[e] = d.get(e, 0) + 1
-    return d
-
-def compare(f1, f2):
-    d1 = count_uniq(f1)
-    d2 = count_uniq(f2)
-    n_keys = (len(d1) + len(d2))//2
-    val_capacity = sum(d1.values()) + sum(d2.values())
-
-    key_overlap = 0
-    abs_overlap = 0
-    for e in d1.keys():
-        if e in d2:
-            print(f'overlap: {e}')
-            key_overlap += 1
-            abs_overlap += min(d1[e], d2[e])
-    return key_overlap, abs_overlap, n_keys, val_capacity
+def test_rm_dead_code():
+    zs = [
+        [0, 1],
+        [0, 2],
+    ]
+    test_cases = [
+        ([
+             ["1_",
+              "1_"],
+         ],
+         [Sprite(0)],
+         [Sprite(0)]),
+        ([
+             ["1_",
+              "1_"],
+             ["22",
+              "22"],
+         ],
+         [Sprite(0), Sprite(1)],
+         [Sprite(0), Sprite(1)]),
+        ([
+             ["1_",
+              "1_"],
+             ["2_",
+              "2_"],
+         ],
+         [Sprite(0), Sprite(1)],
+         [Sprite(0)]),
+        ([
+             ["11",
+              "1_"],
+             ["__",
+              "_2"],
+             ["33",
+              "33"],
+         ],
+         [Sprite(0), Sprite(1), Sprite(2)],
+         [Sprite(0), Sprite(1)]),
+        ([],
+         [Rect(Num(0), Num(0), Num(2), Num(2)),
+          Rect(Num(0), Num(0), Num(2), Num(2))],
+         [Rect(Num(0), Num(0), Num(2), Num(2))]),
+        ([],
+         [Rect(Num(0), Num(0), Num(2), Num(2)),
+          Line(Num(0), Num(0), Num(1), Num(1))],
+         [Rect(Num(0), Num(0), Num(2), Num(2))]),
+        ([],
+         [Line(Num(0), Num(0), Num(1), Num(1), color=Num(1)),
+          Rect(Num(0), Num(0), Num(2), Num(2), color=Num(1))],
+         [Rect(Num(0), Num(0), Num(2), Num(2), color=Num(1))]),
+        ([],
+         [Line(Num(0), Num(0), Num(1), Num(1), color=Num(1)),
+          Rect(Num(0), Num(0), Num(2), Num(2), color=Num(2))],
+         [Line(Num(0), Num(0), Num(1), Num(1), color=Num(1)),
+          Rect(Num(0), Num(0), Num(2), Num(2), color=Num(2))]),
+        ([],
+         [Rect(Z(0), Z(0), Num(2), Num(2)), Point(Z(0), Plus(Z(0), Num(1)))],
+         [Rect(Z(0), Z(0), Num(2), Num(2))]),
+        ([],
+         [Rect(Z(0), Z(1), Num(2), Num(2)), Point(Z(0), Z(1))],
+         [Rect(Z(0), Z(1), Num(2), Num(2))]),
+        ([],
+         [Rect(Z(0), Z(0), Num(2), Num(2)), Point(Z(0), Plus(Z(1), Num(1)))],
+         [Rect(Z(0), Z(0), Num(2), Num(2)), Point(Z(0), Plus(Z(1), Num(1)))]),
+    ]
+    for lib, entities, ans in test_cases:
+        lib = [util.img_to_tensor(b, w=B_W, h=B_H) for b in lib]
+        envs = [{'z': z, 'sprites': lib} for z in zs]
+        out = rm_dead_code(entities, envs)
+        assert out == ans, f"Failed test: in={entities}; expected {ans}, got {out}"
+    print("[+] passed test_rm_dead_code")
 
 def test_shape_blankness(shapes_loc):
     log = util.load(shapes_loc)
