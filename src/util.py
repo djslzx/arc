@@ -4,8 +4,13 @@ import os
 from glob import glob
 from math import floor, ceil
 from pathlib import Path
+import random
 
 dirname = os.path.dirname(__file__)
+
+def shuffled(it):
+    random.shuffle(it)
+    return it
 
 def is_prefix(l1, l2):
     if len(l1) > len(l2):
@@ -24,8 +29,8 @@ def to_toks(s):
 
 def clamp(x, lo, hi):
     assert hi >= lo
-    if x > hi:   return hi
-    elif x < lo: return lo
+    if x > hi: return hi
+    if x < lo: return lo
     return x
 
 def avg(it):
@@ -122,13 +127,23 @@ def to_abspath(path):
     else:
         return os.path.join(dirname, path)
 
+def make_parent_dir(path):
+    """Make parent dir if it doesn't already exist"""
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+
 def save(data, fname, append=False, verbose=True):
     path = to_abspath(fname)
     if verbose: print(f'Saving to {path}...')
     mode = 'ab' if append else 'wb'
-    Path(path).parent.mkdir(parents=True, exist_ok=True)  # make parent dir if it doesn't already exist
+    make_parent_dir(path)
     with open(path, mode) as f:
         pickle.dump(data, f)
+
+def touch(fname):
+    path = to_abspath(fname)
+    make_parent_dir(path)
+    f = open(path, 'ab')
+    f.close()
 
 def load(fname, verbose=True):
     abspath = to_abspath(fname)
@@ -148,7 +163,7 @@ def load_incremental(fname, verbose=True):
             except EOFError:
                 break
                 
-def load_multi_incremental(file_glob, verbose=False):
+def load_glob_incremental(file_glob, verbose=False):
     """Iterate over multiple files with the prefix"""
     files = glob(file_glob)
     assert files, f'Found empty file glob: {file_glob} -> {files}'

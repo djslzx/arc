@@ -15,37 +15,43 @@ import util
 import viz
 
 def gen_data(n_envs: int, n_programs: int, n_lines: typ.Union[int, tuple[int, int]],
-             line_types: list[type],
+             rand_arg_bounds: tuple[int, int],
+             line_types: list[type], line_type_weights: list[float] = None,
              n_workers: int = 1):
     """
     Samples a set of programs of the form `Seq(l_1, l_2. ..., l_k)`.
-    
-    :param n_envs: the number of environments to use in validating each generated program
-    :param n_programs: the total number of programs to generate per size
-    :param n_lines: the number (or a range) of lines to include in each program
-    :param line_types: the kinds of geometric objects to allow (Lines, Rects, Points)
-    :param n_workers: the number of worker processes to use (multiprocessing)
     """
     uid = time.time()
     # generate a set of `n_envs` environments
     pass
     
-def gen_data_worker(n_envs: int, n_programs: int, n_lines: int, line_types: list[type],
-                    cmp_exprs: list[Expr]):
+def gen_data_worker(fname: str, n_envs: int, n_programs: int, n_lines: int,
+                    arg_exprs: list[Expr],
+                    rand_arg_bounds: tuple[int, int],
+                    line_types: list[type], line_type_weights: list[float]):
     """
     Generate `(f, z)` pairs with associated training outputs (value, policy).
     """
+    util.touch(fname)
     for i in range(n_programs):
         envs = seed_libs(n_envs)
 
         # choose n_lines lines compatible with env
-        lines = gen_lines(envs, cmp_exprs, n_lines, line_types)
+        lines = gen_lines(envs=envs, arg_exprs=arg_exprs, n_lines=n_lines,
+                          rand_arg_bounds=rand_arg_bounds,
+                          line_types=line_types, line_type_weights=line_type_weights)
         f = Seq(*lines)
-    pass
+        util.save(data=(f, envs), fname=fname, append=True)
 
-def gen_lines(envs: list[dict], cmp_exprs: list[Expr], n_lines: int,
+def gen_lines(envs: list[dict], arg_exprs: list[Expr], n_lines: int, rand_arg_bounds: tuple[int, int],
               line_types: list[type], line_type_weights: list[float] = None,
               verbose=False):
+    """
+    Generates a sequence of lines.
+
+    Uses expressions containing randomness for arguments of each line object, but doesn't allow
+    random colors.
+    """
     def is_valid(expr):
         for env in envs:
             try:
@@ -54,18 +60,33 @@ def gen_lines(envs: list[dict], cmp_exprs: list[Expr], n_lines: int,
                 return False
         return True
 
+    def choose_n_rand_args(n_args):
+        lo, hi = rand_arg_bounds
+        lo = util.clamp(lo, 0, n_args)
+        hi = util.clamp(hi, 0, n_args)
+        return random.randint(lo, hi)
+
+    assert rand_arg_bounds[0] <= rand_arg_bounds[1], 'Invalid rand argument bounds'
+    rand_exprs, const_exprs = util.split(arg_exprs, lambda expr: expr.zs())
     lines = []
     while len(lines) < n_lines:
         n_tries = 0
         line_type = random.choices(population=line_types, weights=line_type_weights)[0]
-        in_types = line_type.in_types
+        n_args = len(line_type.in_types) - 1
+        n_rand_args = choose_n_rand_args(n_args)
+        n_const_args = n_args - n_rand_args
+
         # try choosing valid args for the line type
         # note: assumes that all in_types are integers (not true in general, but true of shapes)
         line = None
         while line is None:
             n_tries += 1
-            args = random.choices(population=cmp_exprs, k=len(in_types))
-            cand = line_type(*args)
+            if verbose and n_tries % 1000 == 0: print(f'[{len(lines)}, {line_type.__name__}]: {n_tries} tries')
+            
+            const_args = random.choices(population=const_exprs, k=n_const_args)
+            rand_args = random.choices(population=rand_exprs, k=n_rand_args)
+            args = util.shuffled(const_args + rand_args)
+            cand = line_type(*args, color=Num(random.randint(0, 9)))
             if is_valid(cand):
                 line = cand
         lines.append(line)
@@ -99,18 +120,37 @@ def canonical_ordering(lines):
         
     return sorted(lines, key=destructure)
 
+def extract_zs(envs):
+    return [env['z'] for env in envs]
 
-if __name__ == '__main__':
+def demo_gen_lines():
     environments = seed_libs(5)
     ls = gen_lines(envs=environments,
-                   cmp_exprs=[Z(i) for i in range(LIB_SIZE)] + [Num(i) for i in range(0, 10)],
+                   arg_exprs=[Z(i) for i in range(LIB_SIZE)] + [Num(i) for i in range(0, 10)],
                    n_lines=3,
                    line_types=[Rect, Line, Point],
-                   line_type_weights=[5, 2, 1])
-    print(ls, [env['z'] for env in environments])
+                   line_type_weights=[4, 3, 1],
+                   rand_arg_bounds=(0, 2),
+                   verbose=True)
+    print(ls, extract_zs(environments))
     p = Seq(*ls)
     ps = T.stack([
         p.eval(env) for env in environments
     ])
-    viz.viz_mult(ps, text=p)
-    
+    viz.viz_mult(ps, text=p.simplify_indices())
+
+def demo_gen_data_worker():
+    fname = '../data/test1.dat'
+    gen_data_worker(fname=fname,
+                    n_envs=5, n_programs=10, n_lines=3,
+                    arg_exprs=[Z(i) for i in range(LIB_SIZE)] + [Num(i) for i in range(0, 10)],
+                    rand_arg_bounds=(0, 2),
+                    line_types=[Rect, Line, Point],
+                    line_type_weights=[4, 3, 1])
+    for f, envs in util.load_incremental(fname):
+        print(f, extract_zs(envs))
+
+
+if __name__ == '__main__':
+    # demo_gen_lines()
+    demo_gen_data_worker()
