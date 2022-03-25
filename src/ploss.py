@@ -11,16 +11,9 @@ Perceptual loss
     - extension: use some notion of distance between expressions: edit distance?
 """
 
-import torch as T
 import torch.nn as nn
-import torch.nn.functional as F
-import itertools
-import pickle
 
-import util
-from grammar import *
-from bottom_up import *
-from learn import *
+from src.learn import *
 
 # Use a GPU
 device = T.device("cuda:0" if T.cuda.is_available() else "cpu")

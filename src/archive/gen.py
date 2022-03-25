@@ -6,9 +6,9 @@ import math
 import time
 import multiprocessing as mp
 
-from grammar import *
-from bottom_up import bottom_up_generator, eval
-from transformer import recover_model
+from src.grammar import *
+from src.bottom_up import bottom_up_generator, eval
+from src.transformer import recover_model
 
 def gen_random_shape(shape_type, c_exprs: list[Expr], z_exprs: list[Expr], z_range: tuple[int, int]):
     in_types = shape_type.in_types
@@ -283,25 +283,6 @@ def make_discrim_exs_model_perturb(shapes_loc, model_checkpoint_loc, data_glob, 
                 print(f"Generated example: {ex[-2]} -> {ex[-1]}")
             util.save(ex, fname, append=cleared, verbose=not cleared)
             cleared = True
-
-def gen_teacher_forcing_data(programs: list[Expr]):
-    """
-    Given example programs, then splits these into teacher-forcing training data.
-    
-    For each program f = [l1, l2, ..., lk], generate the following examples:
-    - [] -> l1
-    - [l1] -> l2
-    - [l1, l2] -> l3
-    ...
-    - [l1, ..., li] -> l{i+1}
-    """
-    raise UnimplementedError
-    for program in programs:
-        lines = program.lines()
-        for i in range(len(lines)):
-            f_i = lines[:i]
-            d_i = lines[i+1]
-            yield f_i, d_i
 
 def test_canonical_ordering():
     test_cases = [
