@@ -3,7 +3,7 @@ Generate data to train value & policy nets
 """
 import pickle
 import time
-import typing as typ
+from typing import Optional, List
 import multiprocessing as mp
 
 from grammar import *
@@ -14,12 +14,13 @@ import viz
 def gen_policy_data(fname_prefix: str,
                     n_envs: int, n_programs: int, n_lines_bounds: tuple[int, int],
                     rand_arg_bounds: tuple[int, int],
-                    line_types: list[type], line_type_weights: typ.Optional[list[float]] = None,
-                    n_programs_per_worker: int = 100):
+                    line_types: List[type], line_type_weights: Optional[List[float]] = None,
+                    n_workers: int = 1):
     """
     Generates data for pretraining policy net by sampling a set of programs of the form
     `Seq(l_1, l_2. ..., l_k)`, where k is in n_lines_bounds
     """
+    assert n_programs % n_workers == 0, f'Expected n_workers to divide n_programs, got {n_programs}/{n_workers}'
     n_lines_lo, n_lines_hi = n_lines_bounds
     assert n_lines_lo >= 0, f'Expected n_lines_bounds > 1, found {n_lines_bounds}'
     
@@ -27,8 +28,7 @@ def gen_policy_data(fname_prefix: str,
     arg_exprs = [Z(i) for i in range(LIB_SIZE)] + [Num(i) for i in range(0, 10)]
     
     # run n_workers workers to generate a total of n_programs programs of each size in n_lines
-    n_workers = n_programs // n_programs_per_worker + (n_programs % n_programs_per_worker > 0)
-    
+    n_programs_per_worker = n_programs // n_workers
     with mp.Pool(processes=n_workers) as pool:
         pool.starmap(worker_gen_policy_data,
                      [(f'{fname}/{i}.dat', n_envs, n_programs_per_worker, n_lines,
@@ -37,9 +37,9 @@ def gen_policy_data(fname_prefix: str,
                       for i in range(n_workers)])
     
 def worker_gen_policy_data(fname: str, n_envs: int, n_programs: int, n_lines: int,
-                           arg_exprs: list[Expr],
+                           arg_exprs: List[Expr],
                            rand_arg_bounds: tuple[int, int],
-                           line_types: list[type], line_type_weights: list[float],
+                           line_types: List[type], line_type_weights: List[float],
                            verbose: bool = False):
     """
     Generate `(f, z)` pairs with associated training outputs (value, policy).
@@ -71,8 +71,8 @@ def compute_value(expr, bitmaps):
     """
     pass
 
-def gen_program(envs: list[dict], arg_exprs: list[Expr], n_lines: int, rand_arg_bounds: tuple[int, int],
-                line_types: list[type], line_type_weights: list[float] = None,
+def gen_program(envs: List[dict], arg_exprs: List[Expr], n_lines: int, rand_arg_bounds: tuple[int, int],
+                line_types: List[type], line_type_weights: List[float] = None,
                 verbose=False):
     """
     Generates a program.
@@ -202,5 +202,6 @@ if __name__ == '__main__':
                     n_lines_bounds=(1, 4),
                     rand_arg_bounds=(0, 2),
                     line_types=[Rect, Line, Point],
-                    line_type_weights=[4, 3, 1])
+                    line_type_weights=[4, 3, 1],
+                    n_workers=100)
     
