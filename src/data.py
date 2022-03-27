@@ -3,7 +3,7 @@ Generate data to train value & policy nets
 """
 import pickle
 import time
-from typing import Optional, List
+from typing import Optional, List, Tuple
 import multiprocessing as mp
 
 from grammar import *
@@ -12,8 +12,8 @@ import viz
 
 
 def gen_policy_data(fname_prefix: str,
-                    n_envs: int, n_programs: int, n_lines_bounds: tuple[int, int],
-                    rand_arg_bounds: tuple[int, int],
+                    n_envs: int, n_programs: int, n_lines_bounds: Tuple[int, int],
+                    rand_arg_bounds: Tuple[int, int],
                     line_types: List[type], line_type_weights: Optional[List[float]] = None,
                     n_workers: int = 1):
     """
@@ -38,7 +38,7 @@ def gen_policy_data(fname_prefix: str,
     
 def worker_gen_policy_data(fname: str, n_envs: int, n_programs: int, n_lines: int,
                            arg_exprs: List[Expr],
-                           rand_arg_bounds: tuple[int, int],
+                           rand_arg_bounds: Tuple[int, int],
                            line_types: List[type], line_type_weights: List[float],
                            verbose: bool = False):
     """
@@ -71,7 +71,7 @@ def compute_value(expr, bitmaps):
     """
     pass
 
-def gen_program(envs: List[dict], arg_exprs: List[Expr], n_lines: int, rand_arg_bounds: tuple[int, int],
+def gen_program(envs: List[dict], arg_exprs: List[Expr], n_lines: int, rand_arg_bounds: Tuple[int, int],
                 line_types: List[type], line_type_weights: List[float] = None,
                 verbose=False):
     """
