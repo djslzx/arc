@@ -5,7 +5,6 @@ import pickle
 import time
 import typing as typ
 import multiprocessing as mp
-import joblib
 
 from grammar import *
 import util
@@ -195,4 +194,13 @@ def demo_gen_policy_data():
 if __name__ == '__main__':
     # demo_gen_program()
     # demo_worker_gen_policy_data()
-    demo_gen_policy_data()
+    # demo_gen_policy_data()
+    
+    gen_policy_data(fname_prefix='../data/policy-dat/1mil-RLP-9e1~4l0~2z',
+                    n_envs=9,
+                    n_programs=1_000_000,
+                    n_lines_bounds=(1, 4),
+                    rand_arg_bounds=(0, 2),
+                    line_types=[Rect, Line, Point],
+                    line_type_weights=[4, 3, 1])
+    
