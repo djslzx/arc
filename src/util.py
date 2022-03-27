@@ -142,7 +142,7 @@ def save(data, fname, append=False, verbose=True):
 def touch(fname):
     path = to_abspath(fname)
     make_parent_dir(path)
-    f = open(path, 'ab')
+    f = open(path, 'wb')
     f.close()
 
 def load(fname, verbose=True):
