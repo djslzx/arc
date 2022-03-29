@@ -612,6 +612,8 @@ def deserialize(tokens):
             return [Seq(*t[:i])] + t[i + 1:]
         if h == '}':
             return tokens
+        if h == '|':
+            return t
         else:
             assert False, f'Failed to classify token: {h} of type {type(h)}'
 
@@ -644,10 +646,11 @@ class Serialize(Visitor):
     def visit_Sprite(self, i, x, y):
         return [f'S_{i}'] + x.accept(self) + y.accept(self)
     def visit_Seq(self, bmps):
-        tokens = ['{']
+        tokens = ['{']  # start
         for bmp in bmps:
             tokens.extend(bmp.accept(self))
-        tokens.append('}')           # stop symbol
+            tokens.append('|')  # line-end
+        tokens.append('}')  # stop
         return tokens
     def visit_Join(self, bmp1, bmp2): return [';'] + bmp1.accept(self) + bmp2.accept(self)
     # def visit_Intersect(self, bmp): return ['^'] + bmp.accept(self)
@@ -876,7 +879,6 @@ class Range(Visitor):
         return min(products), max(products)
     def visit_Rect(self, x_min, y_min, x_max, y_max, color):
         vals = list(it.chain.from_iterable(v.accept(self) for v in [x_min, y_min, x_max, y_max, color]))
-        print(vals)
         return min(vals), max(vals)
 
 def test_eval():
@@ -1293,18 +1295,18 @@ def test_simplify_indices():
 
 def test_serialize():
     test_cases = [
-        # (Nil(), [False]),
-        # (Plus(Z(0), Z(1)), ['+', 'z_0', 'z_1']),
-        # (Plus(Times(Num(1), Num(0)), Minus(Num(3), Num(2))), ['+', '*', 1, 0, '-', 3, 2]),
-        # (And(Not(Nil()), Nil()), ['&', '~', False, False]),
-        # (Not(Lt(Num(3), Minus(Num(2), Num(7)))), ['~', '<', 3, '-', 2, 7]),
-        # (If(Not(Lt(Num(3), Z(0))), Num(2), Num(5)), ['?', '~', '<', 3, 'z_0', 2, 5]),
-        # (If(Lt(Z(0), Z(1)),
-        #     Point(Z(0), Z(0)),
-        #     Rect(Z(1), Z(1), Num(2), Num(3))),
-        #  ['?', '<', 'z_0', 'z_1', 'P', 1, 'z_0', 'z_0', 'R', 1, 'z_1', 'z_1', 2, 3]),
-        # (Seq(Sprite(0), Sprite(1), Sprite(2), Sprite(3)),
-        #  ['{', 'S_0', 0, 0, 'S_1', 0, 0, 'S_2', 0, 0, 'S_3', 0, 0, '}']),
+        (Nil(), [False]),
+        (Plus(Z(0), Z(1)), ['+', 'z_0', 'z_1']),
+        (Plus(Times(Num(1), Num(0)), Minus(Num(3), Num(2))), ['+', '*', 1, 0, '-', 3, 2]),
+        (And(Not(Nil()), Nil()), ['&', '~', False, False]),
+        (Not(Lt(Num(3), Minus(Num(2), Num(7)))), ['~', '<', 3, '-', 2, 7]),
+        (If(Not(Lt(Num(3), Z(0))), Num(2), Num(5)), ['?', '~', '<', 3, 'z_0', 2, 5]),
+        (If(Lt(Z(0), Z(1)),
+            Point(Z(0), Z(0)),
+            Rect(Z(1), Z(1), Num(2), Num(3))),
+         ['?', '<', 'z_0', 'z_1', 'P', 1, 'z_0', 'z_0', 'R', 1, 'z_1', 'z_1', 2, 3]),
+        (Seq(Sprite(0), Sprite(1), Sprite(2), Sprite(3)),
+         ['{', 'S_0', 0, 0, '|', 'S_1', 0, 0, '|', 'S_2', 0, 0, '|', 'S_3', 0, 0, '|', '}']),
         (Apply(Translate(Num(1), Num(2)),
                Seq(Rect(Plus(Z(0), Num(1)),
                         Plus(Z(0), Num(1)),
@@ -1312,8 +1314,8 @@ def test_serialize():
                         Num(2)),
                    Rect(Z(0), Z(0), Num(2), Num(2)))),
          ['@', 'T', 1, 2, '{',
-          'R', 1, '+', 'z_0', 1, '+', 'z_0', 1, 2, 2,
-          'R', 1, 'z_0', 'z_0', 2, 2, '}']),
+          'R', 1, '+', 'z_0', 1, '+', 'z_0', 1, 2, 2, '|',
+          'R', 1, 'z_0', 'z_0', 2, 2, '|', '}']),
     ]
     for expr, ans in test_cases:
         serialized = expr.serialize()
@@ -1400,12 +1402,11 @@ def test_leaves():
     for expr, ans in cases:
         leaves = expr.leaves()
         n_leaves = expr.count_leaves()
-        # print(expr, out)
         assert n_leaves == len(ans), f"count_leaves failed: in={expr}, expected={len(ans)}, actual={n_leaves}"
         assert leaves == ans, f"leaves failed: in={expr}, expected={ans}, actual={leaves}"
     print(" [+] passed test_leaves")
 
-def test_perturb_leaves():
+def demo_perturb_leaves():
     cases = [
         Num(0),
         Plus(Num(0), Num(1)),
@@ -1418,7 +1419,6 @@ def test_perturb_leaves():
         out = expr.perturb_leaves(1)
         print(expr, out)
         # assert out != expr, f"perturb_leaves failed: in={expr}, out={out}"
-    print(" [+] passed test_perturb_leaves")
 
 if __name__ == '__main__':
     # test_eval()
@@ -1427,9 +1427,9 @@ if __name__ == '__main__':
     # test_sprite()
     # test_simplify_indices()
     # test_range()
-    # test_serialize()
-    # test_well_formed()
-    # test_deserialize_breaking()
     # test_zs()
+    test_serialize()
+    test_well_formed()
+    test_deserialize_breaking()
     test_leaves()
-    test_perturb_leaves()
+    demo_perturb_leaves()

@@ -264,7 +264,7 @@ def make_discrim_exs_model_perturb(shapes_loc, model_checkpoint_loc, data_glob, 
     model = recover_model(checkpoint_loc=model_checkpoint_loc,
                           name=f'{dir_name}-model',
                           N=N, H=B_H, W=B_W, d_model=d_model, batch_size=batch_size)
-    dataloader = model.make_dataloader(lambda: util.load_glob_incremental(data_glob))
+    dataloader = model.make_dataloader(lambda: util.load_incremental(data_glob))
 
     # Read in environments from shapes file
     envs = util.load(shapes_loc)['envs']
@@ -415,7 +415,7 @@ def test_shape_blankness(shapes_loc):
 
 def test_expr_shape_blankness(exs_loc, envs_loc):
     envs = util.load(envs_loc)['envs']
-    exs = util.load_glob_incremental(exs_loc)
+    exs = util.load_incremental(exs_loc)
     
     for B, P in exs:
         print(P)

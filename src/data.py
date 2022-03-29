@@ -11,6 +11,31 @@ import util
 import viz
 
 
+def render(p, envs):
+    return T.stack([p.eval(env) for env in envs])
+
+def policy_data_to_examples(data_src: str):
+    """
+    Converts a list of (f: program, z: environment, B: bitmaps) triples into examples of
+    teacher-forcing deltas (B, f', B' -> d') for each program f,
+    where f' is a prefix of f, B' is f'(z), and d' is the next line in f after the lines in f'.
+    """
+    for (f, envs, bitmaps) in util.load_incremental(data_src):
+        f_out = f.simplify_indices().serialize()
+        f_lines = f.lines()
+        for i in range(1, len(f_lines)):
+            f_prefix = Seq(*f_lines[:i])
+            f_prefix_out = f_prefix.simplify_indices().serialize()
+            delta = f_lines[i]
+            bitmaps_partial = T.stack([f_prefix.eval(env) for env in envs])  # well-defined on envs b/c f is
+            yield bitmaps, bitmaps_partial, f_prefix_out, delta, f_out
+
+def save_policy_dat_as_examples(data_src: str, save_loc: str):
+    util.make_parent_dir(save_loc)
+    with open(save_loc, 'wb') as file:
+        for item in policy_data_to_examples(data_src):
+            pickle.dump(item, file)
+
 def gen_policy_data(fname_prefix: str,
                     n_envs: int, n_programs: int, n_lines_bounds: Tuple[int, int],
                     rand_arg_bounds: Tuple[int, int],
@@ -24,7 +49,7 @@ def gen_policy_data(fname_prefix: str,
     n_lines_lo, n_lines_hi = n_lines_bounds
     assert n_lines_lo >= 0, f'Expected n_lines_bounds > 1, found {n_lines_bounds}'
     
-    fname = f'{fname_prefix}policy-{int(time.time())}'
+    fname = f'{fname_prefix}{int(time.time())}'
     arg_exprs = [Z(i) for i in range(LIB_SIZE)] + [Num(i) for i in range(0, 10)]
     
     # run n_workers workers to generate a total of n_programs programs of each size in n_lines
@@ -52,7 +77,6 @@ def worker_gen_policy_data(fname: str, n_envs: int, n_programs: int, n_lines: in
                             rand_arg_bounds=rand_arg_bounds,
                             line_types=line_types, line_type_weights=line_type_weights)
             bitmaps = T.stack([p.eval(env) for env in envs])
-            p = p.simplify_indices()
             if verbose: print(f'[{i}/{n_programs}]: {p}')
             pickle.dump((p, envs, bitmaps), file)
 
@@ -124,18 +148,22 @@ def gen_program(envs: List[dict], arg_exprs: List[Expr], n_lines: int, rand_arg_
     return Seq(*lines)
 
 def rm_dead_code(lines, envs):
-    def render(xs):
-        return T.stack([Seq(*xs).eval(env) for env in envs])
+    """
+    Remove any lines that don't affect the render of Seq(lines) in any of the provided environments.
     
-    orig_bmps = render(lines)
+    Exploits the fact that earlier lines in the sequence are rendered first.
+    """
+    orig_bmps = render(Seq(*lines), envs)
     out = []
     for i, line in enumerate(lines):
-        excl_bmps = render(out + lines[i + 1:])
+        excl_lines = out + lines[i + 1:]
+        excl_bmps = render(Seq(*excl_lines), envs)
         if not T.equal(excl_bmps, orig_bmps):
             out.append(line)
     return out
 
 def canonical_ordering(lines):
+    
     def destructure(e):
         if isinstance(e, Point):
             return 0, e.x, e.y
@@ -178,7 +206,7 @@ def demo_worker_gen_policy_data():
                        arg_exprs, (0, 2), [Rect, Line, Point], [4, 3, 1], True)
                       for i in range(workload_sz)])
 
-    for i, (f, envs, bitmaps) in enumerate(util.load_glob_incremental(f'{fname}*.dat')):
+    for i, (f, envs, bitmaps) in enumerate(util.load_incremental(f'{fname}*.dat')):
         print(i, f)
 
 def demo_gen_policy_data():
@@ -196,12 +224,16 @@ if __name__ == '__main__':
     # demo_worker_gen_policy_data()
     # demo_gen_policy_data()
     
-    gen_policy_data(fname_prefix='../data/policy-dat/1mil-RLP-9e1~4l0~2z',
-                    n_envs=7,
-                    n_programs=1_000_000,
-                    n_lines_bounds=(1, 4),
-                    rand_arg_bounds=(0, 2),
-                    line_types=[Rect, Line, Point],
-                    line_type_weights=[4, 3, 1],
-                    n_workers=100)
-    
+    code = '1k-RLP-5e1~3l0~1z'
+    # gen_policy_data(fname_prefix=f'../data/policy-dat/{code}/',
+    #                 n_envs=5,
+    #                 n_programs=1_000,
+    #                 n_lines_bounds=(1, 3),
+    #                 rand_arg_bounds=(0, 1),
+    #                 line_types=[Rect, Line, Point],
+    #                 line_type_weights=[4, 3, 1],
+    #                 n_workers=10)
+
+    save_policy_dat_as_examples(data_src=f'../data/policy-dat/{code}/*/*.dat',
+                                save_loc=f'../data/policy-exs/{code}-exs.dat')
+        

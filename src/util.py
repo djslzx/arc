@@ -152,18 +152,8 @@ def load(fname, verbose=True):
     if verbose: print(f'Loading from {path}...')
     with open(path, 'rb') as f:
         return pickle.load(f)
-
-def load_incremental(fname, verbose=True):
-    path = to_abspath(fname)
-    if verbose: print(f'Loading from {path}...')
-    with open(path, 'rb') as f:
-        while True:
-            try:
-                yield pickle.load(f)
-            except EOFError:
-                break
-                
-def load_glob_incremental(file_glob, verbose=False):
+        
+def load_incremental(file_glob, verbose=False):
     """Iterate over multiple files with the prefix"""
     files = glob(file_glob)
     assert files, f'Found empty file glob: {file_glob} -> {files}'
