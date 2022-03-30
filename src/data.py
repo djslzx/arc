@@ -23,7 +23,7 @@ def policy_data_to_examples(data_src: str):
     for (f, envs, bitmaps) in util.load_incremental(data_src):
         f_simplified_lines = f.simplify_indices().lines()  # f w/ simplified z indices
         f_lines = f.lines()
-        for i in range(1, len(f_lines)):
+        for i in range(len(f_lines)):
             f_prefix = Seq(*f_lines[:i])
             partial_bitmaps = T.stack([f_prefix.eval(env) for env in envs])  # well-defined on envs b/c f is
             f_prefix_tokens = Seq(*f_simplified_lines[:i]).serialize()
