@@ -24,18 +24,21 @@ class SrcEncoding(nn.Module):
     def __init__(self, d_model: int, source_sizes: list[int], dropout=0.1):
         super().__init__()
         n_sources = len(source_sizes)
+        self.d_model = d_model
+        self.source_sizes = source_sizes
         self.dropout = nn.Dropout(p=dropout)
         self.src_embedding = nn.Embedding(n_sources, d_model)
         
-        encoding = T.zeros(sum(source_sizes), 1, d_model).to(device)
+    def encoding(self):
+        encoding = T.zeros(sum(self.source_sizes), 1, self.d_model).to(device)
         start = 0
-        for i, source_sz in enumerate(source_sizes):
+        for i, source_sz in enumerate(self.source_sizes):
             encoding[start:start + source_sz, :] = self.src_embedding(T.tensor([i]))
             start += source_sz
-        self.encoding = encoding
+        return encoding
         
     def forward(self, x):
-        return self.dropout(x + self.encoding)
+        return self.dropout(x + self.encoding())
 
 
 class PositionalEncoding(nn.Module):
@@ -177,7 +180,7 @@ class Model(nn.Module):
 
         # concatenate e_B, e_B', e_p' into a single sequence and pass through source encoding -> src
         src = T.cat((e_b, e_b_hat, pe_p_hat))
-        # src = self.src_encoding(src)
+        src = self.src_encoding(src)
 
         # pass src through tf_encoder -> tf_encoding
         tf_code = self.tf_encoder(src)
@@ -244,7 +247,6 @@ class Model(nn.Module):
         epoch_loss = 0
         for i, (B, B_hat, P_hat, D) in enumerate(dataloader):
             optimizer.zero_grad()
-            print(f"pretraining iteration {i}")
             # batch dim first, seq-len dim second in dataloader
             policy_out, value_out = self.forward(b=B, b_hat=B_hat, p_hat=P_hat, delta=D)
             expected = self.to_probabilities(D).transpose(0, 1)
