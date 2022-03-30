@@ -21,14 +21,14 @@ def policy_data_to_examples(data_src: str):
     where f' is a prefix of f, B' is f'(z), and d' is the next line in f after the lines in f'.
     """
     for (f, envs, bitmaps) in util.load_incremental(data_src):
-        f_out = f.simplify_indices().serialize()
+        f_simplified_lines = f.simplify_indices().lines()  # f w/ simplified z indices
         f_lines = f.lines()
         for i in range(1, len(f_lines)):
             f_prefix = Seq(*f_lines[:i])
-            f_prefix_out = f_prefix.simplify_indices().serialize()
-            delta = f_lines[i]
-            bitmaps_partial = T.stack([f_prefix.eval(env) for env in envs])  # well-defined on envs b/c f is
-            yield bitmaps, bitmaps_partial, f_prefix_out, delta, f_out
+            partial_bitmaps = T.stack([f_prefix.eval(env) for env in envs])  # well-defined on envs b/c f is
+            f_prefix_tokens = Seq(*f_simplified_lines[:i]).serialize()
+            delta = f_simplified_lines[i].serialize()
+            yield bitmaps, partial_bitmaps, f_prefix_tokens, delta
 
 def save_policy_dat_as_examples(data_src: str, save_loc: str):
     util.make_parent_dir(save_loc)
