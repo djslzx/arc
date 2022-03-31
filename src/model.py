@@ -339,9 +339,10 @@ if __name__ == '__main__':
                   n_tf_encoder_layers=6, n_tf_decoder_layers=6,
                   n_value_heads=1, n_value_ff_layers=2,
                   max_program_length=50, batch_size=16).to(device)
-    prefix = '../data/policy-pretraining'
-    code = '10-RLP-5e1~3l0~1z'
+    epochs = 1_000_000
+    prefix = '/home/djl328/arc/data/policy-pretraining'
+    code = '1mil-RLP-5e1~4l0~2z'
     tloader = model.make_policy_dataloader(f'{prefix}/{code}-training-exs.dat')
     vloader = model.make_policy_dataloader(f'{prefix}/{code}-validation-exs.dat')
-    model.pretrain_policy(tloader=tloader, vloader=vloader, epochs=100)
+    model.pretrain_policy(tloader=tloader, vloader=vloader, epochs=epochs)
     

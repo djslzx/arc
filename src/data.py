@@ -224,17 +224,16 @@ if __name__ == '__main__':
     # demo_worker_gen_policy_data()
     # demo_gen_policy_data()
     
-    prefix = '../data/policy-pretraining'
-    code = '10-RLP-5e1~3l0~1z'
+    prefix = '/home/djl328/arc/data/policy-pretraining'
+    code = '1mil-RLP-5e1~4l0~2z'
     for mode in ['training', 'validation']:
         gen_policy_data(fname_prefix=f'{prefix}/{code}-{mode}/',
                         n_envs=5,
-                        n_programs=10,
-                        n_lines_bounds=(1, 3),
-                        rand_arg_bounds=(0, 1),
+                        n_programs=1_000_000,
+                        n_lines_bounds=(1, 4),
+                        rand_arg_bounds=(0, 2),
                         line_types=[Rect, Line, Point],
                         line_type_weights=[4, 3, 1],
-                        n_workers=10)
+                        n_workers=100)
         save_policy_dat_as_examples(data_src=f'{prefix}/{code}-{mode}/*/*.dat',
                                     save_loc=f'{prefix}/{code}-{mode}-exs.dat')
-        
