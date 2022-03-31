@@ -1,30 +1,19 @@
 # TODO
-- generator
-  - examine generator performance
-    - [x] fix test_sampling
-    - [x] track stats on what kinds of programs the model has the most trouble with
-  - multithreaded example generation
-    - [x] chain multiple generators together (write into files whose names are randomly generated)
-    - [x] load examples from multiple files (chain together into a single iterable)
-  - training larger models on more data
-    - [x] generate 1m examples with no randomness (no z's)
-    - [x] start training large model on 100k, 1m examplees
-  - housekeeping/optimization
-    - [x] change rect representation to two corners
-    - [x] compute per-seq loss instead of per-tok loss
-  - overfitting
-    - [x] try reducing model size to 512 or 1024
-    - [ ] look into regularization methods
-    - [ ] try a different architecture (RNN: GRU instead of LSTM)   
-  - [x] collect stats on hits/misses for perturbed programs
-- discriminator
-  - [x] generate training data for discriminator
-    - sets of bitmaps: ((B_1, B_2), Y)
-    - [x] generate examples by selecting a program P, then generating perturbations on P
-      - [x] implement program perturbations
-    - [x] generate perturbed programs by running trained model on program prompts and saving the result
-  - [ ] write discriminator in same class as transformer 
-- correctness
-  - [x] check if counting z's counts unique z's or the number of z expressions
-- style
-  - [ ] split generator files into separate dir 
+- [ ] test policy net
+- [ ] incorporate inference of random parameters (z) 
+- [ ] sample rollouts from policy
+  ```
+    program := empty program
+      while n_tokens(program) < self.max_p_len:
+        delta := [LINE_START]
+        while delta not complete:
+          next_delta <- self.forward(bitmaps, program.eval(zs), program, prompt)
+          delta = delta + next_delta
+        program += delta
+  ```
+  ^ use the above to generate a bunch of full rollouts (using top-p or top-k),
+  then evaluate them using an offline approximator for the value function (3 outputs)
+
+- [ ] use sampled rollouts to generate training data for value fn
+- [ ] implement fns to compute value fn outputs offline 
+- [ ] train/test value function

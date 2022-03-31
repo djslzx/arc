@@ -18,7 +18,7 @@ LEXICON = ([i for i in range(0, 10)] +
            [f'S_{i}' for i in range(LIB_SIZE)] +
            ['~', '+', '-', '*', '<', '&', '?',
             'P', 'L', 'R',
-            'H', 'V', 'T', '#', 'o', '@', '!', '{', '}'])
+            'H', 'V', 'T', '#', 'o', '@', '!', '{', '}', '(', ')'])
 
 class Visited:
     def accept(self, visitor):
@@ -612,7 +612,7 @@ def deserialize(tokens):
             return [Seq(*t[:i])] + t[i + 1:]
         if h == '}':
             return tokens
-        if h == '|':
+        if h == '(' or h == ')':
             return t
         else:
             assert False, f'Failed to classify token: {h} of type {type(h)}'
@@ -648,8 +648,9 @@ class Serialize(Visitor):
     def visit_Seq(self, bmps):
         tokens = ['{']  # start
         for bmp in bmps:
+            tokens.append('(')  # line-start
             tokens.extend(bmp.accept(self))
-            tokens.append('|')  # line-end
+            tokens.append(')')  # line-end
         tokens.append('}')  # stop
         return tokens
     def visit_Join(self, bmp1, bmp2): return [';'] + bmp1.accept(self) + bmp2.accept(self)

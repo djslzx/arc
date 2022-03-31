@@ -8,6 +8,19 @@ import random
 
 dirname = os.path.dirname(__file__)
 
+def filter_top_p(v, p=0.95):
+    l = v.shape[0]
+    values, indices = T.sort(v, descending=True)
+    sums = T.cumsum(values, dim=-1)
+    mask = sums >= p
+    # right-shift indices to keep first sum >= p
+    mask[..., 1:] = mask[..., :-1].clone()
+    mask[..., 0] = False
+    # filter out elements in v
+    for b in range(l):
+        v[b, indices[b, mask[b]]] = 0
+    return v
+
 def shuffled(it):
     random.shuffle(it)
     return it
