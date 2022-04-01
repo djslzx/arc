@@ -70,6 +70,10 @@ class Expr(Visited):
             return self.bmps
         except AttributeError:
             return []
+    def add_line(self, line):
+        assert isinstance(self, Seq)
+        assert type(line) in [Point, Line, Rect]
+        return Seq(*self.bmps + line)
     def simplify_indices(self):
         zs = self.zs()
         sprites = self.sprites()
