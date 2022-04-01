@@ -2,7 +2,7 @@
 Generate data to train value & policy nets
 """
 import pickle
-import time
+from datetime import datetime
 from typing import Optional, List, Tuple
 import multiprocessing as mp
 
@@ -23,17 +23,24 @@ def policy_data_to_examples(data_src: str):
     for (f, envs, bitmaps) in util.load_incremental(data_src):
         f_simplified_lines = f.simplify_indices().lines()  # f w/ simplified z indices
         f_lines = f.lines()
+        
+        # empty prefix
+        empty_bitmaps = T.stack([Seq().eval(env) for env in envs])
+        yield bitmaps, empty_bitmaps, [], Seq().serialize()
+        
+        # nonempty prefixes
         for i in range(len(f_lines)):
             f_prefix = Seq(*f_lines[:i])
             partial_bitmaps = T.stack([f_prefix.eval(env) for env in envs])  # well-defined on envs b/c f is
             f_prefix_tokens = Seq(*f_simplified_lines[:i]).serialize()
             delta = f_simplified_lines[i].serialize()
             yield bitmaps, partial_bitmaps, f_prefix_tokens, delta
-
-def save_policy_dat_as_examples(data_src: str, save_loc: str):
+            
+def save_policy_dat_as_examples(data_src: str, save_loc: str, verbose: bool = False):
     util.make_parent_dir(save_loc)
     with open(save_loc, 'wb') as file:
         for item in policy_data_to_examples(data_src):
+            if verbose: print(item)
             pickle.dump(item, file)
 
 def gen_policy_data(fname_prefix: str,
@@ -49,14 +56,12 @@ def gen_policy_data(fname_prefix: str,
     n_lines_lo, n_lines_hi = n_lines_bounds
     assert n_lines_lo >= 0, f'Expected n_lines_bounds > 1, found {n_lines_bounds}'
     
-    fname = f'{fname_prefix}{int(time.time())}'
-    arg_exprs = [Z(i) for i in range(LIB_SIZE)] + [Num(i) for i in range(0, 10)]
-    
     # run n_workers workers to generate a total of n_programs programs of each size in n_lines
+    arg_exprs = [Z(i) for i in range(LIB_SIZE)] + [Num(i) for i in range(0, 10)]
     n_programs_per_worker = n_programs // n_workers
     with mp.Pool(processes=n_workers) as pool:
         pool.starmap(worker_gen_policy_data,
-                     [(f'{fname}/{i}.dat', n_envs, n_programs_per_worker, n_lines,
+                     [(f'{fname_prefix}/{i}.dat', n_envs, n_programs_per_worker, n_lines,
                        arg_exprs, rand_arg_bounds, line_types, line_type_weights, True)
                       for n_lines in range(n_lines_lo, n_lines_hi+1)
                       for i in range(n_workers)])
@@ -227,7 +232,8 @@ if __name__ == '__main__':
     prefix = '/home/djl328/arc/data/policy-pretraining'
     code = '1mil-RLP-5e1~4l0~2z'
     for mode in ['training', 'validation']:
-        gen_policy_data(fname_prefix=f'{prefix}/{code}-{mode}/',
+        t = datetime.now().strftime("%b%d_%y_%H-%M-%S")
+        gen_policy_data(fname_prefix=f'{prefix}/{code}/{mode}_{t}',
                         n_envs=5,
                         n_programs=1_000_000,
                         n_lines_bounds=(1, 4),
@@ -235,5 +241,6 @@ if __name__ == '__main__':
                         line_types=[Rect, Line, Point],
                         line_type_weights=[4, 3, 1],
                         n_workers=100)
-        save_policy_dat_as_examples(data_src=f'{prefix}/{code}-{mode}/*/*.dat',
-                                    save_loc=f'{prefix}/{code}-{mode}-exs.dat')
+        save_policy_dat_as_examples(data_src=f'{prefix}/{code}/{mode}_{t}/*.dat',
+                                    save_loc=f'{prefix}/{code}/{mode}_{t}.exs',
+                                    verbose=False)
