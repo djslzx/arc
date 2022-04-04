@@ -244,16 +244,19 @@ if __name__ == '__main__':
     code = '1mil-RLP-5e1~4l0~2z'
     t = datetime.now().strftime("%b%d_%y_%H-%M-%S")
     for mode in ['training', 'validation']:
-        t = datetime.now().strftime("%b%d_%y_%H-%M-%S")
+        print(f"Generating policy data for mode={mode}")
         gen_policy_data(fname_prefix=f'{dir}/{code}/{mode}_{t}',
                         n_envs=5,
                         n_programs=1_000_000,
-                        n_lines_bounds=(1, 4),
+                        n_lines_bounds=(1, 3),
                         rand_arg_bounds=(0, 2),
                         line_types=[Rect, Line, Point],
                         line_type_weights=[4, 3, 1],
                         n_workers=100)
+
+    for mode in ['training', 'validation']:
+        print(f"Generating examples from policy data for mode={mode}")
         save_policy_dat_as_examples(data_src=f'{dir}/{code}/{mode}_{t}/*.dat',
                                     save_loc=f'{dir}/{code}/{mode}_{t}.exs',
                                     split_envs=True,
-                                    verbose=False)
+                                    verbose=True)
