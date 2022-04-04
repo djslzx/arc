@@ -103,7 +103,8 @@ def seed_sprites(n_sprites=LIB_SIZE):
                     for _ in range(n_sprites)])
 
 def seed_libs(n_libs):
-    return [{'z': seed_zs(), 'sprites': seed_sprites()} for _ in range(n_libs)]
+    return [{'z': seed_zs()} for _ in range(n_libs)]
+    # return [{'z': seed_zs(), 'sprites': seed_sprites()} for _ in range(n_libs)]
 
 class Nil(Expr):
     in_types = []
