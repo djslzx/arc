@@ -16,3 +16,16 @@
                            + R * sum{t <= T} log policy(d_t | f', B', B)
 
 ```
+
+## Inference of z's vs generation of heterogeneous z's
+1. add heterogeneous z's:
+   ```
+    let z = rand_vec(n, 2)
+    let z1, z2 = split(z)
+    yield (B_z1, B_z1', f', d), (B_z1, B_z2', f', d), (B_z2, B_z1', f', d), (B_z2, B_z2', f', d) 
+   ```
+2. incorporate inference of z's into NN
+
+## Problems
+- value function expects fixed-size inputs, but this doesn't play nice with program gen
+  - add padding before passing sth into the value fn? 

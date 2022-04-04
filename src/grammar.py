@@ -70,6 +70,10 @@ class Expr(Visited):
             return self.bmps
         except AttributeError:
             return []
+    def add_line(self, line):
+        assert isinstance(self, Seq)
+        assert type(line) in [Point, Line, Rect]
+        return Seq(*self.bmps + line)
     def simplify_indices(self):
         zs = self.zs()
         sprites = self.sprites()
@@ -99,7 +103,8 @@ def seed_sprites(n_sprites=LIB_SIZE):
                     for _ in range(n_sprites)])
 
 def seed_libs(n_libs):
-    return [{'z': seed_zs(), 'sprites': seed_sprites()} for _ in range(n_libs)]
+    return [{'z': seed_zs()} for _ in range(n_libs)]
+    # return [{'z': seed_zs(), 'sprites': seed_sprites()} for _ in range(n_libs)]
 
 class Nil(Expr):
     in_types = []
