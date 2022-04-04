@@ -48,10 +48,10 @@ def policy_data_to_examples(data_src: str, split_envs: bool = False):
                 delta = f_simplified_lines[i].serialize()
                 yield bitmaps, prefix_bitmaps, prefix_tokens, delta
             
-def save_policy_dat_as_examples(data_src: str, save_loc: str, verbose: bool = False):
+def save_policy_dat_as_examples(data_src: str, save_loc: str, split_envs: bool = True, verbose: bool = False):
     util.make_parent_dir(save_loc)
     with open(save_loc, 'wb') as file:
-        for item in policy_data_to_examples(data_src):
+        for item in policy_data_to_examples(data_src, split_envs=split_envs):
             if verbose: print(item)
             pickle.dump(item, file)
 
@@ -242,6 +242,7 @@ if __name__ == '__main__':
     
     dir = '/home/djl328/arc/data/policy-pretraining'
     code = '1mil-RLP-5e1~4l0~2z'
+    t = datetime.now().strftime("%b%d_%y_%H-%M-%S")
     for mode in ['training', 'validation']:
         t = datetime.now().strftime("%b%d_%y_%H-%M-%S")
         gen_policy_data(fname_prefix=f'{dir}/{code}/{mode}_{t}',
@@ -254,4 +255,5 @@ if __name__ == '__main__':
                         n_workers=100)
         save_policy_dat_as_examples(data_src=f'{dir}/{code}/{mode}_{t}/*.dat',
                                     save_loc=f'{dir}/{code}/{mode}_{t}.exs',
+                                    split_envs=True,
                                     verbose=False)
