@@ -30,10 +30,11 @@ def policy_data_to_examples(data_src: str):
             delta = f_simplified_lines[i].serialize()
             yield bitmaps, partial_bitmaps, f_prefix_tokens, delta
 
-def save_policy_dat_as_examples(data_src: str, save_loc: str):
+def save_policy_dat_as_examples(data_src: str, save_loc: str, verbose: bool = False):
     util.make_parent_dir(save_loc)
     with open(save_loc, 'wb') as file:
-        for item in policy_data_to_examples(data_src):
+        for i, item in enumerate(policy_data_to_examples(data_src)):
+            if verbose: print(i)
             pickle.dump(item, file)
 
 def gen_policy_data(fname_prefix: str,
@@ -225,15 +226,20 @@ if __name__ == '__main__':
     # demo_gen_policy_data()
     
     prefix = '/home/djl328/arc/data/policy-pretraining'
-    code = '1mil-RLP-5e1~4l0~2z'
+    code = '1mil-RLP-5e1~3l0~2z'
     for mode in ['training', 'validation']:
+        print(f"Generating policy data for mode={mode}")
         gen_policy_data(fname_prefix=f'{prefix}/{code}-{mode}/',
                         n_envs=5,
                         n_programs=1_000_000,
-                        n_lines_bounds=(1, 4),
+                        n_lines_bounds=(1, 3),
                         rand_arg_bounds=(0, 2),
                         line_types=[Rect, Line, Point],
                         line_type_weights=[4, 3, 1],
                         n_workers=100)
+
+    for mode in ['training', 'validation']:
+        print(f"Generating examples from policy data for mode={mode}")
         save_policy_dat_as_examples(data_src=f'{prefix}/{code}-{mode}/*/*.dat',
-                                    save_loc=f'{prefix}/{code}-{mode}-exs.dat')
+                                    save_loc=f'{prefix}/{code}-{mode}-exs.dat',
+                                    verbose=True)
