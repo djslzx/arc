@@ -17,3 +17,4 @@
 - [ ] use sampled rollouts to generate training data for value fn
 - [ ] implement fns to compute value fn outputs offline 
 - [ ] train/test value function
+- [ ] fix use of LINE_START/LINE_END tokens
