@@ -190,7 +190,7 @@ def demo_gen_closures():
     for i, (f, envs) in enumerate(util.load_incremental(f'{fname}*.dat')):
         print(i, f)
 
-def gen_closures_and_deltas(closures_loc: str, deltas_loc: str,
+def gen_closures_and_deltas(worker_id: int, closures_loc: str, deltas_loc: str,
                             n_envs: int, n_programs: int, n_lines: int,
                             arg_exprs: List[Expr],
                             rand_arg_bounds: Tuple[int, int],
@@ -206,7 +206,7 @@ def gen_closures_and_deltas(closures_loc: str, deltas_loc: str,
             pickle.dump((f, envs), closures_file)
             for delta in to_delta_examples(f, envs, split_envs=True):
                 pickle.dump(delta, deltas_file)
-            if verbose: print(f'[{i}/{n_programs}]: {f}')
+            if verbose: print(f'[{worker_id}][{i}/{n_programs}]: {f}')
 
 def gen_closures_and_deltas_mp(closures_loc_prefix: str, deltas_loc_prefix: str,
                                n_envs: int, n_programs: int, n_lines_bounds: Tuple[int, int],
@@ -225,7 +225,8 @@ def gen_closures_and_deltas_mp(closures_loc_prefix: str, deltas_loc_prefix: str,
     n_programs_per_worker = n_programs // n_workers
     with mp.Pool(processes=n_workers) as pool:
         pool.starmap(gen_closures_and_deltas,
-                     [(f'{closures_loc_prefix}closures_{i}.dat',
+                     [(i,
+                       f'{closures_loc_prefix}closures_{i}.dat',
                        f'{deltas_loc_prefix}deltas_{i}.dat',
                        n_envs * 2, n_programs_per_worker, n_lines,
                        arg_exprs, rand_arg_bounds, line_types, line_type_weights, True)
