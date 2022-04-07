@@ -190,25 +190,25 @@ def demo_gen_closures():
     for i, (f, envs) in enumerate(util.load_incremental(f'{fname}*.dat')):
         print(i, f)
 
-def gen_closures_and_deltas(closures_save_loc: str, deltas_save_loc: str,
+def gen_closures_and_deltas(closures_loc: str, deltas_loc: str,
                             n_envs: int, n_programs: int, n_lines: int,
                             arg_exprs: List[Expr],
                             rand_arg_bounds: Tuple[int, int],
                             line_types: List[type], line_type_weights: List[float],
                             verbose=False):
-    util.make_parent_dir(closures_save_loc)
-    util.make_parent_dir(deltas_save_loc)
-    with open(closures_save_loc, 'wb') as closures_file, open(deltas_save_loc, 'wb') as deltas_file:
+    util.make_parent_dir(closures_loc)
+    util.make_parent_dir(deltas_loc)
+    with open(closures_loc, 'wb') as closures_file, open(deltas_loc, 'wb') as deltas_file:
         gen = gen_closures(n_envs=n_envs, n_programs=n_programs, n_lines=n_lines, arg_exprs=arg_exprs,
                            rand_arg_bounds=rand_arg_bounds,
                            line_types=line_types, line_type_weights=line_type_weights)
         for i, (f, envs) in enumerate(gen):
             pickle.dump((f, envs), closures_file)
-            deltas = list(to_delta_examples(f, envs))
-            pickle.dump(deltas, deltas_file)
+            for delta in to_delta_examples(f, envs, split_envs=True):
+                pickle.dump(delta, deltas_file)
             if verbose: print(f'[{i}/{n_programs}]: {f}')
 
-def gen_closures_and_deltas_mp(closures_save_loc_prefix: str, deltas_save_loc_prefix: str,
+def gen_closures_and_deltas_mp(closures_loc_prefix: str, deltas_loc_prefix: str,
                                n_envs: int, n_programs: int, n_lines_bounds: Tuple[int, int],
                                rand_arg_bounds: Tuple[int, int],
                                line_types: List[type], line_type_weights: Optional[List[float]] = None,
@@ -225,8 +225,8 @@ def gen_closures_and_deltas_mp(closures_save_loc_prefix: str, deltas_save_loc_pr
     n_programs_per_worker = n_programs // n_workers
     with mp.Pool(processes=n_workers) as pool:
         pool.starmap(gen_closures_and_deltas,
-                     [(f'{closures_save_loc_prefix}closures_{i}.dat',
-                       f'{deltas_save_loc_prefix}deltas_{i}.dat',
+                     [(f'{closures_loc_prefix}closures_{i}.dat',
+                       f'{deltas_loc_prefix}deltas_{i}.dat',
                        n_envs * 2, n_programs_per_worker, n_lines,
                        arg_exprs, rand_arg_bounds, line_types, line_type_weights, True)
                       for n_lines in range(n_lines_lo, n_lines_hi + 1)
@@ -245,8 +245,8 @@ if __name__ == '__main__':
     for mode in ['training', 'validation']:
         print(f"Generating policy data for mode={mode}")
         gen_closures_and_deltas_mp(
-            closures_save_loc_prefix=f'{dir}/{code}/{mode}_{t}/',
-            deltas_save_loc_prefix=f'{dir}/{code}/{mode}_{t}/',
+            closures_loc_prefix=f'{dir}/{code}/{mode}_{t}/',
+            deltas_loc_prefix=f'{dir}/{code}/{mode}_{t}/',
             n_envs=5,
             n_programs=10,
             n_lines_bounds=(1, 3),
