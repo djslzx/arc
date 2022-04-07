@@ -13,12 +13,18 @@ B_H = 8
 LIB_SIZE = 10
 Z_LO = 0  # min poss value in z_n
 Z_HI = max(B_W, B_H)-1  # max poss value in z_n
-LEXICON = ([i for i in range(0, 10)] +
-           [f'z_{i}' for i in range(LIB_SIZE)] +
-           [f'S_{i}' for i in range(LIB_SIZE)] +
-           ['~', '+', '-', '*', '<', '&', '?',
-            'P', 'L', 'R',
-            'H', 'V', 'T', '#', 'o', '@', '!', '{', '}', '(', ')'])
+FULL_LEXICON = ([i for i in range(0, 10)] +
+                [f'z_{i}' for i in range(LIB_SIZE)] +
+                [f'S_{i}' for i in range(LIB_SIZE)] +
+                ['~', '+', '-', '*', '<', '&', '?',
+                 'P', 'L', 'R',
+                 'H', 'V', 'T', '#', 'o', '@', '!', '{', '}', '(', ')'])
+SIMPLE_LEXICON = (
+    [i for i in range(0, 10)] +
+    [f'z_{i}' for i in range(LIB_SIZE)] +
+    ['P', 'L', 'R', '{', '}', '(', ')']
+)
+
 
 class Visited:
     def accept(self, visitor):

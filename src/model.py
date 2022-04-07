@@ -41,7 +41,7 @@ class SrcEncoding(nn.Module):
         return encoding
         
     def forward(self, x):
-        return self.dropout(x + self.encoding())
+        return self.dropout(x + self.encoding()[:x.size(0)])
 
 
 class PositionalEncoding(nn.Module):
@@ -68,6 +68,12 @@ class PositionalEncoding(nn.Module):
 
 
 class Model(nn.Module):
+    
+    PADDING = "PADDING"
+    PROGRAM_START = "PROGRAM_START"
+    PROGRAM_END = "PROGRAM_END"
+    LINE_START = "("
+    LINE_END = ")"
     
     def __init__(self,
                  name: str,
@@ -99,11 +105,11 @@ class Model(nn.Module):
         self.lexicon        = lexicon + ["PROGRAM_START", "PROGRAM_END", "PADDING"]
         self.n_tokens       = len(self.lexicon)
         self.token_to_index = {s: i for i, s in enumerate(self.lexicon)}
-        self.PADDING        = self.token_to_index["PADDING"]
-        self.PROGRAM_START  = self.token_to_index["PROGRAM_START"]
-        self.PROGRAM_END    = self.token_to_index["PROGRAM_END"]
-        self.LINE_START     = self.token_to_index["("]
-        self.LINE_END       = self.token_to_index[")"]
+        self.PADDING        = self.token_to_index[Model.PADDING]
+        self.PROGRAM_START  = self.token_to_index[Model.PROGRAM_START]
+        self.PROGRAM_END    = self.token_to_index[Model.PROGRAM_END]
+        self.LINE_START     = self.token_to_index[Model.LINE_START]
+        self.LINE_END       = self.token_to_index[Model.LINE_END]
         self.p_embedding    = nn.Embedding(num_embeddings=self.n_tokens, embedding_dim=self.d_model)
         self.pos_encoding   = PositionalEncoding(self.d_model)
         
@@ -200,7 +206,7 @@ class Model(nn.Module):
         e_delta = self.pos_encoding(self.embed_programs(delta))
 
         # concat e_B, e_B', e_p', add source encoding, then pass through tf_encoder
-        src = self.src_encoding(T.cat((e_b, e_b_hat, e_p_hat)))
+        src = self.src_encoding.forward(T.cat((e_b, e_b_hat, e_p_hat)))
         tf_code = self.tf_encoder.forward(src)
 
         # pass tf_code through v and pi -> value, policy
@@ -221,16 +227,17 @@ class Model(nn.Module):
         """
         x = log_softmax(actual, -1) : turn logits into probabilities
         x = (x * expected)          : pull out values from `actual` at nonzero locations in `expected`
-        x = T.sum(x, -1)            : remove zeros
+        x = T.sum(x, -1)            : pull out nonzero values
         x = T.sum(x, 0)             : take sum of log-probabilities for each example in the batch
         x = T.mean(x)               : compute mean probability of correctly generating each sequence in the batch
-        x = -x                      : minimize loss (-mean) to maximize mean pr of
+        x = -x                      : minimize loss (-mean) to maximize mean pr
         """
         log_prs = T.sum(F.log_softmax(actual, dim=-1) * expected, dim=-1)
         return -T.mean(T.sum(log_prs, dim=0))
 
     def pretrain_policy(self, tloader: DataLoader, vloader: DataLoader, epochs: int,
-                        lr=10 ** -4, correctness_threshold: float = 0., exit_dist_from_min=1,
+                        lr=10 ** -4, correctness_threshold: float = 0.,
+                        exit_when_vloss_increasing=True, exit_dist_from_min: float = 1,
                         epochs_per_sample=10, hours_between_checkpoints=1):
         """
         Pretrain the policy network, exiting when
@@ -272,8 +279,9 @@ class Model(nn.Module):
                 checkpoint += 1
                 
             # TODO: sample from model
-            if min(tloss, vloss) <= correctness_threshold or \
-               vloss >= min_vloss + exit_dist_from_min: break
+            if (min(tloss, vloss) <= correctness_threshold or
+               (exit_when_vloss_increasing and (vloss >= min_vloss + exit_dist_from_min))):
+                break
         
         path = self.model_path(epoch)
         print(f"Finished training at epoch {epoch} with tloss={tloss}. Saving to {path}")
@@ -314,11 +322,21 @@ class Model(nn.Module):
             epoch_loss += self.word_loss(expected_d, p).detach().item()
         return epoch_loss/len(dataloader)
 
+    @staticmethod
+    def strip(tokens):
+        start = int(tokens[0] == Model.PROGRAM_START)  # skip start token if present
+        end = None                                     # end at last token by default
+        for i, token in enumerate(tokens):
+            if token == Model.PROGRAM_END:
+                end = i
+                break
+        return tokens[start:end]
+        
     def to_program(self, indices, default=None) -> Optional[g.Expr]:
         tokens = self.to_tokens(indices)
         try:
-            return g.deserialize(tokens)
-        except AssertionError:
+            return g.deserialize(Model.strip(tokens))
+        except (AssertionError, IndexError):
             return default
     
     def eval_program(self, indices, envs=None):
@@ -351,21 +369,20 @@ class Model(nn.Module):
             p_out = p_program.add_line(p_delta)
         return self.to_indices(p_out.serialize())
     
-    def sample_line_rollouts(self, b, b_hat, p, max_line_length):
+    def sample_line_rollouts(self, b, b_hat, p_hat, max_line_length):
         print("Sampling line rollouts...")
         self.eval()
         batch_size = b.shape[0]
-        rollouts = T.stack([self.pad(T.tensor([self.LINE_START]),
-                                     padded_length=self.max_line_length,
-                                     padding_value=self.PADDING)]
-                           * batch_size).long().to(device)  # [b, 1]
+        rollouts = T.tensor([[self.LINE_START]] * batch_size).long().to(device)  # [b, 1]
         for i in range(max_line_length):
-            p_outs, _ = self.forward(b=b, b_hat=b_hat, p_hat=p, delta=rollouts)  # [i, b, n_tokens]
-            p_prs = T.softmax(p_outs, dim=2)  # convert p_outs to probabilities -> [i, b]
+            # pdb.set_trace()
+            p_outs, _ = self.forward(b=b, b_hat=b_hat, p_hat=p_hat, delta=rollouts)  # [i, b, n_tokens]
+            p_prs = T.softmax(p_outs, dim=-1)  # convert p_outs to probabilities -> [i, b]
             # sample from distro of predictions
             indices = [T.multinomial(util.filter_top_p(p_pr), 1) for p_pr in p_prs]
             next_indices = indices[-1]
             rollouts = T.cat((rollouts, next_indices), dim=1)
+        pdb.set_trace()
         return rollouts
     
     def sample_program_rollouts(self, bitmaps):
@@ -373,22 +390,25 @@ class Model(nn.Module):
         print("Sampling program rollouts...")
         self.eval()
         batch_size = bitmaps.shape[0]
-        # FIXME: update data-gen so we only need to give it the program start token
-        rollouts = T.stack([self.pad(self.to_indices(['{', '}']),
-                                     padded_length=self.max_program_length,
-                                     padding_value=self.PADDING)]
-                           * batch_size).to(device)
+        # rollouts = T.stack([self.to_indices(['{', '}'])] * batch_size).to(device)
+        rollouts = T.tensor([[self.PROGRAM_START]] * batch_size).to(device)
+        print(f"rollouts: {rollouts}")
         while max(len(rollout) for rollout in rollouts) <= self.max_program_length:
             rollout_renders = T.stack([self.eval_program(rollout) for rollout in rollouts])
-            deltas = self.sample_line_rollouts(b=bitmaps, b_hat=rollout_renders, p=rollouts,
+            padded_rollouts = T.stack([self.pad(rollout,
+                                                length=self.max_program_length,
+                                                value=self.PADDING)
+                                       for rollout in rollouts])
+            deltas = self.sample_line_rollouts(b=bitmaps, b_hat=rollout_renders, p_hat=padded_rollouts,
                                                max_line_length=self.max_line_length)
             rollouts = T.stack([self.append_delta(r, d) for r, d in zip(rollouts, deltas)])
+            print(f"rollouts: {rollouts}")
         return rollouts
     
     @staticmethod
-    def pad(v, padded_length: int, padding_value: int):
+    def pad(v, length: int, value: int):
         """Pad v to length `padded_length` using `padding_value`."""
-        return F.pad(v, pad=(0, padded_length - len(v)), value=padding_value)
+        return F.pad(v, pad=(0, length - len(v)), value=value)
     
     def make_policy_dataloader(self, data_src: str, blind: bool = False):
         """
@@ -408,11 +428,11 @@ class Model(nn.Module):
 
             # process programs: turn tokens into tensors of indices, add padding
             delta_indices = self.pad(self.to_indices(delta),
-                                     padded_length=self.max_line_length,
-                                     padding_value=self.PADDING)
+                                     length=self.max_line_length,
+                                     value=self.PADDING)
             p_prefix_indices = self.pad(self.to_indices(f_prefix_tokens),
-                                        padded_length=self.max_program_length,
-                                        padding_value=self.PADDING)
+                                        length=self.max_program_length,
+                                        value=self.PADDING)
             D.append(delta_indices)
             P_hat.append(p_prefix_indices)
 
@@ -422,27 +442,32 @@ class Model(nn.Module):
 
 
 if __name__ == '__main__':
-    model = Model(name='test', N=5, H=g.B_H, W=g.B_W, lexicon=g.LEXICON,
+    prefix = '../data/policy-pretraining'
+    code = '10-RLP-5e1~3l0~2z'
+    t = 'Apr06_22_21-59-24'
+    
+    model = Model(name=f'{code}_{t}', N=5, H=g.B_H, W=g.B_W, lexicon=g.SIMPLE_LEXICON,
                   d_model=512, n_conv_layers=6, n_conv_channels=12,
                   n_tf_encoder_layers=6, n_tf_decoder_layers=6,
                   n_value_heads=1, n_value_ff_layers=2,
-                  max_program_length=50, batch_size=16, save_dir='../models').to(device)
-    epochs = 1_000
-    prefix = '../data/policy-pretraining'
-    code = '10-RLP-5e1~3l0~1z'
-    t = 'Apr01_22_14-43-52'
+                  max_program_length=50, batch_size=16,
+                  save_dir='../models').to(device)
     
     print("Making dataloaders...")
-    tloader = model.make_policy_dataloader(f'{prefix}/{code}/training_{t}.exs')
-    vloader = model.make_policy_dataloader(f'{prefix}/{code}/validation_{t}.exs')
+    tloader = model.make_policy_dataloader(f'{prefix}/{code}/training_{t}/deltas_*.dat')
+    vloader = model.make_policy_dataloader(f'{prefix}/{code}/validation_{t}/deltas_*.dat')
 
     print("Pretraining policy....")
-    # model.pretrain_policy(tloader=tloader, vloader=vloader, epochs=epochs,
-    #                       correctness_threshold=0.1)
-    model.load_model('../models/model_test_28.pt')
-    
+    epochs = 1_000
+    model.pretrain_policy(tloader=tloader, vloader=vloader, epochs=epochs,
+                          correctness_threshold=0,
+                          exit_when_vloss_increasing=False,
+                          exit_dist_from_min=0.1)
+    # model.load_model(f'../models/model_{code}_{t}_{epochs}.pt')
+
     # sample rollouts
-    sample_B, sample_B_hat, sample_P_hat, sample_D = iter(tloader).next()
+    sample_B, _, _, _ = iter(tloader).next()
     print("Sampling rollouts...")
     print(f"sample_B: {sample_B.shape}")
     print(model.sample_program_rollouts(sample_B))
+    
