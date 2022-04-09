@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import TensorDataset, DataLoader
 import torch.utils.tensorboard as tb
-from typing import Optional, Iterable
+from typing import Optional, Iterable, List
 
 import grammar as g
 import util
@@ -24,7 +24,7 @@ class SrcEncoding(nn.Module):
     Add learned encoding to identify data sources
     """
     
-    def __init__(self, d_model: int, source_sizes: list[int], dropout=0.1):
+    def __init__(self, d_model: int, source_sizes: List[int], dropout=0.1):
         super().__init__()
         n_sources = len(source_sizes)
         self.d_model = d_model
@@ -77,7 +77,7 @@ class Model(nn.Module):
     
     def __init__(self,
                  name: str,
-                 N: int, H: int, W: int, lexicon: list[str],
+                 N: int, H: int, W: int, lexicon: List[str],
                  d_model=512,
                  n_conv_layers=6, n_conv_channels=16,
                  n_tf_encoder_layers=6, n_tf_decoder_layers=6,
@@ -442,9 +442,9 @@ class Model(nn.Module):
 
 
 if __name__ == '__main__':
-    prefix = '../data/policy-pretraining'
-    code = '10-RLP-5e1~3l0~2z'
-    t = 'Apr06_22_21-59-24'
+    prefix = '/home/djl328/data/policy-pretraining'
+    code = '1mil-RLP-5e1~3l0~1z'
+    t = 'Apr06_22_22-05-37'
     
     model = Model(name=f'{code}_{t}', N=5, H=g.B_H, W=g.B_W, lexicon=g.SIMPLE_LEXICON,
                   d_model=512, n_conv_layers=6, n_conv_channels=12,
@@ -458,16 +458,15 @@ if __name__ == '__main__':
     vloader = model.make_policy_dataloader(f'{prefix}/{code}/validation_{t}/deltas_*.dat')
 
     print("Pretraining policy....")
-    epochs = 1_000
+    epochs = 1_000_000
     model.pretrain_policy(tloader=tloader, vloader=vloader, epochs=epochs,
                           correctness_threshold=0,
-                          exit_when_vloss_increasing=False,
-                          exit_dist_from_min=0.1)
+                          exit_when_vloss_increasing=False)
     # model.load_model(f'../models/model_{code}_{t}_{epochs}.pt')
 
     # sample rollouts
-    sample_B, _, _, _ = iter(tloader).next()
-    print("Sampling rollouts...")
-    print(f"sample_B: {sample_B.shape}")
-    print(model.sample_program_rollouts(sample_B))
+    # sample_B, _, _, _ = iter(tloader).next()
+    # print("Sampling rollouts...")
+    # print(f"sample_B: {sample_B.shape}")
+    # print(model.sample_program_rollouts(sample_B))
     
