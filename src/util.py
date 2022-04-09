@@ -1,4 +1,5 @@
 import torch as T
+import torch.nn.functional as F
 import pickle
 import os
 from glob import glob
@@ -7,6 +8,9 @@ from pathlib import Path
 import random
 
 dirname = os.path.dirname(__file__)
+
+def pad(v, length: int, value: int):
+    return F.pad(v, pad=(0, length - len(v)), value=value)
 
 def filter_top_p(v, p=0.95):
     x = v.clone()
