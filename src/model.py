@@ -237,10 +237,13 @@ class Model(nn.Module):
         log_prs = T.sum(F.log_softmax(actual, dim=-1) * expected, dim=-1)
         return -T.mean(T.sum(log_prs, dim=0))
 
-    def pretrain_policy(self, tloader: DataLoader, vloader: DataLoader, epochs: int,
-                        lr=10 ** -4, correctness_threshold: float = 0.,
-                        exit_when_vloss_increasing=True, exit_dist_from_min: float = 1,
-                        epochs_per_sample=10, hours_between_checkpoints=1):
+    def pretrain_policy(self, tloader: DataLoader, vloader: DataLoader, epochs: int, lr=10 ** -4,
+                        correctness_threshold: float = 0.,
+                        exit_when_vloss_increasing=True,
+                        exit_dist_from_min: float = 1,
+                        training_log_freq=10_000,
+                        epochs_per_sample=10,
+                        hours_between_checkpoints=1):
         """
         Pretrain the policy network, exiting when
         (a) the validation or training loss reaches the correctness threshold, or
@@ -256,7 +259,7 @@ class Model(nn.Module):
         t_start = time.time()
         for epoch in range(1, epochs + 1):
             t_epoch_start = time.time()
-            tloss = self.pretrain_epoch_tl(tloader, optimizer)
+            tloss = self.pretrain_epoch_tl(tloader, optimizer, log_freq=training_log_freq)
             vloss = self.pretrain_epoch_vl(vloader)
             t_epoch_end = time.time()
             
@@ -298,11 +301,11 @@ class Model(nn.Module):
     def to_probabilities(self, indices):
         return F.one_hot(indices, num_classes=self.n_tokens).float()
     
-    def pretrain_epoch_tl(self, dataloader, optimizer):
+    def pretrain_epoch_tl(self, dataloader, optimizer, log_freq=10_000):
         """Pretrain the policy network."""
         self.train()
         epoch_loss = 0
-        for i, (B, B_hat, P_hat, D) in enumerate(dataloader):
+        for i, (B, B_hat, P_hat, D) in enumerate(dataloader, 1):
             optimizer.zero_grad()
             # batch dim first, seq-len dim second in dataloader
             policy_out, value_out = self.forward(b=B, b_hat=B_hat, p_hat=P_hat, delta=D)
@@ -312,9 +315,7 @@ class Model(nn.Module):
             loss.backward()
             optimizer.step()
             epoch_loss += loss.detach().item()
-
-            if i % 10000 == 0:
-                print(f"[{i}/10000]: loss={epoch_loss/(i+1)}")
+            if i % log_freq == 0: print(f"  [{i}/{len(dataloader)}]: running tloss={epoch_loss/i:.3f}")
 
         return epoch_loss/len(dataloader)
     
@@ -381,14 +382,12 @@ class Model(nn.Module):
         batch_size = b.shape[0]
         rollouts = T.tensor([[self.LINE_START]] * batch_size).long().to(device)  # [b, 1]
         for i in range(max_line_length):
-            # pdb.set_trace()
             p_outs, _ = self.forward(b=b, b_hat=b_hat, p_hat=p_hat, delta=rollouts)  # [i, b, n_tokens]
             p_prs = T.softmax(p_outs, dim=-1)  # convert p_outs to probabilities -> [i, b]
             # sample from distro of predictions
             indices = [T.multinomial(util.filter_top_p(p_pr), 1) for p_pr in p_prs]
             next_indices = indices[-1]
             rollouts = T.cat((rollouts, next_indices), dim=1)
-        pdb.set_trace()
         return rollouts
     
     def sample_program_rollouts(self, bitmaps):
@@ -429,13 +428,26 @@ class PolicyDataset(IterableDataset):
                  padding: int, program_length: int, line_length: int):
         super(PolicyDataset).__init__()
         self.files = util.shuffled(glob(src_glob))  # shuffle file order bc IterableDatasets can't be shuffled
+        assert len(self.files) > 0, f"Found empty glob: {src_glob} => {self.files}"
         self.to_indices = to_indices
         self.padding = padding
         self.program_length = program_length
         self.line_length = line_length
+        self.length = None
         
     def __len__(self):
-        return len(self.files)
+        if self.length is None:
+            n_objs = 0
+            for file in self.files:
+                with open(file, 'rb') as fp:
+                    while True:
+                        try:
+                            pickle.load(fp)
+                            n_objs += 1
+                        except EOFError:
+                            break
+            self.length = n_objs
+        return self.length
     
     def __iter__(self):
         for file in self.files:
@@ -455,9 +467,12 @@ class PolicyDataset(IterableDataset):
 
 
 if __name__ == '__main__':
-    prefix = '/home/djl328/data/policy-pretraining'
-    code = '1mil-RLP-5e1~3l0~1z'
-    t = 'Apr06_22_22-05-37'
+    prefix = '../data/policy-pretraining'
+    code = '10-RLP-5e1~3l0~1z'
+    t = 'Apr09_22_14-11-14'
+    # prefix = '/home/djl328/data/policy-pretraining'
+    # code = '1mil-RLP-5e1~3l0~1z'
+    # t = 'Apr06_22_22-05-37'
     
     model = Model(name=f'{code}_{t}', N=5, H=g.B_H, W=g.B_W, lexicon=g.SIMPLE_LEXICON,
                   d_model=512, n_conv_layers=6, n_conv_channels=12,
@@ -474,7 +489,8 @@ if __name__ == '__main__':
     epochs = 1_000_000
     model.pretrain_policy(tloader=tloader, vloader=vloader, epochs=epochs,
                           correctness_threshold=0,
-                          exit_when_vloss_increasing=False)
+                          exit_when_vloss_increasing=False,
+                          training_log_freq=10_000)
     # model.load_model(f'../models/model_{code}_{t}_{epochs}.pt')
 
     # sample rollouts
