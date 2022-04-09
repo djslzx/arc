@@ -312,6 +312,10 @@ class Model(nn.Module):
             loss.backward()
             optimizer.step()
             epoch_loss += loss.detach().item()
+
+            if i % 10000 == 0:
+                print(f"[{i}/10000]: loss={epoch_loss/(i+1)}")
+
         return epoch_loss/len(dataloader)
     
     def pretrain_epoch_vl(self, dataloader):
