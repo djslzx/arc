@@ -186,6 +186,21 @@ def load_incremental(file_glob, verbose=False):
                         break
     return gen()
 
+def join_glob(in_glob: str, out: str):
+    """Join all globbed files into a single file"""
+    in_fnames = glob(in_glob)
+    print(f"Joining {in_fnames} => {out}...")
+    with open(out, 'wb') as f_out:
+        for fname in in_fnames:
+            print(f"Reading from {fname}...")
+            with open(fname, 'rb') as f_in:
+                while True:
+                    try:
+                        x = pickle.load(f_in)
+                        pickle.dump(x, f_out)
+                    except EOFError:
+                        break
+
 
 if __name__ == '__main__':
     print(img_to_tensor(['_#_',
