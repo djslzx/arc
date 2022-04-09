@@ -3,14 +3,16 @@ Implement a two-headed model (value, policy)
 """
 import pdb
 import math
+import pickle
 import time
+from glob import glob
 
 import torch as T
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.data import TensorDataset, DataLoader, IterableDataset, ChainDataset
 import torch.utils.tensorboard as tb
-from typing import Optional, Iterable, List
+from typing import Optional, Iterable, List, Dict, Callable
 
 import grammar as g
 import util
@@ -405,40 +407,47 @@ class Model(nn.Module):
             print(f"rollouts: {rollouts}")
         return rollouts
     
-    @staticmethod
-    def pad(v, length: int, value: int):
-        """Pad v to length `padded_length` using `padding_value`."""
-        return F.pad(v, pad=(0, length - len(v)), value=value)
-    
-    def make_policy_dataloader(self, data_src: str, blind: bool = False):
+    def make_policy_dataloader(self, data_src: str):
         """
         Make a dataloader for policy network pre-training. (batching, tokens -> indices, add channel dim, etc)
         """
-        B, B_hat, P_hat, D = [], [], [], []
-        for (bitmaps, partial_bitmaps, f_prefix_tokens, delta) in util.load_incremental(data_src):
-            # process bitmaps
-            if blind:
-                bitmaps = T.zeros(self.N, 1, self.H, self.W)
-                partial_bitmaps = T.zeros(self.N, 1, self.H, self.W)
-            else:
-                bitmaps = bitmaps.unsqueeze(1)  # add channel dimension
-                partial_bitmaps = partial_bitmaps.unsqueeze(1)
-            B.append(bitmaps)
-            B_hat.append(partial_bitmaps)
+        dataset = PolicyDataset(data_src,
+                                to_indices=lambda tokens: self.to_indices(tokens),
+                                padding=self.PADDING,
+                                program_length=self.max_program_length,
+                                line_length=self.max_line_length)
+        return DataLoader(dataset, batch_size=self.batch_size)
 
-            # process programs: turn tokens into tensors of indices, add padding
-            delta_indices = self.pad(self.to_indices(delta),
-                                     length=self.max_line_length,
-                                     value=self.PADDING)
-            p_prefix_indices = self.pad(self.to_indices(f_prefix_tokens),
-                                        length=self.max_program_length,
-                                        value=self.PADDING)
-            D.append(delta_indices)
-            P_hat.append(p_prefix_indices)
 
-        dataset = TensorDataset(T.stack(B).to(device), T.stack(B_hat).to(device),
-                                T.stack(P_hat).to(device), T.stack(D).to(device))
-        return DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
+class PolicyDataset(IterableDataset):
+
+    def __init__(self, src_glob: str, to_indices: Callable[[List], T.Tensor],
+                 padding: int, program_length: int, line_length: int):
+        super(PolicyDataset).__init__()
+        self.files = util.shuffled(glob(src_glob))  # shuffle file order bc IterableDatasets can't be shuffled
+        self.to_indices = to_indices
+        self.padding = padding
+        self.program_length = program_length
+        self.line_length = line_length
+        
+    def __len__(self):
+        return len(self.files)
+    
+    def __iter__(self):
+        for file in self.files:
+            with open(file, 'rb') as fp:
+                while True:
+                    try:
+                        bitmaps, partial_bitmaps, f_prefix_tokens, delta = pickle.load(fp)
+                        # add channel dimension to bitmaps
+                        b = bitmaps.unsqueeze(1).to(device)
+                        b_hat = partial_bitmaps.unsqueeze(1).to(device)
+                        # convert program tokens into padded vectors of indices
+                        f_hat = util.pad(self.to_indices(f_prefix_tokens), self.program_length, self.padding).to(device)
+                        d = util.pad(self.to_indices(delta), self.line_length, self.padding).to(device)
+                        yield b, b_hat, f_hat, d
+                    except EOFError:
+                        break
 
 
 if __name__ == '__main__':
@@ -454,8 +463,8 @@ if __name__ == '__main__':
                   save_dir='../models').to(device)
     
     print("Making dataloaders...")
-    tloader = model.make_policy_dataloader(f'{prefix}/{code}/training_{t}/deltas_*.dat')
-    vloader = model.make_policy_dataloader(f'{prefix}/{code}/validation_{t}/deltas_*.dat')
+    tloader = model.make_policy_dataloader(f'{prefix}/{code}/training_{t}/joined_deltas.dat')
+    vloader = model.make_policy_dataloader(f'{prefix}/{code}/validation_{t}/joined_deltas.dat')
 
     print("Pretraining policy....")
     epochs = 1_000_000

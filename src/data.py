@@ -256,3 +256,5 @@ if __name__ == '__main__':
             line_type_weights=[4, 3, 1],
             n_workers=10,
         )
+        util.join_glob(f"{dir}/{code}/{mode}_{t}/deltas_*.dat", 
+                       f"{dir}/{code}/{mode}_{t}/joined_deltas.dat")
