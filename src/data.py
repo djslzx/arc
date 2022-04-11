@@ -242,7 +242,7 @@ if __name__ == '__main__':
     
     dir = '../data/policy-pretraining'
     code = '10-RLP-5e1~3l0~2z'
-    t = datetime.now().strftime("%b%d_%y_%H-%M-%S")
+    t = util.now_str()
     for mode in ['training', 'validation']:
         print(f"Generating policy data for mode={mode}")
         gen_closures_and_deltas_mp(

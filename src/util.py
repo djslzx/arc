@@ -6,8 +6,12 @@ from glob import glob
 from math import floor, ceil
 from pathlib import Path
 import random
+from datetime import datetime
 
 dirname = os.path.dirname(__file__)
+
+def now_str():
+    return datetime.now().strftime("%b%d_%y_%H-%M-%S")
 
 def pad(v, length: int, value: int):
     return F.pad(v, pad=(0, length - len(v)), value=value)

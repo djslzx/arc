@@ -238,12 +238,7 @@ class Model(nn.Module):
         return -T.mean(T.sum(log_prs, dim=0))
 
     def pretrain_policy(self, tloader: DataLoader, vloader: DataLoader, epochs: int, lr=10 ** -4,
-                        correctness_threshold: float = 0.,
-                        exit_when_vloss_increasing=True,
-                        exit_dist_from_min: float = 1,
-                        training_log_freq=10_000,
-                        epochs_per_sample=10,
-                        hours_between_checkpoints=1):
+                        assess_freq=10_000, checkpoint_freq=1, vloss_gap=1, tloss_thresh=0, vloss_thresh=0):
         """
         Pretrain the policy network, exiting when
         (a) the validation or training loss reaches the correctness threshold, or
@@ -253,45 +248,63 @@ class Model(nn.Module):
         optimizer = T.optim.Adam(self.parameters(), lr=lr)
         writer = tb.SummaryWriter(comment=f'_{self.name}')
 
-        epoch, tloss, vloss = 0, 0, 0
+        self.train()
+        t_start = time.time()
+        step, tloss, vloss = 0, 0, 0
         checkpoint = 1
         min_vloss = T.inf
-        t_start = time.time()
-        for epoch in range(1, epochs + 1):
-            t_epoch_start = time.time()
-            tloss = self.pretrain_epoch_tl(tloader, optimizer, log_freq=training_log_freq)
-            vloss = self.pretrain_epoch_vl(vloader)
-            t_epoch_end = time.time()
-            
-            if vloss < min_vloss: min_vloss = vloss
-
-            t_epoch = t_epoch_end - t_epoch_start
-            t_total = t_epoch_end - t_start
-            print(f'training loss: {tloss:.3f}, validation loss: {vloss:.3f}; '
-                  f'took {t_epoch:.2f}s, {t_total:.2f}s total')
-            writer.add_scalar('training loss', tloss, epoch)
-            writer.add_scalar('validation loss', vloss, epoch)
-            
-            # write a checkpoint every `hours_between_checkpoints` hours
-            if (t_epoch_end - t_start)//(3600 * hours_between_checkpoints) > checkpoint:
-                T.save({
-                    'epoch': epoch,
-                    'model_state_dict': self.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    'training loss': tloss,
-                    'validation loss': vloss,
-                }, self.model_path(epoch))
-                checkpoint += 1
+        assess_freq = min(assess_freq, len(tloader))  # bound assess_freq by dataloader size
+        training_complete = False
+        for epoch in range(epochs):
+            round_tloss = 0
+            for i, (B, B_hat, P_hat, D) in enumerate(tloader, 1):
+                step = epoch * assess_freq + i
                 
-            # TODO: sample from model
-            if (min(tloss, vloss) <= correctness_threshold or
-               (exit_when_vloss_increasing and (vloss >= min_vloss + exit_dist_from_min))):
-                break
+                # batch dim first, seq-len dim second in dataloader
+                policy_out, value_out = self.forward(b=B, b_hat=B_hat, p_hat=P_hat, delta=D)
+                expected = self.to_probabilities(D).transpose(0, 1)
+                loss = self.word_loss(expected=expected, actual=policy_out)
         
-        path = self.model_path(epoch)
-        print(f"Finished training at epoch {epoch} with tloss={tloss}. Saving to {path}")
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                round_tloss += loss.item()
+        
+                # assess and record current performance
+                if i % assess_freq == 0:
+                    tloss = round_tloss / assess_freq
+                    vloss = self.pretrain_validate(vloader, n_steps=assess_freq); self.train()
+                    if vloss < min_vloss: min_vloss = vloss
+                    
+                    # record losses
+                    print(f" [{step}]: training loss={tloss:.3f}, validation loss={vloss:.3f},"
+                          f" {time.time() - t_start:.2f}s elapsed")
+                    writer.add_scalar('training loss', tloss, step)
+                    writer.add_scalar('validation loss', vloss, step)
+                    round_tloss = 0
+            
+                    # check exit conditions
+                    if vloss > min_vloss + vloss_gap or tloss <= tloss_thresh or vloss <= vloss_thresh:
+                        training_complete = True
+                        break
+            
+                # write a checkpoint
+                if (time.time() - t_start) // (3600 * checkpoint_freq) > checkpoint:
+                    T.save({'step': step,
+                            'model_state_dict': self.state_dict(),
+                            'optimizer_state_dict': optimizer.state_dict(),
+                            'training loss': tloss,
+                            'validation loss': vloss,
+                            }, self.model_path(step))
+                    checkpoint += 1
+            
+            # TODO: sample from model
+            if training_complete: break
+        
+        path = self.model_path(step)
+        print(f"Finished training at step {step} with tloss={tloss}, vloss={vloss}. Saving to {path}...")
         T.save({
-            'epoch': epoch,
+            'step': step,
             'model_state_dict': self.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
             'training loss': tloss,
@@ -301,33 +314,17 @@ class Model(nn.Module):
     def to_probabilities(self, indices):
         return F.one_hot(indices, num_classes=self.n_tokens).float()
     
-    def pretrain_epoch_tl(self, dataloader, optimizer, log_freq=10_000):
-        """Pretrain the policy network."""
-        self.train()
-        epoch_loss = 0
-        for i, (B, B_hat, P_hat, D) in enumerate(dataloader, 1):
-            optimizer.zero_grad()
-            # batch dim first, seq-len dim second in dataloader
-            policy_out, value_out = self.forward(b=B, b_hat=B_hat, p_hat=P_hat, delta=D)
-            expected = self.to_probabilities(D).transpose(0, 1)
-            loss = self.word_loss(expected=expected, actual=policy_out)
-            
-            loss.backward()
-            optimizer.step()
-            epoch_loss += loss.detach().item()
-            if i % log_freq == 0: print(f"  [{i}/{len(dataloader)}]: running tloss={epoch_loss/i:.3f}")
-
-        return epoch_loss/len(dataloader)
-    
-    def pretrain_epoch_vl(self, dataloader):
+    def pretrain_validate(self, dataloader, n_steps=None):
         """Compute validation loss of the policy network on the (validation data) dataloader."""
         self.eval()
         epoch_loss = 0
-        for (B, B_hat, P_hat, D) in dataloader:
+        if n_steps is None: n_steps = len(dataloader)
+        for i, (B, B_hat, P_hat, D) in zip(range(n_steps), dataloader):
             p, v = self.forward(b=B, b_hat=B_hat, p_hat=P_hat, delta=D)
             expected_d = self.to_probabilities(D).transpose(0, 1)
-            epoch_loss += self.word_loss(expected_d, p).detach().item()
-        return epoch_loss/len(dataloader)
+            loss = self.word_loss(expected_d, p)
+            epoch_loss += loss.detach().item()
+        return epoch_loss/n_steps
 
     @staticmethod
     def strip(tokens):
@@ -469,12 +466,13 @@ class PolicyDataset(IterableDataset):
 if __name__ == '__main__':
     prefix = '../data/policy-pretraining'
     code = '10-RLP-5e1~3l0~1z'
-    t = 'Apr09_22_14-11-14'
+    data_t = 'Apr09_22_14-11-14'
+    model_t = util.now_str()
     # prefix = '/home/djl328/data/policy-pretraining'
     # code = '1mil-RLP-5e1~3l0~1z'
     # t = 'Apr06_22_22-05-37'
     
-    model = Model(name=f'{code}_{t}', N=5, H=g.B_H, W=g.B_W, lexicon=g.SIMPLE_LEXICON,
+    model = Model(name=f'{code}_{model_t}', N=5, H=g.B_H, W=g.B_W, lexicon=g.SIMPLE_LEXICON,
                   d_model=512, n_conv_layers=6, n_conv_channels=12,
                   n_tf_encoder_layers=6, n_tf_decoder_layers=6,
                   n_value_heads=1, n_value_ff_layers=2,
@@ -482,15 +480,12 @@ if __name__ == '__main__':
                   save_dir='../models').to(device)
     
     print("Making dataloaders...")
-    tloader = model.make_policy_dataloader(f'{prefix}/{code}/training_{t}/joined_deltas.dat')
-    vloader = model.make_policy_dataloader(f'{prefix}/{code}/validation_{t}/joined_deltas.dat')
+    tloader = model.make_policy_dataloader(f'{prefix}/{code}/training_{data_t}/joined_deltas.dat')
+    vloader = model.make_policy_dataloader(f'{prefix}/{code}/validation_{data_t}/joined_deltas.dat')
 
     print("Pretraining policy....")
-    epochs = 1_000_000
-    model.pretrain_policy(tloader=tloader, vloader=vloader, epochs=epochs,
-                          correctness_threshold=0,
-                          exit_when_vloss_increasing=False,
-                          training_log_freq=10_000)
+    epochs = 1_000
+    model.pretrain_policy(tloader=tloader, vloader=vloader, epochs=epochs)
     # model.load_model(f'../models/model_{code}_{t}_{epochs}.pt')
 
     # sample rollouts
