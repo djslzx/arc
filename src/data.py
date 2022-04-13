@@ -38,9 +38,9 @@ def to_delta_examples(f: Expr, envs: List[Dict], split_envs=False) -> Generator[
         # generate full program's bitmaps
         bitmaps = T.stack([f.eval(env) for env in full_envs])
         
-        # empty prefix
-        empty_bitmaps = T.stack([Seq().eval(env) for env in full_envs])
-        yield bitmaps, empty_bitmaps, [], Seq().serialize()
+        # # empty prefix
+        # empty_bitmaps = T.stack([Seq().eval(env) for env in full_envs])
+        # yield bitmaps, empty_bitmaps, [], Seq().serialize()
         
         # nonempty prefixes
         for i in range(len(f_lines)):
