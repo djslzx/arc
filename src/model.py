@@ -242,7 +242,7 @@ class Model(nn.Module):
         return -T.mean(T.sum(log_prs, dim=0))
 
     def pretrain_policy(self, tloader: DataLoader, vloader: DataLoader, epochs: int, lr=10 ** -4,
-                        assess_freq=10_000, checkpoint_freq=1, vloss_gap=1, tloss_thresh=0, vloss_thresh=0):
+                        assess_freq=10_000, checkpoint_freq=100_000, vloss_gap=1, tloss_thresh=0, vloss_thresh=0):
         """
         Pretrain the policy network, exiting when
         (a) the validation or training loss reaches the correctness threshold, or
@@ -255,14 +255,13 @@ class Model(nn.Module):
         self.train()
         t_start = time.time()
         step, tloss, vloss = 0, 0, 0
-        checkpoint = 1
         min_vloss = T.inf
         assess_freq = min(assess_freq, len(tloader))  # bound assess_freq by dataloader size
         training_complete = False
         for epoch in range(epochs):
             round_tloss = 0
-            for i, (B, B_hat, P_hat, D) in enumerate(tloader, 1):
-                step = epoch * assess_freq + i
+            for B, B_hat, P_hat, D in tloader:
+                step += 1
                 
                 # batch dim first, seq-len dim second in dataloader
                 D_in = D[:, 1:]
@@ -277,13 +276,13 @@ class Model(nn.Module):
                 round_tloss += loss.item()
         
                 # assess and record current performance
-                if i % assess_freq == 0:
+                if step % assess_freq == 0:
                     tloss = round_tloss / assess_freq
                     vloss = self.pretrain_validate(vloader, n_steps=assess_freq); self.train()
                     if vloss < min_vloss: min_vloss = vloss
                     
                     # record losses
-                    print(f" [{step}]: training loss={tloss:.3f}, validation loss={vloss:.3f},"
+                    print(f" [step={step}, epoch={epoch}]: training loss={tloss:.5f}, validation loss={vloss:.5f},"
                           f" {time.time() - t_start:.2f}s elapsed")
                     writer.add_scalar('training loss', tloss, step)
                     writer.add_scalar('validation loss', vloss, step)
@@ -295,14 +294,14 @@ class Model(nn.Module):
                         break
             
                 # write a checkpoint
-                if (time.time() - t_start) // (3600 * checkpoint_freq) > checkpoint:
+                if step % checkpoint_freq == 0:
+                    print(f"Logging checkpoint at step {step}...")
                     T.save({'step': step,
                             'model_state_dict': self.state_dict(),
                             'optimizer_state_dict': optimizer.state_dict(),
                             'training loss': tloss,
                             'validation loss': vloss,
                             }, self.model_path(step))
-                    checkpoint += 1
             
             # TODO: sample from model
             if training_complete: break
@@ -467,27 +466,29 @@ class PolicyDataset(IterableDataset):
 
 
 if __name__ == '__main__':
-    prefix = '../data/policy-pretraining'
-    data_code = '10-RLP-5e1~3l0~2z'
+    data_prefix = '/home/djl328/arc/data/policy-pretraining'
+    model_prefix = '/home/djl328/arc/models'
+    data_code = '100k-RLP-5e1~3l0~1z'
     model_code = data_code
-    data_t = 'Apr13_22_11-35-52'
-    model_t = 'Apr13_22_11-41-54'
-    # model_t = util.now_str()
+    data_t = 'Apr14_22_01-51-39'
+    model_t = util.now_str()
 
     model = Model(name=f'{model_code}_{model_t}', N=5, H=g.B_H, W=g.B_W, lexicon=g.SIMPLE_LEXICON,
                   d_model=512, n_conv_layers=6, n_conv_channels=12,
                   n_tf_encoder_layers=6, n_tf_decoder_layers=6,
                   n_value_heads=1, n_value_ff_layers=2,
                   max_program_length=50, batch_size=16,
-                  save_dir='../models').to(device)
+                  save_dir=model_prefix).to(device)
     
     print("Making dataloaders...")
-    tloader = model.make_policy_dataloader(f'{prefix}/{data_code}/training_{data_t}/joined_deltas.dat')
-    vloader = model.make_policy_dataloader(f'{prefix}/{data_code}/validation_{data_t}/joined_deltas.dat')
+    tloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/training_{data_t}/joined_deltas.dat')
+    vloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/validation_{data_t}/joined_deltas.dat')
 
     print("Pretraining policy....")
-    epochs = 100
-    model.pretrain_policy(tloader=tloader, vloader=vloader, epochs=epochs)
+    epochs = 1_000_000
+    model.pretrain_policy(tloader=tloader, vloader=vloader, epochs=epochs,
+                          assess_freq=1_000, checkpoint_freq=10_000, vloss_gap=1,
+                          tloss_thresh=10 ** -4, vloss_thresh=10 ** -4)
 
     # print("Loading trained policy...")
     # steps = 160
