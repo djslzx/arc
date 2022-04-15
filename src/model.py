@@ -242,7 +242,9 @@ class Model(nn.Module):
         return -T.mean(T.sum(log_prs, dim=0))
 
     def pretrain_policy(self, tloader: DataLoader, vloader: DataLoader, epochs: int, lr=10 ** -4,
-                        assess_freq=10_000, checkpoint_freq=100_000, vloss_gap=1, tloss_thresh=0, vloss_thresh=0):
+                        assess_freq=10_000, checkpoint_freq=100_000,
+                        tloss_thresh: float = 0, vloss_thresh: float = 0,
+                        check_vloss_gap=True, vloss_gap: float = 1):
         """
         Pretrain the policy network, exiting when
         (a) the validation or training loss reaches the correctness threshold, or
@@ -264,12 +266,16 @@ class Model(nn.Module):
                 step += 1
                 
                 # batch dim first, seq-len dim second in dataloader
-                D_in = D[:, 1:]
-                D_out = D[:, :-1]
+                D_in = D[:, :-1]
+                D_out = D[:, 1:]
                 policy_out, value_out = self.forward(b=B, b_hat=B_hat, p_hat=P_hat, delta=D_in)
                 expected = self.to_probabilities(D_out).transpose(0, 1)  # [seq-len, batch, lexicon-size]
                 loss = self.word_loss(expected=expected, actual=policy_out)
         
+                # programs = policy_out.transpose(0, 1).max(-1).indices
+                # print("deltas:", D)
+                # print("out:", programs)
+                
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
@@ -289,7 +295,8 @@ class Model(nn.Module):
                     round_tloss = 0
             
                     # check exit conditions
-                    if vloss > min_vloss + vloss_gap or tloss <= tloss_thresh or vloss <= vloss_thresh:
+                    if (check_vloss_gap and vloss > min_vloss + vloss_gap) \
+                       or tloss <= tloss_thresh or vloss <= vloss_thresh:
                         training_complete = True
                         break
             
@@ -325,8 +332,8 @@ class Model(nn.Module):
         epoch_loss = 0
         if n_steps is None: n_steps = len(dataloader)
         for i, (B, B_hat, P_hat, D) in zip(range(n_steps), dataloader):
-            D_in = D[:, 1:]
-            D_out = D[:, :-1]
+            D_in = D[:, :-1]
+            D_out = D[:, 1:]
             p, v = self.forward(b=B, b_hat=B_hat, p_hat=P_hat, delta=D_in)
             expected_d = self.to_probabilities(D_out).transpose(0, 1)
             loss = self.word_loss(expected_d, p)
@@ -372,12 +379,11 @@ class Model(nn.Module):
         """Append a 'delta' (a new line) to a program."""
         p_program = self.to_program(indices, default=g.Seq())
         p_delta = self.to_program(delta)
-        print(f'p_program: {p_program}')
-        print(f'p_delta: {p_delta}')
         if p_delta is None:
             p_out = p_program
         else:
             p_out = p_program.add_line(p_delta)
+        print(f'p_out: {p_out}')
         return self.to_indices(p_out.serialize())
     
     def sample_line_rollouts(self, b, b_hat, p_hat):
@@ -397,15 +403,17 @@ class Model(nn.Module):
         print("Sampling program rollouts...")
         self.eval()
         batch_size = bitmaps.shape[0]
-        rollouts = T.stack([self.to_indices(['{', '}'], add_markers=True)] * batch_size).to(device)
+        rollouts = [self.to_indices(['{', '}'], add_markers=True)] * batch_size
         print(f"rollouts: {rollouts}")
         while all(len(rollout) <= self.max_program_length for rollout in rollouts):
             rollout_renders = T.stack([self.eval_program(rollout) for rollout in rollouts])
             padded_rollouts = T.stack([util.pad(rollout, self.max_program_length, self.PADDING)
                                        for rollout in rollouts])
             deltas = self.sample_line_rollouts(b=bitmaps, b_hat=rollout_renders, p_hat=padded_rollouts)
-            print(f"deltas: {deltas}")
-            rollouts = T.stack([self.append_delta(r, d) for r, d in zip(rollouts, deltas)])
+            print("Deltas:")
+            for delta in deltas:
+                print(Model.strip(self.to_tokens(delta)))
+            rollouts = [self.append_delta(r, d) for r, d in zip(rollouts, deltas)]
             print(f"rollouts: {rollouts}")
         return rollouts
     
@@ -465,14 +473,14 @@ class PolicyDataset(IterableDataset):
                         break
 
 
-if __name__ == '__main__':
-    data_prefix = '/home/djl328/arc/data/policy-pretraining'
-    model_prefix = '/home/djl328/arc/models'
-    data_code = '100k-RLP-5e1~3l0~1z'
-    model_code = data_code
-    data_t = 'Apr14_22_01-51-39'
-    model_t = util.now_str()
-
+def run(train: bool, sample: bool,
+        data_prefix: str, model_prefix: str,
+        data_code: str, model_code: str,
+        data_t: str, model_t: str, model_n_steps: int,
+        assess_freq: int, checkpoint_freq: int,
+        tloss_thresh: float, vloss_thresh: float,
+        check_vloss_gap: bool = True, vloss_gap: float = 1):
+    
     model = Model(name=f'{model_code}_{model_t}', N=5, H=g.B_H, W=g.B_W, lexicon=g.SIMPLE_LEXICON,
                   d_model=512, n_conv_layers=6, n_conv_channels=12,
                   n_tf_encoder_layers=6, n_tf_decoder_layers=6,
@@ -483,22 +491,57 @@ if __name__ == '__main__':
     print("Making dataloaders...")
     tloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/training_{data_t}/joined_deltas.dat')
     vloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/validation_{data_t}/joined_deltas.dat')
+    
+    if train:
+        print("Pretraining policy....")
+        epochs = 1_000
+        model.pretrain_policy(tloader=tloader, vloader=vloader, epochs=epochs,
+                              assess_freq=assess_freq, checkpoint_freq=checkpoint_freq,
+                              tloss_thresh=tloss_thresh, vloss_thresh=vloss_thresh,
+                              check_vloss_gap=check_vloss_gap, vloss_gap=vloss_gap)
+    else:
+        print("Loading trained policy...")
+        model.load_model(f'../models/model_{model_code}_{model_t}_{model_n_steps}.pt')
+    
+    loss = model.pretrain_validate(tloader, n_steps=100)
+    print(f"Model loaded. Training loss={loss}")
+    
+    if sample:
+        sample_B, sample_B_hat, sample_P_hat, D = iter(tloader).next()
+        print("Sampling rollouts...")
+        print(f"sample_B: {sample_B.shape}")
+        print(model.sample_program_rollouts(sample_B))
+    
 
-    print("Pretraining policy....")
-    epochs = 1_000_000
-    model.pretrain_policy(tloader=tloader, vloader=vloader, epochs=epochs,
-                          assess_freq=1_000, checkpoint_freq=10_000, vloss_gap=1,
-                          tloss_thresh=10 ** -4, vloss_thresh=10 ** -4)
+if __name__ == '__main__':
+    # # run on g2
+    # run(
+    #     data_prefix='/home/djl328/arc/data/policy-pretraining',
+    #     model_prefix='/home/djl328/arc/models',
+    #     data_code='100k-RLP-5e1~3l0~1z',
+    #     model_code='100k-RLP-5e1~3l0~1z',
+    #     data_t='Apr14_22_01-51-39',
+    #     model_t=util.now_str(),
+    #     assess_freq = 1000, checkpoint_freq = 10_000,
+    #     vloss_gap = 1, tloss_thresh = 10 ** -4, vloss_thresh = 10 ** -4,
+    # )
 
-    # print("Loading trained policy...")
-    # steps = 160
-    # model.load_model(f'../models/model_{model_code}_{model_t}_{steps}.pt')
-    vloss = model.pretrain_validate(vloader, n_steps=1000)
-    print(f"Model loaded. Validation loss={vloss}")
-
-    # sample rollouts
-    sample_B, sample_B_hat, sample_P_hat, D = iter(tloader).next()
-    print("Sampling rollouts...")
-    print(f"sample_B: {sample_B.shape}")
-    print(model.sample_program_rollouts(sample_B))
+    # run locally
+    run(
+        train=False, sample=True,
+        data_prefix='../data/policy-pretraining',
+        model_prefix='../models',
+        data_code='3-RLP-5e1~3l0~1z',
+        data_t='Apr14_22_19-53-19',
+        model_code='3-RLP-5e1~3l0~1z',
+        # model_code='100k-RLP-5e1~3l0~1z',
+        model_t='Apr14_22_20-40-21',
+        # model_t=util.timecode(),
+        model_n_steps=200,
+        assess_freq=16, checkpoint_freq=100,
+        tloss_thresh=10 ** -6, vloss_thresh=10 ** -6,
+        check_vloss_gap=False,
+        vloss_gap=2,
+    )
+    
     

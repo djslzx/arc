@@ -240,21 +240,21 @@ if __name__ == '__main__':
     # demo_gen_closures()
     # demo_gen_policy_data()
     
-    dir = '/home/djl328/arc/data/policy-pretraining'
-    code = '100k-RLP-5e1~3l0~1z'
-    t = util.now_str()
+    dir = '../data/policy-pretraining'
+    code = '3-RLP-5e1~3l0~1z'
+    t = util.timecode()
     for mode in ['training', 'validation']:
         print(f"Generating policy data for mode={mode}")
         gen_closures_and_deltas_mp(
             closures_loc_prefix=f'{dir}/{code}/{mode}_{t}/',
             deltas_loc_prefix=f'{dir}/{code}/{mode}_{t}/',
             n_envs=5,
-            n_programs=100_000,
+            n_programs=3,
             n_lines_bounds=(1, 3),
             rand_arg_bounds=(0, 1),
             line_types=[Rect, Line, Point],
             line_type_weights=[4, 3, 1],
-            n_workers=100,
+            n_workers=1,
         )
         util.join_glob(f"{dir}/{code}/{mode}_{t}/deltas_*.dat", 
                        f"{dir}/{code}/{mode}_{t}/joined_deltas.dat")

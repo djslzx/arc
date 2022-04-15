@@ -10,7 +10,8 @@ from datetime import datetime
 
 dirname = os.path.dirname(__file__)
 
-def now_str():
+def timecode() -> str:
+    """Returns the timecode for the current time"""
     return datetime.now().strftime("%b%d_%y_%H-%M-%S")
 
 def pad(v, length: int, value: int):
