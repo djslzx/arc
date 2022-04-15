@@ -49,6 +49,9 @@ def to_delta_examples(f: Expr, envs: List[Dict], split_envs=False) -> Generator[
             prefix_tokens = Seq(*f_simplified_lines[:i]).serialize()
             delta = f_simplified_lines[i].serialize()
             yield bitmaps, prefix_bitmaps, prefix_tokens, delta
+        
+        # empty suffix
+        yield bitmaps, bitmaps, Seq(*f_simplified_lines).serialize(), ['STOP_LINE']
 
 def gen_closures(n_envs: int, n_programs: int, n_lines: int,
                  arg_exprs: List[Expr],
