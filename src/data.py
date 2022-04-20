@@ -11,6 +11,7 @@ import util
 import viz
 
 
+SEQ_END = "STOP"
 Closure = Tuple[Expr, List[Dict]]
 
 def render(p, envs):
@@ -51,7 +52,7 @@ def to_delta_examples(f: Expr, envs: List[Dict], split_envs=False) -> Generator[
             yield bitmaps, prefix_bitmaps, prefix_tokens, delta
         
         # empty suffix
-        yield bitmaps, bitmaps, Seq(*f_simplified_lines).serialize(), ['STOP_LINE']
+        yield bitmaps, bitmaps, Seq(*f_simplified_lines).serialize(), [SEQ_END]
 
 def gen_closures(n_envs: int, n_programs: int, n_lines: int,
                  arg_exprs: List[Expr],
@@ -103,7 +104,7 @@ def create_program(envs: List[dict], arg_exprs: List[Expr], n_lines: int, rand_a
         lo, hi = rand_arg_bounds
         lo = util.clamp(lo, 0, cap)
         hi = util.clamp(hi, 0, cap)
-        return random.randint(lo, hi)
+        return random.randint(lo, hi)  # TODO: allow non-uniform sampling using random.choices
     
     assert rand_arg_bounds[0] <= rand_arg_bounds[1], 'Invalid rand argument bounds'
     rand_exprs, const_exprs = util.split(arg_exprs, lambda expr: expr.zs())
@@ -243,8 +244,8 @@ if __name__ == '__main__':
     # demo_gen_closures()
     # demo_gen_policy_data()
     
-    dir = '../data/policy-pretraining'
-    code = '3-RLP-5e1~3l0~1z'
+    dir = '/home/djl328/arc/data/policy-pretraining'
+    code = '100k-RLP-5e1~3l0~1z'
     t = util.timecode()
     for mode in ['training', 'validation']:
         print(f"Generating policy data for mode={mode}")
@@ -252,12 +253,12 @@ if __name__ == '__main__':
             closures_loc_prefix=f'{dir}/{code}/{mode}_{t}/',
             deltas_loc_prefix=f'{dir}/{code}/{mode}_{t}/',
             n_envs=5,
-            n_programs=3,
+            n_programs=100_000,
             n_lines_bounds=(1, 3),
             rand_arg_bounds=(0, 1),
             line_types=[Rect, Line, Point],
             line_type_weights=[4, 3, 1],
-            n_workers=1,
+            n_workers=100,
         )
         util.join_glob(f"{dir}/{code}/{mode}_{t}/deltas_*.dat", 
                        f"{dir}/{code}/{mode}_{t}/joined_deltas.dat")
