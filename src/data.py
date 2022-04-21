@@ -16,13 +16,14 @@ Closure = Tuple[Expr, List[Dict]]
 def render(p, envs):
     return T.stack([p.eval(env) for env in envs])
 
-def to_delta_examples(f: Expr, envs: List[Dict], split_envs=False) -> Generator[Closure, None, None]:
+def to_delta_examples(f: Expr, envs: List[Dict], split_envs=False):
     """
     Converts a closure (f: program, z: environment) into examples of teacher-forcing deltas (B, f', B' -> d')
     for each program f, where:
      - f' is a prefix of f, B' is f'(z), and
      - d' is the next line in f after the lines in f'.
     """
+    f_serialized = f.simplify_indices().serialize()
     f_simplified_lines = f.simplify_indices().lines()  # f w/ simplified indices
     f_lines = f.lines()
     
@@ -35,23 +36,17 @@ def to_delta_examples(f: Expr, envs: List[Dict], split_envs=False) -> Generator[
         prefix_env_choices = [envs[:n_envs], envs[n_envs:]]
     
     for full_envs, prefix_envs in it.product(full_env_choices, prefix_env_choices):
-        # generate full program's bitmaps
         bitmaps = T.stack([f.eval(env) for env in full_envs])
         
-        # # empty prefix
-        # empty_bitmaps = T.stack([Seq().eval(env) for env in full_envs])
-        # yield bitmaps, empty_bitmaps, [], Seq().serialize()
-        
-        # nonempty prefixes
         for i in range(len(f_lines)):
             prefix = Seq(*f_lines[:i])
             prefix_bitmaps = T.stack([prefix.eval(env) for env in prefix_envs])  # well-defined on envs b/c f is
             prefix_tokens = Seq(*f_simplified_lines[:i]).serialize()
             delta = f_simplified_lines[i].serialize()
-            yield bitmaps, prefix_bitmaps, prefix_tokens, delta
+            yield (bitmaps, prefix_bitmaps, prefix_tokens), (delta, f_serialized)
         
         # empty suffix
-        yield bitmaps, bitmaps, Seq(*f_simplified_lines).serialize(), ['STOP']
+        yield (bitmaps, bitmaps, f_serialized), (['STOP'], f_serialized)
 
 def gen_closures(n_envs: int, n_programs: int, n_lines: int,
                  arg_exprs: List[Expr],
