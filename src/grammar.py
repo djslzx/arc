@@ -112,6 +112,11 @@ def seed_libs(n_libs):
     return [{'z': seed_zs()} for _ in range(n_libs)]
     # return [{'z': seed_zs(), 'sprites': seed_sprites()} for _ in range(n_libs)]
 
+# class IllFormedError(Exception): pass
+# class IllFormed(Expr):
+#     def __init__(self): pass
+#     def accept(self, v): raise IllFormedError(f"Visitor {v} tried to visit ill-formed expression.")
+
 class Nil(Expr):
     in_types = []
     out_type = 'bool'
