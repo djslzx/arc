@@ -193,7 +193,7 @@ class Model(nn.Module):
         Map the batched bitmap set b (of shape [batch, H, W])
         to bitmap embeddings (of shape [N, batch, d_model])
         """
-        b_flat = b.to(device).reshape(-1, 1, self.H, self.W) # add channel dim, flatten bitmap collection
+        b_flat = b.to(device).reshape(-1, 1, self.H, self.W)  # add channel dim, flatten bitmap collection
         e_b = self.conv(b_flat).reshape(batch_size, -1, self.d_model)  # apply conv, portion embeddings into batches
         e_b = e_b.transpose(0, 1)  # swap batch and sequence dims
         return e_b
@@ -207,16 +207,16 @@ class Model(nn.Module):
         f_embeddings = T.stack([self.p_embedding(p) for p in programs]).transpose(0, 1)
         return f_embeddings
 
-    def forward(self, b, b_hat, p_hat, delta):
+    def forward(self, b, b_hat, f_hat, delta):
         # compute embeddings for bitmaps, programs
         batch_size = b.shape[0]
         e_b = self.embed_bitmaps(b, batch_size)
         e_b_hat = self.embed_bitmaps(b_hat, batch_size)
-        e_p_hat = self.pos_encoding(self.embed_programs(p_hat))
+        e_f_hat = self.pos_encoding(self.embed_programs(f_hat))
         e_delta = self.pos_encoding(self.embed_programs(delta))
 
         # concat e_B, e_B', e_p', add source encoding, then pass through tf_encoder
-        src = T.cat((e_b, e_b_hat, e_p_hat))
+        src = T.cat((e_b, e_b_hat, e_f_hat))
         src = self.src_encoding.forward(src)
         tf_code = self.tf_encoder.forward(src)
 
@@ -267,20 +267,16 @@ class Model(nn.Module):
         training_complete = False
         for epoch in range(epochs):
             round_tloss = 0
-            for B, B_hat, P_hat, D in tloader:
+            for (b, b_hat, f_hat), (delta, _) in tloader:
                 step += 1
                 
                 # batch dim first, seq-len dim second in dataloader
-                D_in = D[:, :-1]
-                D_out = D[:, 1:]
-                policy_out, value_out = self.forward(b=B, b_hat=B_hat, p_hat=P_hat, delta=D_in)
-                expected = self.to_probabilities(D_out).transpose(0, 1)  # [seq-len, batch, lexicon-size]
+                delta_in = delta[:, :-1]
+                delta_out = delta[:, 1:]
+                policy_out, value_out = self.forward(b=b, b_hat=b_hat, f_hat=f_hat, delta=delta_in)
+                expected = self.to_probabilities(delta_out).transpose(0, 1)  # [seq-len, batch, lexicon-size]
                 loss = self.word_loss(expected=expected, actual=policy_out)
         
-                # programs = policy_out.transpose(0, 1).max(-1).indices
-                # print("deltas:", D)
-                # print("out:", programs)
-                
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
@@ -336,11 +332,11 @@ class Model(nn.Module):
         self.eval()
         epoch_loss = 0
         if n_steps is None: n_steps = len(dataloader)
-        for i, (B, B_hat, P_hat, D) in zip(range(n_steps), dataloader):
-            D_in = D[:, :-1]
-            D_out = D[:, 1:]
-            p, v = self.forward(b=B, b_hat=B_hat, p_hat=P_hat, delta=D_in)
-            expected_d = self.to_probabilities(D_out).transpose(0, 1)
+        for i, ((b, b_hat, f_hat), (delta, _)) in zip(range(n_steps), dataloader):
+            delta_in = delta[:, :-1]
+            delta_out = delta[:, 1:]
+            p, v = self.forward(b=b, b_hat=b_hat, f_hat=f_hat, delta=delta_in)
+            expected_d = self.to_probabilities(delta_out).transpose(0, 1)
             loss = self.word_loss(expected_d, p)
             epoch_loss += loss.detach().item()
         return epoch_loss/n_steps
@@ -362,7 +358,7 @@ class Model(nn.Module):
         except (AssertionError, IndexError):
             return None
 
-    def eval_as_program(self, indices, envs=None) -> T.Tensor:
+    def render(self, indices, envs=None) -> T.Tensor:
         if envs is None:
             envs = g.seed_libs(self.N)
         else:
@@ -381,14 +377,14 @@ class Model(nn.Module):
             bitmaps.append(bitmap.unsqueeze(0))  # add channel dimension
         return T.stack(bitmaps)
         
-    def sample_line_rollouts(self, b, b_hat, p_hat):
+    def sample_line_rollouts(self, b, b_hat, f_hat):
         self.eval()
         batch_size = b.shape[0]
         rollouts = T.tensor([[self.PROGRAM_START]] * batch_size).long().to(device)  # [b, 1]
         for i in range(self.max_line_length):
-            p_outs, _ = self.forward(b=b, b_hat=b_hat, p_hat=p_hat, delta=rollouts)  # [i, b, n_tokens]
-            p_prs = p_outs.softmax(-1)  # convert p_outs to probabilities -> [i, b]
-            next_indices = T.multinomial(util.filter_top_p(p_prs[-1]), 1)
+            p_outs, _ = self.forward(b=b, b_hat=b_hat, f_hat=f_hat, delta=rollouts)  # [i, b, n_tokens]
+            next_prs = p_outs.softmax(-1)[-1]  # convert p_outs to probabilities -> [i, b]
+            next_indices = T.multinomial(util.filter_top_p(next_prs), 1)
             rollouts = T.cat((rollouts, next_indices), dim=1)
         return rollouts
     
@@ -421,9 +417,9 @@ class Model(nn.Module):
                                          well_formed=True)
                                   for _ in range(batch_size)]
         while any(not r.completed for r in rollouts):
-            rollout_renders = T.stack([self.eval_as_program(r.indices) for r in rollouts])
+            rollout_renders = T.stack([self.render(r.indices) for r in rollouts])
             padded_rollouts = T.stack([util.pad(r.indices, self.max_program_length, self.PADDING) for r in rollouts])
-            deltas = self.sample_line_rollouts(b=bitmaps, b_hat=rollout_renders, p_hat=padded_rollouts)
+            deltas = self.sample_line_rollouts(b=bitmaps, b_hat=rollout_renders, f_hat=padded_rollouts)
             rollouts = [append_delta(r.indices, delta) if r.well_formed and not r.completed else r
                         for r, delta in zip(rollouts, deltas)]
         return [r.indices for r in rollouts]
@@ -472,16 +468,32 @@ class PolicyDataset(IterableDataset):
             with open(file, 'rb') as fp:
                 while True:
                     try:
-                        bitmaps, partial_bitmaps, f_prefix_tokens, delta = pickle.load(fp)
+                        inputs, outputs = pickle.load(fp)
+                        bitmaps, partial_bitmaps, f_prefix_tokens = inputs
+                        delta, f_tokens = outputs
                         # add channel dimension to bitmaps
                         b = bitmaps.unsqueeze(1).to(device)
                         b_hat = partial_bitmaps.unsqueeze(1).to(device)
                         # convert program tokens into padded vectors of indices
                         f_hat = util.pad(self.to_indices(f_prefix_tokens), self.program_length, self.padding).to(device)
+                        f = util.pad(self.to_indices(f_tokens), self.program_length, self.padding).to(device)
                         d = util.pad(self.to_indices(delta), self.line_length, self.padding).to(device)
-                        yield b, b_hat, f_hat, d
+                        yield (b, b_hat, f_hat), (d, f)
                     except EOFError:
                         break
+
+def sample_model(model: Model, dataloader: DataLoader):
+    for (b, b_hat, f_hat), (delta, _) in dataloader:
+        in_bitmaps = b.squeeze().cpu()[0]
+        rollouts = model.sample_program_rollouts(b)
+
+        for rollout in rollouts[:1]:
+            program = model.to_program(rollout)
+            print(program)
+            out_bitmaps = model.render(rollout).squeeze().cpu()
+            viz.viz_sample(xs=in_bitmaps, ys=out_bitmaps, text=program)
+        print()
+        # viz.viz_mult(bitmaps, text=programs[0])
 
 def run(train: bool, sample: bool,
         data_prefix: str, model_prefix: str,
@@ -495,7 +507,7 @@ def run(train: bool, sample: bool,
     model = Model(name=f'{model_code}_{model_t}', N=5, H=g.B_H, W=g.B_W, lexicon=g.SIMPLE_LEXICON,
                   d_model=512, n_conv_layers=6, n_conv_channels=12,
                   n_tf_encoder_layers=6, n_tf_decoder_layers=6,
-                  n_value_heads=1, n_value_ff_layers=2,
+                  n_value_heads=5, n_value_ff_layers=2,
                   max_program_length=50,
                   batch_size=16,
                   save_dir=model_prefix).to(device)
@@ -521,14 +533,8 @@ def run(train: bool, sample: bool,
     
     if sample:
         print("Sampling rollouts...")
-        for B, B_hat, P_hat, D in tloader:
-            rollouts = model.sample_program_rollouts(B)
-            programs = [model.to_program(rollout) for rollout in rollouts]
-            print("Programs:")
-            for p in programs:
-                print(p)
-            bitmaps = B.squeeze(2).cpu()[0]
-            viz.viz_mult(bitmaps, text=programs[0])
+        sample_model(model, vloader)
+
 
 if __name__ == '__main__':
     # # run on g2
