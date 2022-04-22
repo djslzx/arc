@@ -536,34 +536,39 @@ def run(train: bool, sample: bool,
         sample_model(model, vloader)
 
 
+
 if __name__ == '__main__':
-    # # run on g2
-    # run(
-    #     data_prefix='/home/djl328/arc/data/policy-pretraining',
-    #     model_prefix='/home/djl328/arc/models',
-    #     data_code='100k-RLP-5e1~3l0~1z',
-    #     model_code='100k-RLP-5e1~3l0~1z',
-    #     data_t='Apr14_22_01-51-39',
-    #     model_t=util.now_str(),
-    #     assess_freq = 1000, checkpoint_freq = 10_000,
-    #     vloss_gap = 1, tloss_thresh = 10 ** -4, vloss_thresh = 10 ** -4,
-    # )
+    # run on g2
+    run(
+        train=True, sample=False,
+        data_prefix='/home/djl328/arc/data/policy-pretraining',
+        model_prefix='/home/djl328/arc/models',
+        data_code='100k-RLP-5e1~3l0~1z',
+        data_t='Apr20_22_15-05-16',
+        model_code='100k-RLP-5e1~3l0~1z',
+        model_t=util.timecode(),
+        assess_freq = 1000,
+        checkpoint_freq = 10_000,
+        tloss_thresh = 10 ** -4, vloss_thresh = 10 ** -4,
+        check_vloss_gap=False, # vloss_gap = 1,
+    )
 
     # run locally
-    run(
-        train=False, sample=True,
-        data_prefix='../data/policy-pretraining',
-        model_prefix='../models',
-        data_code='3-RLP-5e1~3l0~1z',
-        data_t='Apr20_22_14-59-07',
-        model_code='3-RLP-5e1~3l0~1z',
-        model_t='Apr20_22_15-40-28',
-        # model_t=util.timecode(),
-        model_n_steps=400,
-        assess_freq=16, checkpoint_freq=100,
-        tloss_thresh=10 ** -6, vloss_thresh=10 ** -6,
-        check_vloss_gap=False,
-        # vloss_gap=2,
-    )
+    # run(
+    #     train=False, sample=True,
+    #     data_prefix='../data/policy-pretraining',
+    #     model_prefix='../models',
+    #     data_code='3-RLP-5e1~3l0~1z',
+    #     data_t='Apr14_22_19-53-19',
+    #     model_code='3-RLP-5e1~3l0~1z',
+    #     # model_code='100k-RLP-5e1~3l0~1z',
+    #     model_t='Apr14_22_20-40-21',
+    #     # model_t=util.timecode(),
+    #     model_n_steps=200,
+    #     assess_freq=16, checkpoint_freq=100,
+    #     tloss_thresh=10 ** -6, vloss_thresh=10 ** -6,
+    #     check_vloss_gap=False,
+    #     vloss_gap=2,
+    # )
     
     
