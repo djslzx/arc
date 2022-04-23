@@ -72,6 +72,9 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x + self.pe[:x.size(0)])
 
 
+Result = namedtuple('Result', 'indices completed well_formed')
+
+
 class Model(nn.Module):
     
     PADDING = "PADDING"
@@ -234,7 +237,7 @@ class Model(nn.Module):
         return policy, value
 
     @staticmethod
-    def word_loss(expected, actual):
+    def word_loss(expected: T.Tensor, actual: T.Tensor) -> T.Tensor:
         """
         x = log_softmax(actual, -1) : turn logits into probabilities
         x = (x * expected)          : pull out values from `actual` at nonzero locations in `expected`
@@ -257,7 +260,7 @@ class Model(nn.Module):
         """
         self.to(device)
         optimizer = T.optim.Adam(self.parameters(), lr=lr)
-        writer = tb.SummaryWriter(comment=f'_{self.name}')
+        writer = tb.SummaryWriter(comment=f'_{self.name}_policy_pretrain')
 
         self.train()
         t_start = time.time()
@@ -341,6 +344,108 @@ class Model(nn.Module):
             epoch_loss += loss.detach().item()
         return epoch_loss/n_steps
 
+    def estimate_value(self, delta, b, b_hat, f_hat, f):
+        """
+        (1) I[f' is a prefix of f]
+        (2) min{g: f'g ~ f} |g|
+           i.e., minimum number of lines that need to be added to f' to yield the same behavior as f
+        (3) log P(B|f')
+            P(B|f') = (sum_{b in B} log sum_{z in Z} I[f'(z) = b]) - |B| log |Z|
+        (4) min{ d1..dk st f'd1..dk ~ f} - log P(d1 | B, f', B'(f'))
+         - log P(d2 | B, f'd1, B'(f'd1))
+         - log P(d3 | B, f'd1d2, B'(f'd1d2)) ...
+         i.e., maximize probability of deltas being the right lines to add
+        (5) pixel difference between b and b_hat
+        """
+        # new_fs = []
+        # for f, d in zip(f_hat, delta):
+        #     p = self.append_delta(f, d).indices
+        #     pp = self.pad_program(p)
+        #     new_fs.append(pp)
+        # new_fs = T.stack(new_fs)
+        v = [
+            [self.is_prefix(x, y) for x, y in zip(f_hat, f)],
+            [self.min_lines(x, y) for x, y in zip(f_hat, f)],
+            # [self.approx_likelihood(x, y) for x, y in zip(b, f_hat)],
+            # [self.approx_likelihood(b, new_fs)],
+        ]  # [n_heads, b]
+        return T.tensor(v + [[0] * self.batch_size] * (self.n_value_heads - len(v))).transpose(0, 1).to(device)
+    
+    def is_prefix(self, f_hat, f):
+        return float(T.equal(f_hat, f[:f_hat.shape[0]]))
+    
+    def min_lines(self, f_hat, f):
+        try:
+            p = self.to_program(f)
+            p_hat = self.to_program(f_hat)
+            return len(p.lines()) - len(p_hat.lines())
+        except AssertionError:
+            return -1
+
+    def approx_likelihood(self, b: T.Tensor, f_hat: T.Tensor, n_samples=1000) -> float:
+        """
+        Approximate P(B | f'), where
+          P(B | f') = (sum_{b in B} log sum_{z in Z} I[f'(z) = b]) - |B| log |Z|
+          
+        NB: This is always 0 for programs f_hat that are unable to generate bitmaps b
+        """
+        # log |Z| = log(|[z_lo, z_hi]| ** lib_size) = lib_size * log(|[z_lo, z_hi]|) ~= 8^10 = 2^30 ~= 10^9
+        log_Z = g.LIB_SIZE * math.log(g.Z_HI - g.Z_LO + 1)
+        prior_term = self.N * log_Z  # |B| log |Z|
+    
+        # take fixed number of samples (~1000?) to approximate log sum_{z in Z} I[f'(z) = b] for each b in B
+        i_term = 0
+        # print(f'f_hat={f_hat}, {self.to_tokens(f_hat)}, log z={log_Z}, n_samples={n_samples}')
+        for bitmap in b:
+            s = 1  # to avoid taking log of 0
+            for sample in range(n_samples):
+                f_hat_render = self.render(f_hat, envs=g.seed_libs(self.N))
+                s += int(T.equal(f_hat_render, bitmap))
+            # log sum_z I[f'(z) = b] ~= log (sum_{i in 1..k, z_i random} I[f'(z_i) = b] * |Z|/k)
+            # = log (sum ..) + log |Z| - log k
+            i_term += math.log(s) + log_Z - math.log(n_samples)
+        return i_term - prior_term
+
+    def value_loss(self, target, actual) -> float:
+        """Compute loss btwn expected delta and actual delta (delta_hat)"""
+        target[:, 1] *= target[:, 0]  # if f_hat is not a prefix of f, ignore min_lines prediction
+        criterion = nn.MSELoss()
+        return criterion(actual, target)
+
+    def train_value(self, dataloader: DataLoader, epochs: int, lr=10 ** -4,
+                    assess_freq=10_000, checkpoint_freq=100_000):
+        self.train()
+        optimizer = T.optim.Adam(self.parameters(), lr=lr)
+        writer = tb.SummaryWriter(comment=f'_{self.name}_value')
+        
+        step = 0
+        t_start = time.time()
+        for epoch in range(epochs):
+            epoch_loss = 0
+            for (b, b_hat, f_hat), (delta, f) in dataloader:
+                step += 1
+                # TODO: sample multiple rollouts per input in policy dataloader
+                # TODO: modify delta sampling so we can get multiple rollouts per instance in each batch
+                # pdb.set_trace()
+                lines = self.sample_line_rollouts(b, b_hat, f_hat).to(device)  # [b, l]
+                # new_fs = [self.append_delta(f, d).indices for f, d in zip(f_hat, lines)]  # [b, l]
+                # new_bs = T.stack([self.render(f, k=10) for f in new_fs])
+        
+                # TODO: use rollouts instead of dataset values
+                value_expected = self.estimate_value(lines, b, b_hat, f_hat, f)
+                _, value_out = self.forward(b, b_hat, f_hat, lines)
+                loss = self.value_loss(target=value_expected, actual=value_out)
+                
+                print(f"loss: {loss}")
+                
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                epoch_loss += loss.item()
+                
+                # TODO: logging
+            print(f"Epoch loss = {epoch_loss}, {time.time() - t_start:.2f}s elapsed")
+    
     @staticmethod
     def strip(tokens):
         start = int(tokens[0] == Model.PROGRAM_START)  # skip start token if present
@@ -358,9 +463,15 @@ class Model(nn.Module):
         except (AssertionError, IndexError):
             return None
 
-    def render(self, indices, envs=None) -> T.Tensor:
+    def render(self, indices, envs=None, k=1) -> T.Tensor:
+        def try_render(f) -> Optional[T.Tensor]:
+            try:
+                return f.eval(env)
+            except AssertionError:
+                return None
+
         if envs is None:
-            envs = g.seed_libs(self.N)
+            envs = g.seed_libs(self.N * k)
         else:
             assert len(envs) == self.N, \
                 f'When evaluating a program on multiple environments, ' \
@@ -368,46 +479,52 @@ class Model(nn.Module):
                 f'the number of bitmaps rendered per program.'
         program = self.to_program(indices)
         if program is None: program = g.Seq()
+
         bitmaps = []
         for env in envs:
-            try:
-                bitmap = program.eval(env)
-            except AssertionError:
-                bitmap = T.zeros(self.H, self.W)
-            bitmaps.append(bitmap.unsqueeze(0))  # add channel dimension
-        return T.stack(bitmaps)
+            if (bitmap := try_render(program)) is not None:
+                bitmaps.append(bitmap.unsqueeze(0))  # add channel dimension
+                if len(bitmaps) == self.N:
+                    break
+        # add blank bitmaps until we reach the quota
+        if len(bitmaps) < self.N:
+            bitmaps += [T.zeros(self.H, self.W)] * (self.N - len(bitmaps))
+
+        assert(len(bitmaps) == self.N)
+        return T.stack(bitmaps).to(device)
         
     def sample_line_rollouts(self, b, b_hat, f_hat):
         self.eval()
         batch_size = b.shape[0]
         rollouts = T.tensor([[self.PROGRAM_START]] * batch_size).long().to(device)  # [b, 1]
-        for i in range(self.max_line_length):
+        for i in range(self.max_line_length - 1):
             p_outs, _ = self.forward(b=b, b_hat=b_hat, f_hat=f_hat, delta=rollouts)  # [i, b, n_tokens]
             next_prs = p_outs.softmax(-1)[-1]  # convert p_outs to probabilities -> [i, b]
             next_indices = T.multinomial(util.filter_top_p(next_prs), 1)
             rollouts = T.cat((rollouts, next_indices), dim=1)
         return rollouts
+
+    def append_delta(self, indices: T.Tensor, delta: T.Tensor) -> Result:
+        """
+        Append a 'delta' (a new line) to a program.
+        """
+        p_seq = self.to_program(indices)
+        if p_seq is None:
+            return Result(indices=indices, completed=False, well_formed=False)
+        if delta[1] == self.SEQ_END:  # FIXME: hacky
+            return Result(indices=indices, completed=True, well_formed=True)
+        p_delta = self.to_program(delta)
+        if p_delta is None:
+            return Result(indices=indices, completed=True, well_formed=True)
+        return Result(indices=self.to_indices(p_seq.add_line(p_delta).serialize()).to(device),
+                      completed=False,
+                      well_formed=True)
+
+    def pad_program(self, indices: T.Tensor) -> T.Tensor:
+        return util.pad(indices, self.max_program_length, self.PADDING)
     
     def sample_program_rollouts(self, bitmaps: T.Tensor) -> List[T.Tensor]:
         """Take samples from the model wrt a (batched) set of bitmaps"""
-
-        Result = namedtuple('Result', 'indices completed well_formed')
-    
-        def append_delta(indices: T.Tensor, delta: T.Tensor) -> Result:
-            """
-            Append a 'delta' (a new line) to a program.
-            """
-            p_seq = self.to_program(indices)
-            if p_seq is None:
-                return Result(indices=indices, completed=False, well_formed=False)
-            if delta[1] == self.SEQ_END:  # FIXME: hacky
-                return Result(indices=indices, completed=True, well_formed=True)
-            p_delta = self.to_program(delta)
-            if p_delta is None:
-                return Result(indices=indices, completed=True, well_formed=True)
-            return Result(indices=self.to_indices(p_seq.add_line(p_delta).serialize()),
-                          completed=False,
-                          well_formed=True)
         
         self.eval()
         batch_size = bitmaps.shape[0]
@@ -418,9 +535,9 @@ class Model(nn.Module):
                                   for _ in range(batch_size)]
         while any(not r.completed for r in rollouts):
             rollout_renders = T.stack([self.render(r.indices) for r in rollouts])
-            padded_rollouts = T.stack([util.pad(r.indices, self.max_program_length, self.PADDING) for r in rollouts])
+            padded_rollouts = T.stack([self.pad_program(r.indices) for r in rollouts])
             deltas = self.sample_line_rollouts(b=bitmaps, b_hat=rollout_renders, f_hat=padded_rollouts)
-            rollouts = [append_delta(r.indices, delta) if r.well_formed and not r.completed else r
+            rollouts = [self.append_delta(r.indices, delta) if r.well_formed and not r.completed else r
                         for r, delta in zip(rollouts, deltas)]
         return [r.indices for r in rollouts]
     
@@ -495,7 +612,9 @@ def sample_model(model: Model, dataloader: DataLoader):
         print()
         # viz.viz_mult(bitmaps, text=programs[0])
 
-def run(train: bool, sample: bool,
+def run(pretrain_policy: bool,
+        train_value: bool,
+        sample: bool,
         data_prefix: str, model_prefix: str,
         data_code: str, model_code: str,
         data_t: str, model_t: str,
@@ -516,7 +635,7 @@ def run(train: bool, sample: bool,
     tloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/training_{data_t}/joined_deltas.dat')
     vloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/validation_{data_t}/joined_deltas.dat')
     
-    if train:
+    if pretrain_policy:
         print("Pretraining policy....")
         epochs = 1_000
         model.pretrain_policy(tloader=tloader, vloader=vloader, epochs=epochs,
@@ -528,6 +647,12 @@ def run(train: bool, sample: bool,
         assert model_n_steps is not None
         model.load_model(f'../models/model_{model_code}_{model_t}_{model_n_steps}.pt')
     
+    if train_value:
+        print("Training value net...")
+        epochs = 1_000
+        model.train_value(dataloader=vloader, epochs=epochs,
+                          assess_freq=assess_freq, checkpoint_freq=checkpoint_freq)
+    
     loss = model.pretrain_validate(tloader, n_steps=100)
     print(f"Model loaded. Training loss={loss}")
     
@@ -536,39 +661,38 @@ def run(train: bool, sample: bool,
         sample_model(model, vloader)
 
 
-
 if __name__ == '__main__':
-    # run on g2
-    run(
-        train=True, sample=False,
-        data_prefix='/home/djl328/arc/data/policy-pretraining',
-        model_prefix='/home/djl328/arc/models',
-        data_code='100k-RLP-5e1~3l0~1z',
-        data_t='Apr20_22_15-05-16',
-        model_code='100k-RLP-5e1~3l0~1z',
-        model_t=util.timecode(),
-        assess_freq = 1000,
-        checkpoint_freq = 10_000,
-        tloss_thresh = 10 ** -4, vloss_thresh = 10 ** -4,
-        check_vloss_gap=False, # vloss_gap = 1,
-    )
+    # # run on g2
+    # run(
+    #     data_prefix='/home/djl328/arc/data/policy-pretraining',
+    #     model_prefix='/home/djl328/arc/models',
+    #     data_code='100k-RLP-5e1~3l0~1z',
+    #     model_code='100k-RLP-5e1~3l0~1z',
+    #     data_t='Apr14_22_01-51-39',
+    #     model_t=util.now_str(),
+    #     assess_freq = 1000, checkpoint_freq = 10_000,
+    #     vloss_gap = 1, tloss_thresh = 10 ** -4, vloss_thresh = 10 ** -4,
+    # )
 
     # run locally
-    # run(
-    #     train=False, sample=True,
-    #     data_prefix='../data/policy-pretraining',
-    #     model_prefix='../models',
-    #     data_code='3-RLP-5e1~3l0~1z',
-    #     data_t='Apr14_22_19-53-19',
-    #     model_code='3-RLP-5e1~3l0~1z',
-    #     # model_code='100k-RLP-5e1~3l0~1z',
-    #     model_t='Apr14_22_20-40-21',
-    #     # model_t=util.timecode(),
-    #     model_n_steps=200,
-    #     assess_freq=16, checkpoint_freq=100,
-    #     tloss_thresh=10 ** -6, vloss_thresh=10 ** -6,
-    #     check_vloss_gap=False,
-    #     vloss_gap=2,
-    # )
+    run(
+        pretrain_policy=False,
+        train_value=True,
+        sample=False,
+        data_prefix='../data/policy-pretraining',
+        model_prefix='../models',
+        data_code='3-RLP-5e1~3l0~1z',
+        data_t='Apr21_22_19-41-52',
+        model_code='100k-RLP-5e1~3l0~1z',  # remote
+        model_t='Apr21_22_22-59-46',  # remote
+        # model_code='3-RLP-5e1~3l0~1z',  # local
+        # model_t='Apr20_22_15-40-28',  # local
+        # model_t=util.timecode(),
+        model_n_steps=1_500_000,
+        assess_freq=10, checkpoint_freq=100,
+        tloss_thresh=10 ** -5, vloss_thresh=10 ** -5,
+        check_vloss_gap=False,
+        # vloss_gap=2,
+    )
     
     
