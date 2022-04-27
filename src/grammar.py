@@ -583,6 +583,8 @@ def deserialize(tokens):
         if isinstance(h, int):
             return [Num(h)] + t
         if isinstance(h, str):
+            if h == "SEQ_END":
+                return t
             if h.startswith('z'):
                 return [Z(int(h[2:]))] + t
             if h.startswith('S'):
@@ -625,11 +627,10 @@ def deserialize(tokens):
         #     return [Intersect(t[0])] + t[1:]
         if h == '{':
             i = t.index('}')
+            # assert "STOP" in t, f"A sequence must have a STOP token, but none were found: {t}"
             return [Seq(*t[:i])] + t[i + 1:]
         if h == '}':
             return tokens
-        if h == '(' or h == ')':
-            return t
         else:
             assert False, f'Failed to classify token: {h} of type {type(h)}'
 
@@ -664,9 +665,8 @@ class Serialize(Visitor):
     def visit_Seq(self, bmps):
         tokens = ['{']  # start
         for bmp in bmps:
-            tokens.append('(')  # line-start
             tokens.extend(bmp.accept(self))
-            tokens.append(')')  # line-end
+        tokens.append("SEQ_END")
         tokens.append('}')  # stop
         return tokens
     def visit_Join(self, bmp1, bmp2): return [';'] + bmp1.accept(self) + bmp2.accept(self)
