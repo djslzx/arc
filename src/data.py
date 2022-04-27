@@ -204,8 +204,8 @@ def gen_closures_and_deltas(worker_id: int, closures_loc: str, deltas_loc: str,
             pickle.dump((f, envs), closures_file)
             for delta in to_delta_examples(f, envs, split_envs=split_envs):
                 (p_toks, p_envs, p_bmps), (f_toks, f_envs, f_bmps), d = delta
-                print("delta example:", p_toks, p_envs, p_bmps, f_toks, f_envs, f_bmps, d,
-                      sep='\n', end='\n\n')
+                # print("delta example:", p_toks, p_envs, p_bmps, f_toks, f_envs, f_bmps, d,
+                #       sep='\n', end='\n\n')
                 pickle.dump(delta, deltas_file)
             if verbose: print(f'[{worker_id}][{i}/{n_programs}]: {f}')
 
@@ -253,10 +253,10 @@ if __name__ == '__main__':
             deltas_loc_prefix=f'{dir}/{code}/{mode}_{t}/',
             n_envs=5,
             n_programs=100_000,
-            n_lines_bounds=(1, 3),
+            n_lines_bounds=(1, 1),
             rand_arg_bounds=(0, 1),
             line_types=[Rect, Line, Point],
-            line_type_weights=[4, 3, 1],
+            line_type_weights=[4, 3, 2],
             n_workers=100,
         )
         util.join_glob(f"{dir}/{code}/{mode}_{t}/deltas_*.dat", 
