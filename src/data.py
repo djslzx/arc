@@ -2,29 +2,30 @@
 Generate data to train value & policy nets
 """
 import pickle
-from datetime import datetime
-from typing import Optional, List, Tuple, Generator, Dict
+from typing import Optional, List, Tuple, Iterable, Generator, Dict
 import multiprocessing as mp
 
 from grammar import *
 import util
 import viz
 
-
-SEQ_END = "STOP"
-Closure = Tuple[Expr, List[Dict]]
+Envs = List[Dict]
 
 def render(p, envs):
     return T.stack([p.eval(env) for env in envs])
 
-def to_delta_examples(f: Expr, envs: List[Dict], split_envs=False):
+def to_delta_examples(f: Expr, envs: List[Dict], split_envs=False) \
+        -> Generator[Tuple[Tuple[List, Envs, T.Tensor],
+                           Tuple[List, Envs, T.Tensor],
+                           List],
+                     None, None]:
     """
     Converts a closure (f: program, z: environment) into examples of teacher-forcing deltas (B, f', B' -> d')
     for each program f, where:
      - f' is a prefix of f, B' is f'(z), and
      - d' is the next line in f after the lines in f'.
     """
-    f_serialized = f.simplify_indices().serialize()
+    f_tokens = f.simplify_indices().serialize()
     f_simplified_lines = f.simplify_indices().lines()  # f w/ simplified indices
     f_lines = f.lines()
     
@@ -37,17 +38,14 @@ def to_delta_examples(f: Expr, envs: List[Dict], split_envs=False):
         prefix_env_choices = [envs[:n_envs], envs[n_envs:]]
     
     for full_envs, prefix_envs in it.product(full_env_choices, prefix_env_choices):
-        bitmaps = T.stack([f.eval(env) for env in full_envs])
-        
-        for i in range(len(f_lines)):
+        f_bitmaps = T.stack([f.eval(env) for env in full_envs])
+
+        for i in range(len(f_lines) + 1):
             prefix = Seq(*f_lines[:i])
             prefix_bitmaps = T.stack([prefix.eval(env) for env in prefix_envs])  # well-defined on envs b/c f is
             prefix_tokens = Seq(*f_simplified_lines[:i]).serialize()
-            delta = f_simplified_lines[i].serialize()
-            yield (bitmaps, prefix_bitmaps, prefix_tokens), (delta, f_serialized)
-        
-        # empty suffix
-        yield (bitmaps, bitmaps, f_serialized), ([SEQ_END], f_serialized)
+            delta_tokens = f_simplified_lines[i].serialize() if i < len(f_lines) else [SEQ_END]
+            yield (prefix_tokens, prefix_envs, prefix_bitmaps), (f_tokens, full_envs, f_bitmaps), delta_tokens
 
 def gen_closures(n_envs: int, n_programs: int, n_lines: int,
                  arg_exprs: List[Expr],
@@ -194,6 +192,7 @@ def gen_closures_and_deltas(worker_id: int, closures_loc: str, deltas_loc: str,
                             arg_exprs: List[Expr],
                             rand_arg_bounds: Tuple[int, int],
                             line_types: List[type], line_type_weights: List[float],
+                            split_envs=False,
                             verbose=False):
     util.make_parent_dir(closures_loc)
     util.make_parent_dir(deltas_loc)
@@ -203,7 +202,10 @@ def gen_closures_and_deltas(worker_id: int, closures_loc: str, deltas_loc: str,
                            line_types=line_types, line_type_weights=line_type_weights)
         for i, (f, envs) in enumerate(gen):
             pickle.dump((f, envs), closures_file)
-            for delta in to_delta_examples(f, envs, split_envs=True):
+            for delta in to_delta_examples(f, envs, split_envs=split_envs):
+                (p_toks, p_envs, p_bmps), (f_toks, f_envs, f_bmps), d = delta
+                print("delta example:", p_toks, p_envs, p_bmps, f_toks, f_envs, f_bmps, d,
+                      sep='\n', end='\n\n')
                 pickle.dump(delta, deltas_file)
             if verbose: print(f'[{worker_id}][{i}/{n_programs}]: {f}')
 
@@ -211,6 +213,7 @@ def gen_closures_and_deltas_mp(closures_loc_prefix: str, deltas_loc_prefix: str,
                                n_envs: int, n_programs: int, n_lines_bounds: Tuple[int, int],
                                rand_arg_bounds: Tuple[int, int],
                                line_types: List[type], line_type_weights: Optional[List[float]] = None,
+                               split_envs=False,
                                n_workers: int = 1):
     """
     Generate a stream of closures and directly convert them to deltas. Write both to files.
@@ -227,8 +230,9 @@ def gen_closures_and_deltas_mp(closures_loc_prefix: str, deltas_loc_prefix: str,
                      [(i,
                        f'{closures_loc_prefix}closures_{i}.dat',
                        f'{deltas_loc_prefix}deltas_{i}.dat',
-                       n_envs * 2, n_programs_per_worker, n_lines,
-                       arg_exprs, rand_arg_bounds, line_types, line_type_weights, True)
+                       n_envs * (2 if split_envs else 1), n_programs_per_worker, n_lines,
+                       arg_exprs, rand_arg_bounds, line_types, line_type_weights,
+                       split_envs, False)
                       for n_lines in range(n_lines_lo, n_lines_hi + 1)
                       for i in range(n_workers)])
     # separate closure and delta gen? might allow better allocation of workers

@@ -24,7 +24,7 @@ SIMPLE_LEXICON = (
     [f'z_{i}' for i in range(LIB_SIZE)] +
     ['P', 'L', 'R', '{', '}', '(', ')']
 )
-
+SEQ_END = "SEQ_END"
 
 class Visited:
     def accept(self, visitor):
@@ -334,6 +334,12 @@ class Visitor:
     def visit_Apply(self, f, bmp): self.fail('Apply')
     def visit_Repeat(self, f, n): self.fail('Repeat')
 
+class EnvironmentError(Exception):
+    """
+    Use this exception to mark errors in Eval caused by random arguments (Z, Sprites)
+    """
+    pass
+
 class Eval(Visitor):
     def __init__(self, env):
         self.env = env
@@ -583,8 +589,8 @@ def deserialize(tokens):
         if isinstance(h, int):
             return [Num(h)] + t
         if isinstance(h, str):
-            if h == "SEQ_END":
-                return t
+            # if h == SEQ_END:
+            #     return t
             if h.startswith('z'):
                 return [Z(int(h[2:]))] + t
             if h.startswith('S'):
@@ -666,7 +672,7 @@ class Serialize(Visitor):
         tokens = ['{']  # start
         for bmp in bmps:
             tokens.extend(bmp.accept(self))
-        tokens.append("SEQ_END")
+        # tokens.append(SEQ_END)
         tokens.append('}')  # stop
         return tokens
     def visit_Join(self, bmp1, bmp2): return [';'] + bmp1.accept(self) + bmp2.accept(self)
