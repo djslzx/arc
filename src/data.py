@@ -25,8 +25,8 @@ def to_delta_examples(f: Expr, envs: List[Dict], split_envs=False) \
      - f' is a prefix of f, B' is f'(z), and
      - d' is the next line in f after the lines in f'.
     """
-    f_tokens = f.simplify_indices().serialize()
-    f_simplified_lines = f.simplify_indices().lines()  # f w/ simplified indices
+    # TODO: make simplification of indices work with z inference
+    f_toks = f.serialize()
     f_lines = f.lines()
     
     # use different sets of envs for prefixes vs full program
@@ -37,15 +37,15 @@ def to_delta_examples(f: Expr, envs: List[Dict], split_envs=False) \
         full_env_choices = [envs[:n_envs], envs[n_envs:]]
         prefix_env_choices = [envs[:n_envs], envs[n_envs:]]
     
-    for full_envs, prefix_envs in it.product(full_env_choices, prefix_env_choices):
-        f_bitmaps = T.stack([f.eval(env) for env in full_envs])
+    for f_envs, p_envs in it.product(full_env_choices, prefix_env_choices):
+        f_bmps = T.stack([f.eval(env) for env in f_envs])
 
         for i in range(len(f_lines) + 1):
-            prefix = Seq(*f_lines[:i])
-            prefix_bitmaps = T.stack([prefix.eval(env) for env in prefix_envs])  # well-defined on envs b/c f is
-            prefix_tokens = Seq(*f_simplified_lines[:i]).serialize()
-            delta_tokens = f_simplified_lines[i].serialize() if i < len(f_lines) else [SEQ_END]
-            yield (prefix_tokens, prefix_envs, prefix_bitmaps), (f_tokens, full_envs, f_bitmaps), delta_tokens
+            p = Seq(*f_lines[:i])
+            p_bmps = T.stack([p.eval(env) for env in p_envs])  # well-defined on envs b/c f is
+            p_toks = p.serialize()
+            d_toks = f_lines[i].serialize() if i < len(f_lines) else [SEQ_END]
+            yield (p_toks, p_envs, p_bmps), (f_toks, f_envs, f_bmps), d_toks
 
 def gen_closures(n_envs: int, n_programs: int, n_lines: int,
                  arg_exprs: List[Expr],
@@ -237,27 +237,73 @@ def gen_closures_and_deltas_mp(closures_loc_prefix: str, deltas_loc_prefix: str,
                       for i in range(n_workers)])
     # separate closure and delta gen? might allow better allocation of workers
 
+# Examine datasets
+def collect_stats(dataset: Iterable, max_line_count=3):
+    by_len = {
+        i: {"count": 0,    # number of programs of length i
+            "overlap": 0}  # overlap between rendered lines
+        for i in range(1, max_line_count+1)
+    }
+    n_of_type = {t: 0 for t in [Point, Line, Rect]}  # track number of lines by type
+    seen_lines = set()  # track unique lines
+
+    for (p, z_p, b_p), (f, z_f, b_f), d in dataset:
+        f = deserialize(f)
+        lines = f.lines()
+        n_lines = len(lines)
+        
+        z_f, z_p = z_f[0], z_p[0]
+        print(f, z_f, z_p)
+        # print(f, lines, n_lines, by_len, n_of_type, seen_lines)
+        
+        seen_lines.union(lines)
+        by_len[n_lines]["count"] += 1
+
+        for line in lines:
+            t = type(line)
+            n_of_type[t] += 1
+
+        overlap_p = T.sum(T.sum(T.stack([line.eval(z_p) > 0 for line in lines]), dim=-1) > 1).item()
+        overlap_f = T.sum(T.sum(T.stack([line.eval(z_f) > 0 for line in lines]), dim=-1) > 1).item()
+
+        by_len[n_lines]["overlap"] = (overlap_p + overlap_f)/(2 * B_H * B_W)
+    
+    print(f"Unique lines: {len(seen_lines)}",
+          f"Number of lines by type: {n_of_type}",
+          f"Counts by length:",
+          *[f"  {by_len[i]['count']}" for i in range(max_line_count)],
+          f"Overlaps by length:",
+          *[f"  {by_len[i]['overlap']}" for i in range(max_line_count)],
+          sep="\n")
+
 
 if __name__ == '__main__':
     # demo_gen_program()
     # demo_gen_closures()
     # demo_gen_policy_data()
     
-    dir = '/home/djl328/arc/data/policy-pretraining'
-    code = '100k-RLP-5e1~3l0~1z'
-    t = util.timecode()
-    for mode in ['training', 'validation']:
-        print(f"Generating policy data for mode={mode}")
-        gen_closures_and_deltas_mp(
-            closures_loc_prefix=f'{dir}/{code}/{mode}_{t}/',
-            deltas_loc_prefix=f'{dir}/{code}/{mode}_{t}/',
-            n_envs=5,
-            n_programs=100_000,
-            n_lines_bounds=(1, 3),
-            rand_arg_bounds=(0, 1),
-            line_types=[Rect, Line, Point],
-            line_type_weights=[4, 3, 1],
-            n_workers=100,
-        )
-        util.join_glob(f"{dir}/{code}/{mode}_{t}/deltas_*.dat", 
-                       f"{dir}/{code}/{mode}_{t}/joined_deltas.dat")
+    dir = "../data/policy-pretraining"  # '/home/djl328/arc/data/policy-pretraining'
+    code = '1-RLP-5e1l0~1z'
+    # t = util.timecode()
+    # for mode in ['training',
+    #              # 'validation'
+    #              ]:
+    #     print(f"Generating policy data for mode={mode}")
+    #     gen_closures_and_deltas_mp(
+    #         closures_loc_prefix=f'{dir}/{code}/{mode}_{t}/',
+    #         deltas_loc_prefix=f'{dir}/{code}/{mode}_{t}/',
+    #         n_envs=3,
+    #         n_programs=1,
+    #         n_lines_bounds=(1, 1),
+    #         rand_arg_bounds=(1, 1),
+    #         line_types=[Rect, Line, Point],
+    #         line_type_weights=[4, 3, 1],
+    #         n_workers=1,
+    #     )
+    #     util.join_glob(f"{dir}/{code}/{mode}_{t}/deltas_*.dat",
+    #                    f"{dir}/{code}/{mode}_{t}/joined_deltas.dat")
+
+    collect_stats(util.load_incremental("../data/policy-pretraining/100k-RLP-5e1l0~1z/training_deltas.dat"),
+                  max_line_count=1)
+    collect_stats(util.load_incremental("../data/policy-pretraining/100k-RLP-5e1l0~1z/validation_deltas.dat"),
+                  max_line_count=1)
