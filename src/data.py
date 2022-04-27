@@ -204,8 +204,8 @@ def gen_closures_and_deltas(worker_id: int, closures_loc: str, deltas_loc: str,
             pickle.dump((f, envs), closures_file)
             for delta in to_delta_examples(f, envs, split_envs=split_envs):
                 (p_toks, p_envs, p_bmps), (f_toks, f_envs, f_bmps), d = delta
-                print("delta example:", p_toks, p_envs, p_bmps, f_toks, f_envs, f_bmps, d,
-                      sep='\n', end='\n\n')
+                # print("delta example:", p_toks, p_envs, p_bmps, f_toks, f_envs, f_bmps, d,
+                #       sep='\n', end='\n\n')
                 pickle.dump(delta, deltas_file)
             if verbose: print(f'[{worker_id}][{i}/{n_programs}]: {f}')
 
@@ -247,16 +247,24 @@ def collect_stats(dataset: Iterable, max_line_count=3):
     n_of_type = {t: 0 for t in [Point, Line, Rect]}  # track number of lines by type
     seen_lines = set()  # track unique lines
 
+    n_items = 0
+    total_n_lines = 0
+    seen_fs = set()
     for (p, z_p, b_p), (f, z_f, b_f), d in dataset:
+        if str(f) in seen_fs:
+            continue
+        else:
+            seen_fs.add(str(f))
+        
+        n_items += 1
         f = deserialize(f)
         lines = f.lines()
         n_lines = len(lines)
+        total_n_lines += n_lines
         
-        z_f, z_p = z_f[0], z_p[0]
-        print(f, z_f, z_p)
-        # print(f, lines, n_lines, by_len, n_of_type, seen_lines)
-        
-        seen_lines.union(lines)
+        z_f, z_p = z_f[0], z_p[0]  # FIXME
+
+        seen_lines = seen_lines.union(lines)
         by_len[n_lines]["count"] += 1
 
         for line in lines:
@@ -265,15 +273,15 @@ def collect_stats(dataset: Iterable, max_line_count=3):
 
         overlap_p = T.sum(T.sum(T.stack([line.eval(z_p) > 0 for line in lines]), dim=-1) > 1).item()
         overlap_f = T.sum(T.sum(T.stack([line.eval(z_f) > 0 for line in lines]), dim=-1) > 1).item()
-
-        by_len[n_lines]["overlap"] = (overlap_p + overlap_f)/(2 * B_H * B_W)
+        by_len[n_lines]["overlap"] = (overlap_p + overlap_f)/2
     
-    print(f"Unique lines: {len(seen_lines)}",
+    print(f"#items: {n_items}",
+          f"Unique lines: {len(seen_lines)}, (expected: {total_n_lines})",
           f"Number of lines by type: {n_of_type}",
           f"Counts by length:",
-          *[f"  {by_len[i]['count']}" for i in range(max_line_count)],
+          *[f"  {i}: {by_len[i]['count']}" for i in range(1, max_line_count+1)],
           f"Overlaps by length:",
-          *[f"  {by_len[i]['overlap']}" for i in range(max_line_count)],
+          *[f"  {i}: {by_len[i]['overlap']}" for i in range(1, max_line_count+1)],
           sep="\n")
 
 
@@ -283,27 +291,31 @@ if __name__ == '__main__':
     # demo_gen_policy_data()
     
     dir = "../data/policy-pretraining"  # '/home/djl328/arc/data/policy-pretraining'
-    code = '1-RLP-5e1l0~1z'
-    # t = util.timecode()
-    # for mode in ['training',
-    #              # 'validation'
-    #              ]:
-    #     print(f"Generating policy data for mode={mode}")
-    #     gen_closures_and_deltas_mp(
-    #         closures_loc_prefix=f'{dir}/{code}/{mode}_{t}/',
-    #         deltas_loc_prefix=f'{dir}/{code}/{mode}_{t}/',
-    #         n_envs=3,
-    #         n_programs=1,
-    #         n_lines_bounds=(1, 1),
-    #         rand_arg_bounds=(1, 1),
-    #         line_types=[Rect, Line, Point],
-    #         line_type_weights=[4, 3, 1],
-    #         n_workers=1,
-    #     )
-    #     util.join_glob(f"{dir}/{code}/{mode}_{t}/deltas_*.dat",
-    #                    f"{dir}/{code}/{mode}_{t}/joined_deltas.dat")
+    code = '10-RLP-5e1l0~1z'
+    t = util.timecode()
+    # t = 'Apr27_22_17-30-25'
+    for mode in ['training',
+                 # 'validation'
+                 ]:
+        print(f"Generating policy data for mode={mode}")
+        gen_closures_and_deltas_mp(
+            closures_loc_prefix=f'{dir}/{code}/{t}/{mode}/',
+            deltas_loc_prefix=f'{dir}/{code}/{t}/{mode}/',
+            n_envs=3,
+            n_programs=10,
+            n_lines_bounds=(1, 1),
+            rand_arg_bounds=(1, 1),
+            line_types=[Rect, Line, Point],
+            line_type_weights=[4, 3, 1],
+            n_workers=1,
+        )
+        util.join_glob(f"{dir}/{code}/{t}/{mode}/deltas_*.dat",
+                       f"{dir}/{code}/{t}/{mode}_deltas.dat")
 
-    collect_stats(util.load_incremental("../data/policy-pretraining/100k-RLP-5e1l0~1z/training_deltas.dat"),
+    collect_stats(util.load_incremental(f"{dir}/{code}/{t}/training_deltas.dat"),
                   max_line_count=1)
-    collect_stats(util.load_incremental("../data/policy-pretraining/100k-RLP-5e1l0~1z/validation_deltas.dat"),
-                  max_line_count=1)
+    
+    # collect_stats(util.load_incremental("../data/policy-pretraining/100k-RLP-5e1l0~1z/training_deltas.dat"),
+    #               max_line_count=1)
+    # collect_stats(util.load_incremental("../data/policy-pretraining/100k-RLP-5e1l0~1z/validation_deltas.dat"),
+    #               max_line_count=1)
