@@ -1,6 +1,7 @@
 """
 Generate data to train value & policy nets
 """
+import pdb
 import pickle
 from typing import Optional, List, Tuple, Iterable, Generator, Dict
 import multiprocessing as mp
@@ -44,7 +45,7 @@ def to_delta_examples(f: Expr, envs: List[Dict], split_envs=False) \
             p = Seq(*f_lines[:i])
             p_bmps = T.stack([p.eval(env) for env in p_envs])  # well-defined on envs b/c f is
             p_toks = p.serialize()
-            d_toks = f_lines[i].serialize() if i < len(f_lines) else [SEQ_END]
+            d_toks = f_lines[i].serialize() if i < len(f_lines) else []
             yield (p_toks, p_envs, p_bmps), (f_toks, f_envs, f_bmps), d_toks
 
 def gen_closures(n_envs: int, n_programs: int, n_lines: int,
@@ -271,8 +272,9 @@ def collect_stats(dataset: Iterable, max_line_count=3):
             t = type(line)
             n_of_type[t] += 1
 
-        overlap_p = T.sum(T.sum(T.stack([line.eval(z_p) > 0 for line in lines]), dim=-1) > 1).item()
-        overlap_f = T.sum(T.sum(T.stack([line.eval(z_f) > 0 for line in lines]), dim=-1) > 1).item()
+        overlap_p = T.sum(T.sum(T.stack([line.eval(z_p) > 0 for line in lines]), dim=0) > 1).item()
+        overlap_f = T.sum(T.sum(T.stack([line.eval(z_f) > 0 for line in lines]), dim=0) > 1).item()
+        
         by_len[n_lines]["overlap"] = (overlap_p + overlap_f)/2
     
     print(f"#items: {n_items}",
@@ -293,29 +295,25 @@ if __name__ == '__main__':
     dir = "../data/policy-pretraining"  # '/home/djl328/arc/data/policy-pretraining'
     code = '10-RLP-5e1l0~1z'
     t = util.timecode()
-    # t = 'Apr27_22_17-30-25'
-    for mode in ['training',
-                 # 'validation'
-                 ]:
-        print(f"Generating policy data for mode={mode}")
-        gen_closures_and_deltas_mp(
-            closures_loc_prefix=f'{dir}/{code}/{t}/{mode}/',
-            deltas_loc_prefix=f'{dir}/{code}/{t}/{mode}/',
-            n_envs=3,
-            n_programs=10,
-            n_lines_bounds=(1, 1),
-            rand_arg_bounds=(1, 1),
-            line_types=[Rect, Line, Point],
-            line_type_weights=[4, 3, 1],
-            n_workers=1,
-        )
-        util.join_glob(f"{dir}/{code}/{t}/{mode}/deltas_*.dat",
-                       f"{dir}/{code}/{t}/{mode}_deltas.dat")
+    for n_lines in [1, 2, 3]:
+        for mode in ['training', 'validation']:
+            print(f"Generating policy data for mode={mode}")
+            gen_closures_and_deltas_mp(
+                closures_loc_prefix=f'{dir}/{code}/{t}/{mode}/',
+                deltas_loc_prefix=f'{dir}/{code}/{t}/{mode}/',
+                n_envs=5,
+                n_programs=10,
+                n_lines_bounds=(1, 1),
+                rand_arg_bounds=(0, 1),
+                line_types=[Rect, Line, Point],
+                line_type_weights=[4, 3, 2],
+                n_workers=1,
+            )
+            util.join_glob(f"{dir}/{code}/{t}/{mode}/deltas_*.dat",
+                           f"{dir}/{code}/{t}/{mode}_deltas.dat")
 
     collect_stats(util.load_incremental(f"{dir}/{code}/{t}/training_deltas.dat"),
                   max_line_count=1)
+    collect_stats(util.load_incremental(f"{dir}/{code}/{t}/validation_deltas.dat"),
+                  max_line_count=1)
     
-    # collect_stats(util.load_incremental("../data/policy-pretraining/100k-RLP-5e1l0~1z/training_deltas.dat"),
-    #               max_line_count=1)
-    # collect_stats(util.load_incremental("../data/policy-pretraining/100k-RLP-5e1l0~1z/validation_deltas.dat"),
-    #               max_line_count=1)

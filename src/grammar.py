@@ -10,7 +10,7 @@ import ant
 B_W = 8
 B_H = 8
 
-LIB_SIZE = 10
+LIB_SIZE = 10  # number of z's, sprites
 Z_LO = 0  # min poss value in z_n
 Z_HI = max(B_W, B_H)-1  # max poss value in z_n
 FULL_LEXICON = ([i for i in range(0, 10)] +
