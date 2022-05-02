@@ -10,10 +10,10 @@ import ant
 B_W = 8
 B_H = 8
 
-LIB_SIZE = 10  # number of z's, sprites
-Z_LO = 0  # min poss value in z_n
-Z_HI = max(B_W, B_H)-1  # max poss value in z_n
-Z_IGNORE = -1
+LIB_SIZE = 10                   # number of z's, sprites
+Z_LO = 0                        # min poss value in z_n
+Z_HI = max(B_W, B_H)            # max poss value in z_n
+Z_IGNORE = -1                   # ignore z's that have this value
 FULL_LEXICON = ([i for i in range(0, 10)] +
                 [f'z_{i}' for i in range(LIB_SIZE)] +
                 [f'S_{i}' for i in range(LIB_SIZE)] +
@@ -21,7 +21,7 @@ FULL_LEXICON = ([i for i in range(0, 10)] +
                  'P', 'L', 'R',
                  'H', 'V', 'T', '#', 'o', '@', '!', '{', '}', '(', ')'])
 SIMPLE_LEXICON = (
-    [i for i in range(0, 10)] +
+    [i for i in range(Z_LO, Z_HI+1)] +
     [f'z_{i}' for i in range(LIB_SIZE)] +
     ['P', 'L', 'R', '{', '}', '(', ')']
 )

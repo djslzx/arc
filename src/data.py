@@ -227,7 +227,8 @@ def gen_closures_and_deltas_mp(closures_loc_prefix: str, deltas_loc_prefix: str,
                                rand_arg_bounds: Tuple[int, int],
                                line_types: List[type], line_type_weights: Optional[List[float]] = None,
                                split_envs=False,
-                               n_workers: int = 1):
+                               n_workers: int = 1,
+                               verbose=False):
     """
     Generate a stream of closures and directly convert them to deltas. Write both to files.
     """
@@ -236,7 +237,7 @@ def gen_closures_and_deltas_mp(closures_loc_prefix: str, deltas_loc_prefix: str,
     assert n_lines_lo >= 0, f'Expected n_lines_bounds > 1, found {n_lines_bounds}'
     
     # run n_workers workers to generate a total of n_programs programs of each size in n_lines
-    arg_exprs = [Z(i) for i in range(LIB_SIZE)] + [Num(i) for i in range(0, 10)]
+    arg_exprs = [Z(i) for i in range(LIB_SIZE)] + [Num(i) for i in range(Z_LO, Z_HI+1)]
     n_programs_per_worker = n_programs // n_workers
     with mp.Pool(processes=n_workers) as pool:
         pool.starmap(gen_closures_and_deltas,
