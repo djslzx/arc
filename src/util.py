@@ -198,6 +198,7 @@ def load_incremental(file_glob, verbose=False):
 def join_glob(in_glob: str, out: str):
     """Join all globbed files into a single file"""
     in_fnames = glob(in_glob)
+    make_parent_dir(out)
     print(f"Joining {in_fnames} => {out}...")
     with open(out, 'wb') as f_out:
         for fname in in_fnames:
