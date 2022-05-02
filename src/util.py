@@ -10,6 +10,12 @@ from datetime import datetime
 
 dirname = os.path.dirname(__file__)
 
+def wrap_tensor(t):
+    if isinstance(t, T.Tensor):
+        return t
+    else:
+        return T.Tensor(t)
+
 def timecode() -> str:
     """Returns the timecode for the current time"""
     return datetime.now().strftime("%b%d_%y_%H-%M-%S")
