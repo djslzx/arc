@@ -761,7 +761,7 @@ class SimplifyIndices(Visitor):
         zs: the indices of zs in the whole expression
         sprites: the indices of sprites in the whole expression
         """
-        self.z_mapping = {z: i for i, z in enumerate(sorted(zs))}
+        self.z_mapping = {z: i for i, z in enumerate(zs)}
         self.sprite_mapping = {sprite: i for i, sprite in enumerate(sorted(sprites))}
     def visit_Nil(self): return Nil()
     def visit_Num(self, n): return Num(n)
@@ -1311,13 +1311,13 @@ def test_simplify_indices():
         (Seq(Z(0), Z(1), Z(3)),
          Seq(Z(0), Z(1), Z(2))),
         (Seq(Z(7), Z(9), Z(3)),
-         Seq(Z(1), Z(2), Z(0))),
+         Seq(Z(0), Z(1), Z(2))),
         (Rect(Z(2), Z(1),
-              Plus(Z(0), Num(2)),
-              Plus(Z(1), Num(3))),
-         Rect(Z(2), Z(1),
-              Plus(Z(0), Num(2)),
-              Plus(Z(1), Num(3)))),
+              Plus(Z(0), Z(2)),
+              Plus(Z(1), Z(3))),
+         Rect(Z(0), Z(1),
+              Plus(Z(2), Z(0)),
+              Plus(Z(1), Z(3)))),
         (Seq(Sprite(0), Sprite(1), Z(3), Z(3)),
          Seq(Sprite(0), Sprite(1), Z(0), Z(0))),
     ]
@@ -1465,7 +1465,7 @@ if __name__ == '__main__':
     # test_eval_bitmap()
     # test_eval_color()
     # test_sprite()
-    # test_simplify_indices()
+    test_simplify_indices()
     # test_range()
     test_zs()
     test_serialize()
