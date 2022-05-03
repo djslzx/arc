@@ -81,8 +81,9 @@ class Expr(Visited):
         assert isinstance(self, Seq)
         assert type(line) in [Point, Line, Rect]
         return Seq(*self.bmps, line)
-    def simplify_indices(self):
-        zs = self.zs()
+    def simplify_indices(self, zs=None):
+        if zs is None:
+            zs = self.zs()
         sprites = self.sprites()
         return self.accept(SimplifyIndices(zs, sprites))
     def serialize(self): return self.accept(Serialize())
@@ -688,33 +689,41 @@ class Serialize(Visitor):
 
 class Zs(Visitor):
     def __init__(self): pass
-    def visit_Nil(self): return set()
-    def visit_Num(self, n): return set()
-    def visit_Z(self, i): return {i}
+    @staticmethod
+    def join(*lists):
+        assert len(lists) >= 2
+        joined = lists[0]
+        for l in lists[1:]:
+            for x in l:
+                if x not in joined:
+                    joined.append(x)
+        return joined
+    def visit_Nil(self): return []
+    def visit_Num(self, n): return []
+    def visit_Z(self, i): return [i]
     def visit_Not(self, b): return b.accept(self)
-    def visit_Plus(self, x, y): return x.accept(self) | y.accept(self)
-    def visit_Minus(self, x, y): return x.accept(self) | y.accept(self)
-    def visit_Times(self, x, y): return x.accept(self) | y.accept(self)
-    def visit_Lt(self, x, y): return x.accept(self) | y.accept(self)
-    def visit_And(self, x, y): return x.accept(self) | y.accept(self)
-    def visit_If(self, b, x, y): return b.accept(self) | x.accept(self) | y.accept(self)
-    def visit_Point(self, x, y, color): return x.accept(self) | y.accept(self) | color.accept(self)
+    def visit_Plus(self, x, y): return self.join(x.accept(self), y.accept(self))
+    def visit_Minus(self, x, y): return self.join(x.accept(self), y.accept(self))
+    def visit_Times(self, x, y): return self.join(x.accept(self), y.accept(self))
+    def visit_Lt(self, x, y): return self.join(x.accept(self), y.accept(self))
+    def visit_And(self, x, y): return self.join(x.accept(self), y.accept(self))
+    def visit_If(self, b, x, y): return self.join(b.accept(self), x.accept(self), y.accept(self))
+    def visit_Point(self, x, y, color): return self.join(x.accept(self), y.accept(self), color.accept(self))
     def visit_Line(self, x1, y1, x2, y2, color):
-        return x1.accept(self) | y1.accept(self) | x2.accept(self) | y2.accept(self) | color.accept(self)
+        return self.join(x1.accept(self), y1.accept(self), x2.accept(self), y2.accept(self), color.accept(self))
     def visit_Rect(self, x_min, y_min, x_max, y_max, color):
-        return x_min.accept(self) | y_min.accept(self) | x_max.accept(self) | y_max.accept(self) | color.accept(self)
-    def visit_Sprite(self, i, x, y):
-        return x.accept(self) | y.accept(self)
-    def visit_Seq(self, bmps): return set.union(*[bmp.accept(self) for bmp in bmps])
-    def visit_Join(self, bmp1, bmp2): return bmp1.accept(self) | bmp2.accept(self)
+        return self.join(x_min.accept(self), y_min.accept(self), x_max.accept(self), y_max.accept(self), color.accept(self))
+    def visit_Sprite(self, i, x, y): return self.join(x.accept(self), y.accept(self))
+    def visit_Seq(self, bmps): return self.join(*[bmp.accept(self) for bmp in bmps])
+    def visit_Join(self, bmp1, bmp2): return self.join(bmp1.accept(self), bmp2.accept(self))
     # def visit_Intersect(self, bmp): return bmp.accept(self)
-    def visit_HFlip(self): return set()
-    def visit_VFlip(self): return set()
-    def visit_Translate(self, x, y): return x.accept(self) | y.accept(self)
+    def visit_HFlip(self): return []
+    def visit_VFlip(self): return []
+    def visit_Translate(self, x, y): return self.join(x.accept(self), y.accept(self))
     def visit_Recolor(self, c): return c.accept(self)
-    def visit_Compose(self, f, g): return f.accept(self) | g.accept(self)
-    def visit_Apply(self, f, bmp): return f.accept(self) | bmp.accept(self)
-    def visit_Repeat(self, f, n): return f.accept(self) | n.accept(self)
+    def visit_Compose(self, f, g): return self.join(f.accept(self), g.accept(self))
+    def visit_Apply(self, f, bmp): return self.join(f.accept(self), bmp.accept(self))
+    def visit_Repeat(self, f, n): return self.join(f.accept(self), n.accept(self))
 
 class Sprites(Visitor):
     def __init__(self): pass
@@ -1284,13 +1293,13 @@ def test_eval_color():
 def test_zs():
     test_cases = [
         (Rect(Num(0), Num(1), Num(2), Num(3)),
-         set()),
+         []),
         (Rect(Z(0), Z(1), Plus(Z(0), Num(3)), Plus(Z(1), Num(3))),
-         {0, 1}),
-        (Rect(Z(0), Z(1), Z(2), Z(3)),
-         {0, 1, 2, 3}),
-        (Rect(Z(0), Z(1), Z(0), Z(1)),
-         {0, 1}),
+         [0, 1]),
+        (Rect(Z(3), Z(1), Z(3), Z(0)),
+         [3, 1, 0]),
+        (Rect(Z(0), Z(1), Z(3), Z(1)),
+         [0, 1, 3]),
     ]
     for expr, ans in test_cases:
         out = expr.zs()
@@ -1328,9 +1337,16 @@ def test_serialize():
         (If(Lt(Z(0), Z(1)),
             Point(Z(0), Z(0)),
             Rect(Z(1), Z(1), Num(2), Num(3))),
-         ['?', '<', 'z_0', 'z_1', 'P', 1, 'z_0', 'z_0', 'R', 1, 'z_1', 'z_1', 2, 3]),
+         ['?', '<', 'z_0', 'z_1',
+          'P', 1, 'z_0', 'z_0',
+          'R', 1, 'z_1', 'z_1', 2, 3]),
         (Seq(Sprite(0), Sprite(1), Sprite(2), Sprite(3)),
-         ['{', 'S_0', 0, 0, '|', 'S_1', 0, 0, '|', 'S_2', 0, 0, '|', 'S_3', 0, 0, '|', '}']),
+         ['{',
+          'S_0', 0, 0,
+          'S_1', 0, 0,
+          'S_2', 0, 0,
+          'S_3', 0, 0,
+          '}']),
         (Apply(Translate(Num(1), Num(2)),
                Seq(Rect(Plus(Z(0), Num(1)),
                         Plus(Z(0), Num(1)),
@@ -1338,8 +1354,8 @@ def test_serialize():
                         Num(2)),
                    Rect(Z(0), Z(0), Num(2), Num(2)))),
          ['@', 'T', 1, 2, '{',
-          'R', 1, '+', 'z_0', 1, '+', 'z_0', 1, 2, 2, '|',
-          'R', 1, 'z_0', 'z_0', 2, 2, '|', '}']),
+          'R', 1, '+', 'z_0', 1, '+', 'z_0', 1, 2, 2,
+          'R', 1, 'z_0', 'z_0', 2, 2, '}']),
     ]
     for expr, ans in test_cases:
         serialized = expr.serialize()
@@ -1451,9 +1467,9 @@ if __name__ == '__main__':
     # test_sprite()
     # test_simplify_indices()
     # test_range()
-    # test_zs()
+    test_zs()
     test_serialize()
     test_well_formed()
     test_deserialize_breaking()
     test_leaves()
-    demo_perturb_leaves()
+    # demo_perturb_leaves()
