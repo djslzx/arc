@@ -7,14 +7,14 @@ import random
 import ant
 
 # bitmap size constants
-B_W = 8
-B_H = 8
+B_W = 10
+B_H = 10
 
 LIB_SIZE = 10                   # number of z's, sprites
 Z_LO = 0                        # min poss value in z_n
 Z_HI = max(B_W, B_H)            # max poss value in z_n
 Z_IGNORE = -1                   # ignore z's that have this value
-FULL_LEXICON = ([i for i in range(0, 10)] +
+FULL_LEXICON = ([i for i in range(Z_LO, Z_HI+1)] +
                 [f'z_{i}' for i in range(LIB_SIZE)] +
                 [f'S_{i}' for i in range(LIB_SIZE)] +
                 ['~', '+', '-', '*', '<', '&', '?',

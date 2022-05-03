@@ -21,8 +21,12 @@ import util
 import viz
 
 dev_name = 'cuda:0' if T.cuda.is_available() else 'cpu'
-device = T.device(dev_name)
+dev = T.device(dev_name)
 print(f"Using {dev_name}")
+
+PADDING = "PADDING"
+PROGRAM_START = "PROGRAM_START"
+PROGRAM_END = "PROGRAM_END"
 
 class SrcEncoding(nn.Module):
     """
@@ -38,10 +42,10 @@ class SrcEncoding(nn.Module):
         self.src_embedding = nn.Embedding(n_sources, d_model)
         
     def encoding(self):
-        encoding = T.zeros(sum(self.source_sizes), 1, self.d_model).to(device)
+        encoding = T.zeros(sum(self.source_sizes), 1, self.d_model).to(dev)
         start = 0
         for i, source_sz in enumerate(self.source_sizes):
-            encoding[start:start + source_sz, :] = self.src_embedding(T.tensor([i]).to(device))
+            encoding[start:start + source_sz, :] = self.src_embedding(T.tensor([i]).to(dev))
             start += source_sz
         return encoding
         
@@ -77,95 +81,97 @@ Result = namedtuple('Result', 'indices completed well_formed')
 
 class Model(nn.Module):
     
-    PADDING = "PADDING"
-    PROGRAM_START = "PROGRAM_START"
-    PROGRAM_END = "PROGRAM_END"
-    LINE_START = "("
-    LINE_END = ")"
-    SEQ_END = "STOP"
-    
     def __init__(self,
                  name: str,
-                 N: int, H: int, W: int, lexicon: List[str],
+                 N: int, C: int, H: int, W: int,
+                 Z_LO: int, Z_HI: int,
+                 lexicon: List[str],
                  d_model=512,
-                 n_conv_layers=6, n_conv_channels=16,
-                 n_tf_encoder_layers=6, n_tf_decoder_layers=6,
-                 n_value_heads=3, n_value_ff_layers=6,
-                 max_program_length=50, max_line_length=15,
-                 batch_size=32, save_dir='.'):
+                 n_conv_channels=16,
+                 n_tf_encoder_layers=6,
+                 n_tf_decoder_layers=6,
+                 n_value_heads=3,
+                 max_program_length=50,
+                 max_line_length=15,
+                 batch_size=32,
+                 save_dir='.'):
         super().__init__()
         self.name = name
-        self.N = N
-        self.H = H
-        self.W = W
+
+        # grammar/bitmap parameters
+        self.N = N        # number of rendered bitmaps per sample
+        self.C = C        # number of channels per bitmap
+        self.H = H        # height (in pixels) of each bitmap
+        self.W = W        # width of each bitmap
+        self.Z_LO = Z_LO  # minimum value of z
+        self.Z_HI = Z_HI  # max value of z
+
+        # model hyperparameters
         self.d_model = d_model
-        self.n_conv_layers = n_conv_layers
         self.n_conv_channels = n_conv_channels
         self.n_tf_encoder_layers = n_tf_encoder_layers
         self.n_tf_decoder_layers = n_tf_decoder_layers
         self.n_value_heads = n_value_heads
-        self.n_value_ff_layers = n_value_ff_layers
+        self.batch_size = batch_size
         self.max_line_length = max_line_length
         self.max_program_length = max_program_length
-        self.batch_size = batch_size
         self.save_dir = save_dir
         
         # program embedding: embed program tokens as d_model-size tensors
-        self.lexicon        = lexicon + [Model.PROGRAM_START, Model.PROGRAM_END, Model.PADDING, Model.SEQ_END]
+        # lexicon includes both the program alphabet and the range of valid z's
+        self.lexicon        = [PADDING, PROGRAM_START, PROGRAM_END, g.Z_IGNORE] + lexicon
         self.n_tokens       = len(self.lexicon)
         self.token_to_index = {s: i for i, s in enumerate(self.lexicon)}
-        self.PADDING        = self.token_to_index[Model.PADDING]
-        self.PROGRAM_START  = self.token_to_index[Model.PROGRAM_START]
-        self.PROGRAM_END    = self.token_to_index[Model.PROGRAM_END]
-        self.LINE_START     = self.token_to_index[Model.LINE_START]
-        self.LINE_END       = self.token_to_index[Model.LINE_END]
-        self.SEQ_END        = self.token_to_index[Model.SEQ_END]
-        self.p_embedding    = nn.Embedding(num_embeddings=self.n_tokens, embedding_dim=self.d_model)
+        self.PADDING        = self.token_to_index[PADDING]
+        self.PROGRAM_START  = self.token_to_index[PROGRAM_START]
+        self.PROGRAM_END    = self.token_to_index[PROGRAM_END]
+        self.Z_IGNORE       = self.token_to_index[g.Z_IGNORE]
         self.pos_encoding   = PositionalEncoding(self.d_model)
+        self.p_embedding    = nn.Embedding(num_embeddings=self.n_tokens, embedding_dim=self.d_model)
         
         # bitmap embedding: convolve HxW bitmaps into d_model-size tensors
-        conv_stack = [
-            nn.Conv2d(1, n_conv_channels, 3, padding='same'),
-            nn.BatchNorm2d(n_conv_channels),
-            nn.ReLU(),
-        ]
-        for _ in range(n_conv_layers - 1):
-            conv_stack.extend([
-                nn.Conv2d(n_conv_channels, n_conv_channels, 3, padding='same'),
-                nn.BatchNorm2d(n_conv_channels),
+        def conv_block(in_channels: int, out_channels: int, kernel_size=3) -> nn.Module:
+            return nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, kernel_size, padding='same'),
+                nn.BatchNorm2d(out_channels),
                 nn.ReLU(),
-            ])
-        conv_out_dim = n_conv_channels * H * W
+            )
         self.conv = nn.Sequential(
-            *conv_stack,
+            conv_block(C, n_conv_channels),
+            conv_block(n_conv_channels, n_conv_channels),
+            conv_block(n_conv_channels, n_conv_channels),
+            conv_block(n_conv_channels, n_conv_channels),
+            conv_block(n_conv_channels, n_conv_channels),
+            conv_block(n_conv_channels, n_conv_channels),
             nn.Flatten(),
-            nn.Linear(conv_out_dim, d_model),
+            nn.Linear(n_conv_channels * H * W, d_model),
         )
         # Add embedding to track source of different tensors passed into the transformer encoder
         self.src_encoding = SrcEncoding(d_model=d_model,
-                                        source_sizes=[self.N, self.N, self.max_program_length])
-        self.tf_encoder = nn.TransformerEncoder(encoder_layer=nn.TransformerEncoderLayer(d_model=self.d_model, nhead=8),
-                                                num_layers=self.n_tf_encoder_layers)
+                                        source_sizes=[N, N, max_program_length])
+        self.tf_encoder = nn.TransformerEncoder(encoder_layer=nn.TransformerEncoderLayer(d_model=d_model, nhead=8),
+                                                num_layers=n_tf_encoder_layers)
         
-        # policy head: receives transformer encoding of the triple (B, B', f') and generates an embedding
+        # policy heads: receive transformer encoding of the triple (B, B', f') and
+        # generate a program embedding + random params
         self.tf_decoder = nn.TransformerDecoder(decoder_layer=nn.TransformerDecoderLayer(d_model=self.d_model, nhead=8),
                                                 num_layers=self.n_tf_decoder_layers)
+        # take the d_model-dimensional vector output from the decoder and map it to a probability distribution over
+        # the program/parameter alphabet
         self.tf_out = nn.Linear(self.d_model, self.n_tokens)
+        
+        # feed in z's appended to the end of each program
 
         # value head: receives code from tf_encoder and maps to evaluation of program
-        value_layers = [
-            nn.Linear((2 * self.N + self.max_program_length) * self.d_model,
-                      self.d_model),
-            nn.ReLU(),
-        ]
-        assert self.n_value_ff_layers >= 1
-        for _ in range(self.n_value_ff_layers - 1):
-            value_layers.extend([
-                nn.Linear(self.d_model, self.d_model),
+        def lin_block(in_channels: int, out_channels:int) -> nn.Module:
+            return nn.Sequential(
+                nn.Linear(in_channels, out_channels),
                 nn.ReLU(),
-            ])
+            )
         self.value_fn = nn.Sequential(
-            *value_layers,
+            lin_block((2 * self.N + self.max_program_length) * self.d_model, self.d_model),
+            lin_block(self.d_model, self.d_model),
+            lin_block(self.d_model, self.d_model),
             nn.Linear(self.d_model, self.n_value_heads)
         )
 
@@ -173,15 +179,15 @@ class Model(nn.Module):
         return f'{self.save_dir}/model_{self.name}_{epoch}.pt'
 
     def load_model(self, checkpoint_loc: str):
-        checkpoint = T.load(checkpoint_loc, map_location=device)
+        checkpoint = T.load(checkpoint_loc, map_location=dev)
         self.load_state_dict(checkpoint['model_state_dict'])
 
     def to_index(self, token):
         return self.token_to_index[token]
 
-    def to_indices(self, tokens: Iterable, add_markers=False) -> T.Tensor:
+    def to_indices(self, tokens: Iterable, decorate=False) -> T.Tensor:
         indices = [self.to_index(t) for t in tokens]
-        if add_markers:
+        if decorate:
             indices = [self.PROGRAM_START] + indices + [self.PROGRAM_END]
         return T.tensor(indices)
 
@@ -196,37 +202,33 @@ class Model(nn.Module):
         Map the batched bitmap set b (of shape [batch, H, W])
         to bitmap embeddings (of shape [N, batch, d_model])
         """
-        b_flat = b.to(device).reshape(-1, 1, self.H, self.W)  # add channel dim, flatten bitmap collection
+        b_flat = b.to(dev).reshape(-1, self.C, self.H, self.W)  # add channel dim, flatten bitmap collection
         e_b = self.conv(b_flat).reshape(batch_size, -1, self.d_model)  # apply conv, portion embeddings into batches
         e_b = e_b.transpose(0, 1)  # swap batch and sequence dims
         return e_b
+    
+    def forward(self, f_bmps, p_bmps, p, delta_z):
+        """Overloads delta_z to carry both program and parameters"""
         
-    def embed_programs(self, f):
-        """
-        Map the batched program list (represented as a 2D tensor of program indices)
-        to a tensor of program embeddings
-        """
-        programs = f.to(device)
-        f_embeddings = T.stack([self.p_embedding(p) for p in programs]).transpose(0, 1)
-        return f_embeddings
-
-    def forward(self, b, b_hat, f_hat, delta):
         # compute embeddings for bitmaps, programs
-        batch_size = b.shape[0]
-        e_b = self.embed_bitmaps(b, batch_size)
-        e_b_hat = self.embed_bitmaps(b_hat, batch_size)
-        e_f_hat = self.pos_encoding(self.embed_programs(f_hat))
-        e_delta = self.pos_encoding(self.embed_programs(delta))
+        batch_size = f_bmps.shape[0]  # need this b/c last batch might not be the full size
+        e_f_bmps = self.embed_bitmaps(f_bmps, batch_size)
+        e_p_bmps = self.embed_bitmaps(p_bmps, batch_size)
+        e_p = self.pos_encoding(self.p_embedding(p).transpose(0, 1))
+        e_delta_z = self.pos_encoding(self.p_embedding(delta_z).transpose(0, 1))
 
         # concat e_B, e_B', e_p', add source encoding, then pass through tf_encoder
-        src = T.cat((e_b, e_b_hat, e_f_hat))
+        src = T.cat((e_f_bmps, e_p_bmps, e_p))
         src = self.src_encoding.forward(src)
         tf_code = self.tf_encoder.forward(src)
 
         # pass tf_code through v and pi -> value, policy
-        padding_mask = T.eq(delta, self.PADDING).to(device)
-        tgt_mask = nn.Transformer.generate_square_subsequent_mask(sz=e_delta.shape[0]).to(device)
-        policy = self.tf_out(self.tf_decoder.forward(tgt=e_delta, memory=tf_code,
+        padding_mask = T.eq(delta_z, self.PADDING).to(dev)
+        tgt_mask = nn.Transformer.generate_square_subsequent_mask(sz=e_delta_z.shape[0]).to(dev)
+        # TODO MAYBE: use tgt_mask to mask out unwanted values of z?
+        # pass in delta tokens + environment tokens to transformer as tgt
+        policy = self.tf_out(self.tf_decoder.forward(tgt=e_delta_z,
+                                                     memory=tf_code,
                                                      tgt_mask=tgt_mask,
                                                      tgt_key_padding_mask=padding_mask))
 
@@ -237,7 +239,7 @@ class Model(nn.Module):
         return policy, value
 
     @staticmethod
-    def word_loss(expected: T.Tensor, actual: T.Tensor) -> T.Tensor:
+    def word_loss(target, output):
         """
         x = log_softmax(actual, -1) : turn logits into probabilities
         x = (x * expected)          : pull out values from `actual` at nonzero locations in `expected`
@@ -246,10 +248,47 @@ class Model(nn.Module):
         x = T.mean(x)               : compute mean probability of correctly generating each sequence in the batch
         x = -x                      : minimize loss (-mean) to maximize mean pr
         """
-        log_prs = T.sum(F.log_softmax(actual, dim=-1) * expected, dim=-1)
+        log_prs = T.sum(F.log_softmax(output, dim=-1) * target, dim=-1)
         return -T.mean(T.sum(log_prs, dim=0))
 
-    def pretrain_policy(self, tloader: DataLoader, vloader: DataLoader, epochs: int, lr=10 ** -4,
+    def program_params_loss(self, target, output, mask):
+        """
+        fz: f cat f_envs
+        pz: p cat p_envs
+        """
+        # envs_size = self.N * g.LIB_SIZE - 1  # -1 to account for shifting
+        # prog_size = fz.shape[0] - envs_size
+        # f, f_envs = fz.split((prog_size, envs_size))
+        # p, p_envs = pz.split((prog_size, envs_size))
+        #
+        # # mask out values in f_envs that aren't used in f
+        # # TODO: mask out values of p_envs?
+        # mask = (f_envs == self.Z_IGNORE)
+        # pdb.set_trace()
+        # f_masked_envs = f_envs.masked_fill(mask, 0)
+        # p_masked_envs = p_envs.masked_fill(mask, 0)
+        # target = T.cat((f, f_masked_envs))
+        # output = T.cat((p, p_masked_envs))
+
+        print('target:', target.shape)
+        print('output:', output.shape)
+        print('mask:', mask.shape)
+        return Model.word_loss(target * mask, output * mask)
+
+    def mask_envs(self, envs):
+        batch = envs.shape[0]
+        # noinspection PyTypeChecker
+        mask: T.Tensor = (envs != self.Z_IGNORE)[:, 1:]  # compensate for shifting - match tgt_out
+        # [b, N*L - 1] => [|d| + N*L - 1, b, n_tokens]
+        mask = T.cat((T.ones(batch, self.max_line_length).to(dev), mask), dim=1)  # [b, |d| + N*L - 1]
+        mask = mask.unsqueeze(-1) * T.ones(1, self.n_tokens).to(dev)  # [b, |d| + N*L - 1, n_toks]
+        mask = mask.transpose(0, 1)  # [|d| + N*L - 1, b, n_toks]
+        return mask
+    
+    def pretrain_policy(self,
+                        # TODO: add save_to str here instead of using self.save_to
+                        tloader: DataLoader, vloader: DataLoader,
+                        epochs: int, lr=10 ** -4,
                         assess_freq=10_000, checkpoint_freq=100_000,
                         tloss_thresh: float = 0, vloss_thresh: float = 0,
                         check_vloss_gap=True, vloss_gap: float = 1):
@@ -258,7 +297,7 @@ class Model(nn.Module):
         (a) the validation or training loss reaches the correctness threshold, or
         (b) the validation loss creeps upwards of `exit_dist_from_min` away from its lowest point.
         """
-        self.to(device)
+        self.to(dev)
         optimizer = T.optim.Adam(self.parameters(), lr=lr)
         writer = tb.SummaryWriter(comment=f'_{self.name}_policy_pretrain')
 
@@ -270,15 +309,19 @@ class Model(nn.Module):
         training_complete = False
         for epoch in range(epochs):
             round_tloss = 0
-            for (b, b_hat, f_hat), (delta, _) in tloader:
+            for (p, p_envs, p_bmps), (f, f_envs, f_bmps), d in tloader:
                 step += 1
                 
                 # batch dim first, seq-len dim second in dataloader
-                delta_in = delta[:, :-1]
-                delta_out = delta[:, 1:]
-                policy_out, value_out = self.forward(b=b, b_hat=b_hat, f_hat=f_hat, delta=delta_in)
-                expected = self.to_probabilities(delta_out).transpose(0, 1)  # [seq-len, batch, lexicon-size]
-                loss = self.word_loss(expected=expected, actual=policy_out)
+                tgt = T.cat((d, f_envs), dim=1)
+                tgt_in = tgt[:, :-1]
+                tgt_out = tgt[:, 1:]
+
+                # generate a mask to apply to both target and policy_out
+                policy_out, value_out = self.forward(f_bmps, p_bmps, p, tgt_in)
+                target = self.to_probabilities(tgt_out).transpose(0, 1)  # [seq-len, batch, lexicon-size]
+                mask = self.mask_envs(f_envs)
+                loss = self.program_params_loss(target, policy_out, mask)
         
                 optimizer.zero_grad()
                 loss.backward()
@@ -326,7 +369,7 @@ class Model(nn.Module):
             'training loss': tloss,
             'validation loss': vloss,
         }, path)
-            
+        
     def to_probabilities(self, indices):
         return F.one_hot(indices, num_classes=self.n_tokens).float()
     
@@ -335,12 +378,17 @@ class Model(nn.Module):
         self.eval()
         epoch_loss = 0
         if n_steps is None: n_steps = len(dataloader)
-        for i, ((b, b_hat, f_hat), (delta, _)) in zip(range(n_steps), dataloader):
-            delta_in = delta[:, :-1]
-            delta_out = delta[:, 1:]
-            p, v = self.forward(b=b, b_hat=b_hat, f_hat=f_hat, delta=delta_in)
-            expected_d = self.to_probabilities(delta_out).transpose(0, 1)
-            loss = self.word_loss(expected_d, p)
+        i = 0
+        for (p, p_envs, p_bmps), (f, f_envs, f_bmps), d in dataloader:
+            i += 1
+            if i > n_steps: break
+            tgt = T.cat((d, f_envs), dim=1)
+            tgt_in = tgt[:, :-1]
+            tgt_out = tgt[:, 1:]
+            policy_out, _ = self.forward(f_bmps, p_bmps, p, tgt_in)
+            target = self.to_probabilities(tgt_out).transpose(0, 1)
+            mask = self.mask_envs(f_envs)
+            loss = self.program_params_loss(target, policy_out, mask)
             epoch_loss += loss.detach().item()
         return epoch_loss/n_steps
 
@@ -369,7 +417,7 @@ class Model(nn.Module):
             # [self.approx_likelihood(x, y) for x, y in zip(b, f_hat)],
             # [self.approx_likelihood(b, new_fs)],
         ]  # [n_heads, b]
-        return T.tensor(v + [[0] * self.batch_size] * (self.n_value_heads - len(v))).transpose(0, 1).to(device)
+        return T.tensor(v + [[0] * self.batch_size] * (self.n_value_heads - len(v))).transpose(0, 1).to(dev)
     
     def is_prefix(self, f_hat, f):
         return float(T.equal(f_hat, f[:f_hat.shape[0]]))
@@ -422,18 +470,18 @@ class Model(nn.Module):
         t_start = time.time()
         for epoch in range(epochs):
             epoch_loss = 0
-            for (b, b_hat, f_hat), (delta, f) in dataloader:
+            for (p, p_envs, p_bmps), (f, f_envs, f_bmps), d in dataloader:
                 step += 1
                 # TODO: sample multiple rollouts per input in policy dataloader
                 # TODO: modify delta sampling so we can get multiple rollouts per instance in each batch
                 # pdb.set_trace()
-                lines = self.sample_line_rollouts(b, b_hat, f_hat).to(device)  # [b, l]
+                lines = self.sample_line_rollouts(f_bmps, p_bmps, p).to(dev)  # [b, l]
                 # new_fs = [self.append_delta(f, d).indices for f, d in zip(f_hat, lines)]  # [b, l]
                 # new_bs = T.stack([self.render(f, k=10) for f in new_fs])
         
                 # TODO: use rollouts instead of dataset values
-                value_expected = self.estimate_value(lines, b, b_hat, f_hat, f)
-                _, value_out = self.forward(b, b_hat, f_hat, lines)
+                value_expected = self.estimate_value(lines, f_bmps, p_bmps, p, f)
+                _, value_out = self.forward(f_bmps, p_bmps, p, lines)
                 loss = self.value_loss(target=value_expected, actual=value_out)
                 
                 print(f"loss: {loss}")
@@ -488,17 +536,17 @@ class Model(nn.Module):
                     break
         # add blank bitmaps until we reach the quota
         if len(bitmaps) < self.N:
-            bitmaps += [T.zeros(self.H, self.W)] * (self.N - len(bitmaps))
+            bitmaps += [T.zeros(1, self.H, self.W)] * (self.N - len(bitmaps))
 
         assert(len(bitmaps) == self.N)
-        return T.stack(bitmaps).to(device)
+        return T.stack(bitmaps).to(dev)
         
     def sample_line_rollouts(self, b, b_hat, f_hat):
         self.eval()
         batch_size = b.shape[0]
-        rollouts = T.tensor([[self.PROGRAM_START]] * batch_size).long().to(device)  # [b, 1]
+        rollouts = T.tensor([[self.PROGRAM_START]] * batch_size).long().to(dev)  # [b, 1]
         for i in range(self.max_line_length - 1):
-            p_outs, _ = self.forward(b=b, b_hat=b_hat, f_hat=f_hat, delta=rollouts)  # [i, b, n_tokens]
+            p_outs, _ = self.forward(f_bmps=b, p_bmps=b_hat, p=f_hat, delta=rollouts)  # [i, b, n_tokens]
             next_prs = p_outs.softmax(-1)[-1]  # convert p_outs to probabilities -> [i, b]
             next_indices = T.multinomial(util.filter_top_p(next_prs), 1)
             rollouts = T.cat((rollouts, next_indices), dim=1)
@@ -511,17 +559,17 @@ class Model(nn.Module):
         p_seq = self.to_program(indices)
         if p_seq is None:
             return Result(indices=indices, completed=False, well_formed=False)
-        if delta[1] == self.SEQ_END:  # FIXME: hacky
+        if p_seq == g.Seq():  # a bit hacky: use the empty program to denote an empty delta
             return Result(indices=indices, completed=True, well_formed=True)
         p_delta = self.to_program(delta)
         if p_delta is None:
             return Result(indices=indices, completed=True, well_formed=True)
-        return Result(indices=self.to_indices(p_seq.add_line(p_delta).serialize()).to(device),
+        return Result(indices=self.to_indices(p_seq.add_line(p_delta).serialize()).to(dev),
                       completed=False,
                       well_formed=True)
 
     def pad_program(self, indices: T.Tensor) -> T.Tensor:
-        return util.pad(indices, self.max_program_length, self.PADDING)
+        return util.pad(indices, self.max_program_length, self.PADDING).to(dev)
     
     def sample_program_rollouts(self, bitmaps: T.Tensor) -> List[T.Tensor]:
         """Take samples from the model wrt a (batched) set of bitmaps"""
@@ -529,7 +577,7 @@ class Model(nn.Module):
         self.eval()
         batch_size = bitmaps.shape[0]
         # track whether a rollout is completed in tandem with the rollout data
-        rollouts: List[Result] = [Result(indices=self.to_indices(['{', '}'], add_markers=True),
+        rollouts: List[Result] = [Result(indices=self.to_indices(['{', '}'], decorate=True),
                                          completed=False,
                                          well_formed=True)
                                   for _ in range(batch_size)]
@@ -546,7 +594,7 @@ class Model(nn.Module):
         Make a dataloader for policy network pre-training. (batching, tokens -> indices, add channel dim, etc)
         """
         dataset = PolicyDataset(data_src,
-                                to_indices=lambda tokens: self.to_indices(tokens, add_markers=True),
+                                to_indices=self.to_indices,
                                 padding=self.PADDING,
                                 program_length=self.max_program_length,
                                 line_length=self.max_line_length)
@@ -555,7 +603,7 @@ class Model(nn.Module):
 
 class PolicyDataset(IterableDataset):
 
-    def __init__(self, src_glob: str, to_indices: Callable[[List], T.Tensor],
+    def __init__(self, src_glob: str, to_indices: Callable[[List, bool], T.Tensor],
                  padding: int, program_length: int, line_length: int):
         super(PolicyDataset).__init__()
         self.files = util.shuffled(glob(src_glob))  # shuffle file order bc IterableDatasets can't be shuffled
@@ -585,17 +633,23 @@ class PolicyDataset(IterableDataset):
             with open(file, 'rb') as fp:
                 while True:
                     try:
-                        inputs, outputs = pickle.load(fp)
-                        bitmaps, partial_bitmaps, f_prefix_tokens = inputs
-                        delta, f_tokens = outputs
+                        (p_toks, p_envs, p_bmps), (f_toks, f_envs, f_bmps), d_toks = pickle.load(fp)
+                        
                         # add channel dimension to bitmaps
-                        b = bitmaps.unsqueeze(1).to(device)
-                        b_hat = partial_bitmaps.unsqueeze(1).to(device)
+                        f_bmps = f_bmps.unsqueeze(1).to(dev)
+                        p_bmps = p_bmps.unsqueeze(1).to(dev)
+                        
+                        # convert envs into vectors of length N * lib_size
+                        p_envs_indices = self.to_indices([z.item() for env in p_envs for z in env['z']], False).to(dev)
+                        f_envs_indices = self.to_indices([z.item() for env in f_envs for z in env['z']], False).to(dev)
+                        
                         # convert program tokens into padded vectors of indices
-                        f_hat = util.pad(self.to_indices(f_prefix_tokens), self.program_length, self.padding).to(device)
-                        f = util.pad(self.to_indices(f_tokens), self.program_length, self.padding).to(device)
-                        d = util.pad(self.to_indices(delta), self.line_length, self.padding).to(device)
-                        yield (b, b_hat, f_hat), (d, f)
+                        p_indices = util.pad(self.to_indices(p_toks, True), self.program_length, self.padding).to(dev)
+                        f_indices = util.pad(self.to_indices(f_toks, True), self.program_length, self.padding).to(dev)
+                        d_indices = util.pad(self.to_indices(d_toks, True), self.line_length, self.padding).to(dev)
+
+                        yield (p_indices, p_envs_indices, p_bmps), (f_indices, f_envs_indices, f_bmps), d_indices
+                    
                     except EOFError:
                         break
 
@@ -604,13 +658,12 @@ def sample_model(model: Model, dataloader: DataLoader):
         in_bitmaps = b.squeeze().cpu()[0]
         rollouts = model.sample_program_rollouts(b)
 
-        for rollout in rollouts[:1]:
+        for rollout in rollouts:
             program = model.to_program(rollout)
             print(program)
             out_bitmaps = model.render(rollout).squeeze().cpu()
-            viz.viz_sample(xs=in_bitmaps, ys=out_bitmaps, text=program)
+            # viz.viz_sample(xs=in_bitmaps, ys=out_bitmaps, text=program)
         print()
-        # viz.viz_mult(bitmaps, text=programs[0])
 
 def run(pretrain_policy: bool,
         train_value: bool,
@@ -623,21 +676,26 @@ def run(pretrain_policy: bool,
         model_n_steps: Optional[int] = None,
         check_vloss_gap: bool = True, vloss_gap: float = 1):
     
-    model = Model(name=f'{model_code}_{model_t}', N=5, H=g.B_H, W=g.B_W, lexicon=g.SIMPLE_LEXICON,
-                  d_model=512, n_conv_layers=6, n_conv_channels=12,
-                  n_tf_encoder_layers=6, n_tf_decoder_layers=6,
-                  n_value_heads=5, n_value_ff_layers=2,
+    model = Model(name=f'{model_code}_{model_t}',
+                  N=5, C=1, H=g.B_H, W=g.B_W,
+                  Z_HI=g.Z_HI, Z_LO=g.Z_LO,
+                  lexicon=g.SIMPLE_LEXICON,
+                  d_model=512,
+                  n_conv_channels=12,
+                  n_tf_encoder_layers=6,
+                  n_tf_decoder_layers=6,
+                  n_value_heads=5,
                   max_program_length=50,
                   batch_size=16,
-                  save_dir=model_prefix).to(device)
+                  save_dir=model_prefix).to(dev)
     
     print("Making dataloaders...")
-    tloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/training_{data_t}/joined_deltas.dat')
-    vloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/validation_{data_t}/joined_deltas.dat')
+    tloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/{data_t}/training_deltas.dat')
+    vloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/{data_t}/validation_deltas.dat')
     
     if pretrain_policy:
         print("Pretraining policy....")
-        epochs = 1_000
+        epochs = 1000 if model_n_steps is not None else model_n_steps
         model.pretrain_policy(tloader=tloader, vloader=vloader, epochs=epochs,
                               assess_freq=assess_freq, checkpoint_freq=checkpoint_freq,
                               tloss_thresh=tloss_thresh, vloss_thresh=vloss_thresh,
@@ -658,7 +716,7 @@ def run(pretrain_policy: bool,
     
     if sample:
         print("Sampling rollouts...")
-        sample_model(model, vloader)
+        sample_model(model, tloader)
 
 
 if __name__ == '__main__':
@@ -676,23 +734,21 @@ if __name__ == '__main__':
 
     # run locally
     run(
-        pretrain_policy=False,
-        train_value=True,
+        pretrain_policy=True,
+        train_value=False,
         sample=False,
         data_prefix='../data/policy-pretraining',
         model_prefix='../models',
-        data_code='3-RLP-5e1~3l0~1z',
-        data_t='Apr21_22_19-41-52',
-        model_code='100k-RLP-5e1~3l0~1z',  # remote
-        model_t='Apr21_22_22-59-46',  # remote
-        # model_code='3-RLP-5e1~3l0~1z',  # local
-        # model_t='Apr20_22_15-40-28',  # local
-        # model_t=util.timecode(),
-        model_n_steps=1_500_000,
-        assess_freq=10, checkpoint_freq=100,
-        tloss_thresh=10 ** -5, vloss_thresh=10 ** -5,
+        data_code='10-RLP-5e1l0~1z',
+        data_t='May03_22_01-34-53',
+        # model_code='100k-RLP-5e1~3l0~1z',  # remote
+        # model_t='Apr21_22_22-59-46',  # remote
+        model_code='10-RLP-5e1l0~1z',  # local
+        # model_t='Apr28_22_17-11-50',  # local
+        model_t=util.timecode(),
+        model_n_steps=300,
+        assess_freq=10, checkpoint_freq=200,
+        tloss_thresh=0.0001, vloss_thresh=0.0001,
         check_vloss_gap=False,
         # vloss_gap=2,
     )
-    
-    
