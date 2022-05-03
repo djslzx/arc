@@ -256,28 +256,34 @@ class Model(nn.Module):
         fz: f cat f_envs
         pz: p cat p_envs
         """
-        # envs_size = self.N * g.LIB_SIZE - 1  # -1 to account for shifting
-        # prog_size = fz.shape[0] - envs_size
-        # f, f_envs = fz.split((prog_size, envs_size))
-        # p, p_envs = pz.split((prog_size, envs_size))
-        #
-        # # mask out values in f_envs that aren't used in f
-        # # TODO: mask out values of p_envs?
-        # mask = (f_envs == self.Z_IGNORE)
-        # pdb.set_trace()
-        # f_masked_envs = f_envs.masked_fill(mask, 0)
-        # p_masked_envs = p_envs.masked_fill(mask, 0)
-        # target = T.cat((f, f_masked_envs))
-        # output = T.cat((p, p_masked_envs))
+        envs_sz = self.N * g.LIB_SIZE - 1  # -1 to account for shifting
+        p_sz = target.shape[0] - envs_sz
+        
+        # split target/output into program/env
+        target_p, target_z = target.split((p_sz, envs_sz))
+        output_p, output_z = output.split((p_sz, envs_sz))
 
-        print('target:', target.shape)
-        print('output:', output.shape)
-        print('mask:', mask.shape)
-        return Model.word_loss(target * mask, output * mask)
-
-    def mask_envs(self, envs):
+        # compute losses separately
+        f_loss = Model.word_loss(target_p, output_p)
+        z_loss = Model.word_loss(target_z * mask, output_z * mask)
+        return f_loss, z_loss
+    
+    def env_mask(self, envs):
+        """
+        Take the natural mask for envs (mask out tokens eq to Z_IGNORE), then stretch it to cover
+        params represented as probabilities
+        """
+        mask: T.Tensor = (envs != self.Z_IGNORE)[:, 1:]  # compensate for shifting - match tgt_out
+        mask = mask.unsqueeze(-1) * T.ones(1, self.n_tokens).to(dev)
+        mask = mask.transpose(0, 1)
+        return mask
+    
+    def stretched_env_mask(self, envs):
+        """
+        Take the natural mask for envs (mask out tokens eq to Z_IGNORE), then stretch it to cover
+        deltas that include params, represented as probabilities
+        """
         batch = envs.shape[0]
-        # noinspection PyTypeChecker
         mask: T.Tensor = (envs != self.Z_IGNORE)[:, 1:]  # compensate for shifting - match tgt_out
         # [b, N*L - 1] => [|d| + N*L - 1, b, n_tokens]
         mask = T.cat((T.ones(batch, self.max_line_length).to(dev), mask), dim=1)  # [b, |d| + N*L - 1]
@@ -297,6 +303,8 @@ class Model(nn.Module):
         (a) the validation or training loss reaches the correctness threshold, or
         (b) the validation loss creeps upwards of `exit_dist_from_min` away from its lowest point.
         """
+        assess_freq = min(assess_freq, len(tloader))  # bound assess_freq by dataloader size
+
         self.to(dev)
         optimizer = T.optim.Adam(self.parameters(), lr=lr)
         writer = tb.SummaryWriter(comment=f'_{self.name}_policy_pretrain')
@@ -304,41 +312,54 @@ class Model(nn.Module):
         self.train()
         t_start = time.time()
         step, tloss, vloss = 0, 0, 0
+        tloss_f, tloss_z = 0, 0
         min_vloss = T.inf
-        assess_freq = min(assess_freq, len(tloader))  # bound assess_freq by dataloader size
         training_complete = False
         for epoch in range(epochs):
-            round_tloss = 0
+            round_tloss, round_tloss_f, round_tloss_z = 0, 0, 0
             for (p, p_envs, p_bmps), (f, f_envs, f_bmps), d in tloader:
                 step += 1
                 
-                # batch dim first, seq-len dim second in dataloader
                 tgt = T.cat((d, f_envs), dim=1)
                 tgt_in = tgt[:, :-1]
                 tgt_out = tgt[:, 1:]
 
-                # generate a mask to apply to both target and policy_out
                 policy_out, value_out = self.forward(f_bmps, p_bmps, p, tgt_in)
                 target = self.to_probabilities(tgt_out).transpose(0, 1)  # [seq-len, batch, lexicon-size]
-                mask = self.mask_envs(f_envs)
-                loss = self.program_params_loss(target, policy_out, mask)
+                # mask = self.stretched_env_mask(f_envs)
+                mask = self.env_mask(f_envs)
+                p_loss, z_loss = self.program_params_loss(target, policy_out, mask)
+                loss = p_loss + z_loss
         
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
                 round_tloss += loss.item()
+                round_tloss_f += p_loss.item()
+                round_tloss_z += z_loss.item()
         
                 # assess and record current performance
                 if step % assess_freq == 0:
                     tloss = round_tloss / assess_freq
-                    vloss = self.pretrain_validate(vloader, n_steps=assess_freq); self.train()
+                    tloss_f = round_tloss_f / assess_freq
+                    tloss_z = round_tloss_z / assess_freq
+                    vloss_f, vloss_z = self.pretrain_validate(vloader, n_steps=assess_freq)
+                    vloss = vloss_f + vloss_z
+                    self.train()
                     if vloss < min_vloss: min_vloss = vloss
                     
                     # record losses
-                    print(f" [step={step}, epoch={epoch}]: training loss={tloss:.5f}, validation loss={vloss:.5f},"
+                    print(f" [step={step}, epoch={epoch}]: "
+                          f"training loss={tloss:.5f}, validation loss={vloss:.5f}, "
+                          f"training program loss={tloss_f}, training parameter loss={tloss_z}, "
+                          f"validation program loss={vloss_f}, validation parameter loss={vloss_z}, "
                           f" {time.time() - t_start:.2f}s elapsed")
                     writer.add_scalar('training loss', tloss, step)
+                    writer.add_scalar('training loss, program', tloss_f, step)
+                    writer.add_scalar('training loss, parameters', tloss_z, step)
                     writer.add_scalar('validation loss', vloss, step)
+                    writer.add_scalar('validation loss, program', vloss_f, step)
+                    writer.add_scalar('validation loss, parameters', vloss_z, step)
                     round_tloss = 0
             
                     # check exit conditions
@@ -361,7 +382,8 @@ class Model(nn.Module):
             if training_complete: break
         
         path = self.model_path(step)
-        print(f"Finished training at step {step} with tloss={tloss}, vloss={vloss}. Saving to {path}...")
+        print(f"Finished training at step {step} with tloss={tloss}, vloss={vloss},"
+              f"tloss_f={tloss_f}, tloss_z={tloss_z}. Saving to {path}...")
         T.save({
             'step': step,
             'model_state_dict': self.state_dict(),
@@ -376,7 +398,7 @@ class Model(nn.Module):
     def pretrain_validate(self, dataloader, n_steps=None):
         """Compute validation loss of the policy network on the (validation data) dataloader."""
         self.eval()
-        epoch_loss = 0
+        epoch_p_loss, epoch_z_loss = 0, 0
         if n_steps is None: n_steps = len(dataloader)
         i = 0
         for (p, p_envs, p_bmps), (f, f_envs, f_bmps), d in dataloader:
@@ -387,10 +409,12 @@ class Model(nn.Module):
             tgt_out = tgt[:, 1:]
             policy_out, _ = self.forward(f_bmps, p_bmps, p, tgt_in)
             target = self.to_probabilities(tgt_out).transpose(0, 1)
-            mask = self.mask_envs(f_envs)
-            loss = self.program_params_loss(target, policy_out, mask)
-            epoch_loss += loss.detach().item()
-        return epoch_loss/n_steps
+            # mask = self.stretched_env_mask(f_envs)
+            mask = self.env_mask(f_envs)
+            f_loss, z_loss = self.program_params_loss(target, policy_out, mask)
+            epoch_p_loss += f_loss.detach().item()
+            epoch_z_loss += z_loss.detach().item()
+        return epoch_p_loss/n_steps, epoch_z_loss/n_steps
 
     def estimate_value(self, delta, b, b_hat, f_hat, f):
         """
@@ -496,10 +520,10 @@ class Model(nn.Module):
     
     @staticmethod
     def strip(tokens):
-        start = int(tokens[0] == Model.PROGRAM_START)  # skip start token if present
+        start = int(tokens[0] == PROGRAM_START)  # skip start token if present
         end = None                                     # end at last token by default
         for i, token in enumerate(tokens):
-            if token == Model.PROGRAM_END:
+            if token == PROGRAM_END:
                 end = i
                 break
         return tokens[start:end]
@@ -739,10 +763,8 @@ if __name__ == '__main__':
         sample=False,
         data_prefix='../data/policy-pretraining',
         model_prefix='../models',
-        data_code='10-RLP-5e1l0~1z',
-        data_t='May03_22_01-34-53',
-        # model_code='100k-RLP-5e1~3l0~1z',  # remote
-        # model_t='Apr21_22_22-59-46',  # remote
+        data_code='10-RLP-5e2l1z',
+        data_t='May03_22_13-45-57',
         model_code='10-RLP-5e1l0~1z',  # local
         # model_t='Apr28_22_17-11-50',  # local
         model_t=util.timecode(),
