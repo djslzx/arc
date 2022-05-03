@@ -306,17 +306,16 @@ if __name__ == '__main__':
     # demo_gen_policy_data()
     
     dir = '/home/djl328/arc/data/policy-pretraining'
-    joint_code = '100k-RLP-5e1~3l0~1z'
     t = util.timecode()
     for n_lines in [1, 2, 3]:
-        code = f'{n_examples}-RLP-5e{n_lines}l0~1z'
+        code = f'100k-RLP-5e{n_lines}l0~1z'
         for mode in ['training', 'validation']:
             print(f"Generating policy data for mode={mode}")
             gen_closures_and_deltas_mp(
                 closures_loc_prefix=f'{dir}/{code}/{t}/{mode}/',
                 deltas_loc_prefix=f'{dir}/{code}/{t}/{mode}/',
                 n_envs=5,
-                n_programs=n_examples,
+                n_programs=100_000,
                 n_lines_bounds=(n_lines, n_lines),
                 rand_arg_bounds=(0, 1),
                 line_types=[Rect, Line, Point],
@@ -329,8 +328,8 @@ if __name__ == '__main__':
                            f"{dir}/{code}/{t}/{mode}_deltas.dat")
 
     for mode in ['training', 'validation']:
-        util.join_glob(f"{dir}/{n_examples}-RLP-5e*l0~1z/{t}/{mode}_deltas.dat",
-                       f"{dir}/{n_examples}-RLP-5e1~3l0~1z/{t}/{mode}_deltas.dat")
+        util.join_glob(f"{dir}/100k-RLP-5e*l0~1z/{t}/{mode}_deltas.dat",
+                       f"{dir}/100k-RLP-5e1~3l0~1z/{t}/{mode}_deltas.dat")
 
     # collect_stats(util.load_incremental(f"{dir}/{code}/{t}/training_deltas.dat"),
     #               max_line_count=1)

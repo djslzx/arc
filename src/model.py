@@ -270,9 +270,6 @@ class Model(nn.Module):
         # target = T.cat((f, f_masked_envs))
         # output = T.cat((p, p_masked_envs))
 
-        print('target:', target.shape)
-        print('output:', output.shape)
-        print('mask:', mask.shape)
         return Model.word_loss(target * mask, output * mask)
 
     def mask_envs(self, envs):
@@ -341,9 +338,9 @@ class Model(nn.Module):
                     writer.add_scalar('validation loss', vloss, step)
                     round_tloss = 0
             
-                    # check exit conditions
-                    if (check_vloss_gap and vloss > min_vloss + vloss_gap) \
-                       or tloss <= tloss_thresh or vloss <= vloss_thresh:
+                    # check exit conditions (train for at least one epoch)
+                    if epoch > 0 and ((check_vloss_gap and vloss > min_vloss + vloss_gap) \
+                                      or tloss <= tloss_thresh or vloss <= vloss_thresh):
                         training_complete = True
                         break
             
@@ -695,7 +692,7 @@ def run(pretrain_policy: bool,
     
     if pretrain_policy:
         print("Pretraining policy....")
-        epochs = 1000 if model_n_steps is not None else model_n_steps
+        epochs = 1000 if model_n_steps is None else model_n_steps
         model.pretrain_policy(tloader=tloader, vloader=vloader, epochs=epochs,
                               assess_freq=assess_freq, checkpoint_freq=checkpoint_freq,
                               tloss_thresh=tloss_thresh, vloss_thresh=vloss_thresh,
@@ -720,35 +717,40 @@ def run(pretrain_policy: bool,
 
 
 if __name__ == '__main__':
-    # # run on g2
-    # run(
-    #     data_prefix='/home/djl328/arc/data/policy-pretraining',
-    #     model_prefix='/home/djl328/arc/models',
-    #     data_code='100k-RLP-5e1~3l0~1z',
-    #     model_code='100k-RLP-5e1~3l0~1z',
-    #     data_t='Apr14_22_01-51-39',
-    #     model_t=util.now_str(),
-    #     assess_freq = 1000, checkpoint_freq = 10_000,
-    #     vloss_gap = 1, tloss_thresh = 10 ** -4, vloss_thresh = 10 ** -4,
-    # )
-
-    # run locally
+    # run on g2
     run(
         pretrain_policy=True,
         train_value=False,
         sample=False,
-        data_prefix='../data/policy-pretraining',
-        model_prefix='../models',
-        data_code='10-RLP-5e1l0~1z',
-        data_t='May03_22_01-34-53',
-        # model_code='100k-RLP-5e1~3l0~1z',  # remote
-        # model_t='Apr21_22_22-59-46',  # remote
-        model_code='10-RLP-5e1l0~1z',  # local
-        # model_t='Apr28_22_17-11-50',  # local
+        data_prefix='/home/djl328/arc/data/policy-pretraining',
+        model_prefix='/home/djl328/arc/models',
+        data_code='100k-RLP-5e1l0~1z',
+        data_t='May03_22_01-46-06',
+        model_code='100k-RLP-5e1~3l0~1z',
         model_t=util.timecode(),
-        model_n_steps=300,
-        assess_freq=10, checkpoint_freq=200,
-        tloss_thresh=0.0001, vloss_thresh=0.0001,
-        check_vloss_gap=False,
-        # vloss_gap=2,
+        assess_freq=1000, checkpoint_freq=10_000,
+        model_n_steps=10_000,
+        check_vloss_gap=False, # vloss_gap=2,
+        tloss_thresh=10 ** -3, vloss_thresh=10 ** -3,
     )
+
+    # run locally
+    # run(
+    #     pretrain_policy=True,
+    #     train_value=False,
+    #     sample=False,
+    #     data_prefix='../data/policy-pretraining',
+    #     model_prefix='../models',
+    #     data_code='10-RLP-5e1l0~1z',
+    #     data_t='May03_22_01-34-53',
+    #     # model_code='100k-RLP-5e1~3l0~1z',  # remote
+    #     # model_t='Apr21_22_22-59-46',  # remote
+    #     model_code='10-RLP-5e1l0~1z',  # local
+    #     # model_t='Apr28_22_17-11-50',  # local
+    #     model_t=util.timecode(),
+    #     model_n_steps=300,
+    #     assess_freq=10, checkpoint_freq=200,
+    #     tloss_thresh=0.0001, vloss_thresh=0.0001,
+    #     check_vloss_gap=False,
+    #     # vloss_gap=2,
+    # )
