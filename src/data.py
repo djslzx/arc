@@ -305,15 +305,14 @@ if __name__ == '__main__':
     # demo_gen_closures()
     # demo_gen_policy_data()
 
-    # dir = '/home/djl328/arc/data/policy-pretraining'
-    dir = '../data/policy-pretraining'
+    dir = '/home/djl328/arc/data/policy-pretraining'
+    # dir = '../data/policy-pretraining'
     n_envs = 5
-    n_examples = 10
-    n_zs = (1, 1)
+    n_zs = (0, 1)
     z_code = f'{min(n_zs)}~{max(n_zs)}' if min(n_zs) < max(n_zs) else f'{min(n_zs)}'
     t = util.timecode()
     for n_lines in [1, 2, 3]:
-        code = f'{n_examples}-RLP-{n_envs}e{n_lines}l{z_code}z'
+        code = f'100k-RLP-{n_envs}e{n_lines}l{z_code}z'
         for mode in ['training', 'validation']:
             print(f"Generating policy data for mode={mode}")
             gen_closures_and_deltas_mp(
@@ -333,8 +332,8 @@ if __name__ == '__main__':
                            f"{dir}/{code}/{t}/{mode}_deltas.dat")
 
     for mode in ['training', 'validation']:
-        util.join_glob(f"{dir}/{n_examples}-RLP-{n_envs}e*l{z_code}z/{t}/{mode}_deltas.dat",
-                       f"{dir}/{n_examples}-RLP-{n_envs}e1~3l{z_code}z/{t}/{mode}_deltas.dat")
+        util.join_glob(f"{dir}/100k-RLP-{n_envs}e*l{z_code}z/{t}/{mode}_deltas.dat",
+                       f"{dir}/100k-RLP-{n_envs}e1~3l{z_code}z/{t}/{mode}_deltas.dat")
 
     # collect_stats(util.load_incremental(f"{dir}/{code}/{t}/training_deltas.dat"),
     #               max_line_count=1)
