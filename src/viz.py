@@ -53,7 +53,7 @@ def viz_json(fname, save=False):
     viz_sample(xs, ys, title=f'pdfs/{name}.pdf')
 
 def viz_sample(xs, ys, title='', text='', save=False):
-    '''Visualize an nx2 grid of input/output pairs'''
+    """Visualize an nx2 grid of input/output pairs"""
     f, ax = plt.subplots(len(xs), 2)
     plt.figtext(0.5, 0.01, text, wrap=True, horizontalalignment='center', fontsize=9)
     if len(xs) == 1:

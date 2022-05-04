@@ -19,11 +19,24 @@ def filter_zs(env, zs):
     return {'z': T.tensor([z if i in zs else Z_IGNORE
                            for i, z in enumerate(env['z'])])}
 
-def to_delta_examples(f: Expr, envs: List[Dict], split_envs=False) \
-        -> Generator[Tuple[Tuple[List, Envs, T.Tensor],
-                           Tuple[List, Envs, T.Tensor],
-                           List],
-                     None, None]:
+def to_delta_examples_with_params(f: Expr, envs):
+    used_z_indices = f.zs()
+    n_used = len(used_z_indices)
+    # reorder the envs to place used_zs at the front (where they've been remapped) and blank out all other z's
+    envs = [{'z': [util.unwrap_tensor(env['z'][idx]) for idx in used_z_indices] + [Z_IGNORE] * (LIB_SIZE - n_used)}
+            for env in envs]
+    f = f.simplify_indices(used_z_indices)
+    f_toks = f.serialize()
+    f_lines = f.lines()
+    f_bmps = T.stack([f.eval(env) for env in envs])
+    for i in range(len(f_lines) + 1):
+        p = Seq(*f_lines[:i])
+        p_bmps = T.stack([p.eval(env) for env in envs])  # well-defined on envs b/c f is
+        p_toks = p.serialize()
+        d_toks = f_lines[i].serialize() if i < len(f_lines) else []
+        yield (p_toks, envs, p_bmps), (f_toks, envs, f_bmps), d_toks
+
+def to_delta_examples(f: Expr, f_envs_choices, p_envs_choices):
     """
     Converts a closure (f: program, z: environment) into examples of teacher-forcing deltas (B, f', B' -> d')
     for each program f, where:
@@ -34,31 +47,21 @@ def to_delta_examples(f: Expr, envs: List[Dict], split_envs=False) \
     f_toks = f.serialize()
     f_lines = f.lines()
     
-    # use different sets of envs for prefixes vs full program
-    full_env_choices, prefix_env_choices = [envs], [envs]
-    if split_envs:
-        assert len(envs) % 2 == 0
-        n_envs = len(envs) // 2
-        full_env_choices = [envs[:n_envs], envs[n_envs:]]
-        prefix_env_choices = [envs[:n_envs], envs[n_envs:]]
+    # if split_envs:
+    #     assert len(envs) % 2 == 0
+    #     n_envs = len(envs) // 2
+    #     full_env_choices = [envs[:n_envs], envs[n_envs:]]
+    #     prefix_env_choices = [envs[:n_envs], envs[n_envs:]]
     
-    used_zs = f.zs()
-    for f_envs, p_envs in it.product(full_env_choices, prefix_env_choices):
+    for f_envs, p_envs in it.product(f_envs_choices, p_envs_choices):
         f_bmps = T.stack([f.eval(env) for env in f_envs])
-
         for i in range(len(f_lines) + 1):
             p = Seq(*f_lines[:i])
             p_bmps = T.stack([p.eval(env) for env in p_envs])  # well-defined on envs b/c f is
             p_toks = p.serialize()
             d_toks = f_lines[i].serialize() if i < len(f_lines) else []
             
-            # filter envs for parameters that aren't used in the program
-            f_filtered_envs = [filter_zs(env, used_zs) for env in f_envs]
-            p_filtered_envs = [filter_zs(env, used_zs) for env in p_envs]
-
-            # print(f"p: {p_envs} => {p_filtered_envs}")
-            # print(f"f: {f_envs} => {f_filtered_envs}")
-            yield (p_toks, p_filtered_envs, p_bmps), (f_toks, f_filtered_envs, f_bmps), d_toks
+            yield (p_toks, p_envs, p_bmps), (f_toks, f_envs, f_bmps), d_toks
 
 def gen_closures(n_envs: int, n_programs: int, n_lines: int,
                  arg_exprs: List[Expr],
@@ -115,6 +118,7 @@ def create_program(envs: List[dict], arg_exprs: List[Expr], n_lines: int, rand_a
     assert rand_arg_bounds[0] <= rand_arg_bounds[1], 'Invalid rand argument bounds'
     rand_exprs, const_exprs = util.split(arg_exprs, lambda expr: expr.zs())
     lines = []
+    colors = [Num(c) for c in random.sample(range(1, 10), n_lines)]
     while len(lines) < n_lines:
         n_tries = 0
         line_type = random.choices(population=line_types, weights=line_type_weights)[0]
@@ -131,7 +135,7 @@ def create_program(envs: List[dict], arg_exprs: List[Expr], n_lines: int, rand_a
             rand_args = random.choices(population=rand_exprs, k=n_rand_args)
             const_args = random.choices(population=const_exprs, k=n_const_args)
             args = util.shuffled(const_args + rand_args)
-            cand = line_type(*args, color=Num(random.randint(0, 9)))
+            cand = line_type(*args, color=colors[len(lines)])
             if is_valid(cand):
                 line = cand
         lines.append(line)
@@ -215,12 +219,18 @@ def gen_closures_and_deltas(worker_id: int, closures_loc: str, deltas_loc: str,
                            line_types=line_types, line_type_weights=line_type_weights)
         for i, (f, envs) in enumerate(gen):
             pickle.dump((f, envs), closures_file)
-            for delta in to_delta_examples(f, envs, split_envs=split_envs):
+            printed = False
+            for delta in to_delta_examples_with_params(f, envs):
                 (p_toks, p_envs, p_bmps), (f_toks, f_envs, f_bmps), d = delta
                 # print("delta example:", p_toks, p_envs, p_bmps, f_toks, f_envs, f_bmps, d,
                 #       sep='\n', end='\n\n')
                 pickle.dump(delta, deltas_file)
-            if verbose: print(f'[{worker_id}][{i}/{n_programs}]: {f}')
+                if not printed and verbose:
+                    print(f'[{worker_id}][{i}/{n_programs}]: {f_toks}')
+                    # p = deserialize(f_toks)
+                    # if p.zs() and n_lines >= 2:
+                    #     viz.viz_mult([p.eval(env) for env in f_envs])
+                    printed = True
 
 def gen_closures_and_deltas_mp(closures_loc_prefix: str, deltas_loc_prefix: str,
                                n_envs: int, n_programs: int, n_lines_bounds: Tuple[int, int],
@@ -264,7 +274,11 @@ def collect_stats(dataset: Iterable, max_line_count=3):
     n_items = 0
     total_n_lines = 0
     seen_fs = set()
+    i = 0
     for (p, z_p, b_p), (f, z_f, b_f), d in dataset:
+        i += 1
+        if i > 10_000: break
+        # print(i, f)
         if str(f) in seen_fs:
             continue
         else:
@@ -305,25 +319,25 @@ if __name__ == '__main__':
     # demo_gen_closures()
     # demo_gen_policy_data()
 
-    dir = '/home/djl328/arc/data/policy-pretraining'
-    # dir = '../data/policy-pretraining'
+    # dir = '/home/djl328/arc/data/policy-pretraining'
+    dir = '../data/policy-pretraining'
     n_envs = 5
     n_zs = (0, 1)
     z_code = f'{min(n_zs)}~{max(n_zs)}' if min(n_zs) < max(n_zs) else f'{min(n_zs)}'
     t = util.timecode()
     for n_lines in [1, 2, 3]:
-        code = f'100k-RLP-{n_envs}e{n_lines}l{z_code}z'
+        code = f'10-RP-{n_envs}e{n_lines}l{z_code}z'
         for mode in ['training', 'validation']:
             print(f"Generating policy data for mode={mode}")
             gen_closures_and_deltas_mp(
                 closures_loc_prefix=f'{dir}/{code}/{t}/{mode}/',
                 deltas_loc_prefix=f'{dir}/{code}/{t}/{mode}/',
                 n_envs=n_envs,
-                n_programs=n_examples,
+                n_programs=10,
                 n_lines_bounds=(n_lines, n_lines),
                 rand_arg_bounds=n_zs,
-                line_types=[Rect, Line, Point],
-                line_type_weights=[4, 3, 2],
+                line_types=[Rect, Point],
+                line_type_weights=[3, 1],
                 n_workers=1,
                 split_envs=False,
                 verbose=True
@@ -332,8 +346,8 @@ if __name__ == '__main__':
                            f"{dir}/{code}/{t}/{mode}_deltas.dat")
 
     for mode in ['training', 'validation']:
-        util.join_glob(f"{dir}/100k-RLP-{n_envs}e*l{z_code}z/{t}/{mode}_deltas.dat",
-                       f"{dir}/100k-RLP-{n_envs}e1~3l{z_code}z/{t}/{mode}_deltas.dat")
+        util.join_glob(f"{dir}/10-RP-{n_envs}e*l{z_code}z/{t}/{mode}_deltas.dat",
+                       f"{dir}/10-RP-{n_envs}e1~3l{z_code}z/{t}/{mode}_deltas.dat")
 
     # collect_stats(util.load_incremental(f"{dir}/{code}/{t}/training_deltas.dat"),
     #               max_line_count=1)

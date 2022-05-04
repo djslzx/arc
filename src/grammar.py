@@ -691,7 +691,8 @@ class Zs(Visitor):
     def __init__(self): pass
     @staticmethod
     def join(*lists):
-        assert len(lists) >= 2
+        if len(lists) == 0: return []
+        if len(lists) == 1: return lists[0]
         joined = lists[0]
         for l in lists[1:]:
             for x in l:
