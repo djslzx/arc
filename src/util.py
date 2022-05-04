@@ -10,6 +10,12 @@ from datetime import datetime
 
 dirname = os.path.dirname(__file__)
 
+def unwrap_tensor(t):
+    if isinstance(t, T.Tensor):
+        return t.item()
+    else:
+        return t
+
 def wrap_tensor(t):
     if isinstance(t, T.Tensor):
         return t

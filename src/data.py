@@ -19,13 +19,17 @@ def filter_zs(env, zs):
     return {'z': T.tensor([z if i in zs else Z_IGNORE
                            for i, z in enumerate(env['z'])])}
 
-def to_delta_examples_with_params(f: Expr, envs):
+def simplify_envs(f, envs):
     used_z_indices = f.zs()
     n_used = len(used_z_indices)
     # reorder the envs to place used_zs at the front (where they've been remapped) and blank out all other z's
     envs = [{'z': [util.unwrap_tensor(env['z'][idx]) for idx in used_z_indices] + [Z_IGNORE] * (LIB_SIZE - n_used)}
             for env in envs]
-    f = f.simplify_indices(used_z_indices)
+    return envs
+
+def to_delta_examples_with_params(f: Expr, envs):
+    envs = simplify_envs(f, envs)
+    f = f.simplify_indices()
     f_toks = f.serialize()
     f_lines = f.lines()
     f_bmps = T.stack([f.eval(env) for env in envs])
@@ -36,31 +40,25 @@ def to_delta_examples_with_params(f: Expr, envs):
         d_toks = f_lines[i].serialize() if i < len(f_lines) else []
         yield (p_toks, envs, p_bmps), (f_toks, envs, f_bmps), d_toks
 
-def to_delta_examples(f: Expr, f_envs_choices, p_envs_choices):
+def to_delta_examples(f: Expr, envs_choices):
     """
     Converts a closure (f: program, z: environment) into examples of teacher-forcing deltas (B, f', B' -> d')
     for each program f, where:
      - f' is a prefix of f, B' is f'(z), and
      - d' is the next line in f after the lines in f'.
     """
-    # TODO: make simplification of indices work with z inference
+    # simplifying envs wrt f is fine b/c p is a prefix of f
+    envs_choices = [simplify_envs(f, envs) for envs in envs_choices]
+    f = f.simplify_indices()
     f_toks = f.serialize()
     f_lines = f.lines()
-    
-    # if split_envs:
-    #     assert len(envs) % 2 == 0
-    #     n_envs = len(envs) // 2
-    #     full_env_choices = [envs[:n_envs], envs[n_envs:]]
-    #     prefix_env_choices = [envs[:n_envs], envs[n_envs:]]
-    
-    for f_envs, p_envs in it.product(f_envs_choices, p_envs_choices):
+    for f_envs, p_envs in it.product(envs_choices, envs_choices):
         f_bmps = T.stack([f.eval(env) for env in f_envs])
         for i in range(len(f_lines) + 1):
             p = Seq(*f_lines[:i])
             p_bmps = T.stack([p.eval(env) for env in p_envs])  # well-defined on envs b/c f is
             p_toks = p.serialize()
             d_toks = f_lines[i].serialize() if i < len(f_lines) else []
-            
             yield (p_toks, p_envs, p_bmps), (f_toks, f_envs, f_bmps), d_toks
 
 def gen_closures(n_envs: int, n_programs: int, n_lines: int,
@@ -209,7 +207,6 @@ def gen_closures_and_deltas(worker_id: int, closures_loc: str, deltas_loc: str,
                             arg_exprs: List[Expr],
                             rand_arg_bounds: Tuple[int, int],
                             line_types: List[type], line_type_weights: List[float],
-                            split_envs=False,
                             verbose=False):
     util.make_parent_dir(closures_loc)
     util.make_parent_dir(deltas_loc)
@@ -236,7 +233,6 @@ def gen_closures_and_deltas_mp(closures_loc_prefix: str, deltas_loc_prefix: str,
                                n_envs: int, n_programs: int, n_lines_bounds: Tuple[int, int],
                                rand_arg_bounds: Tuple[int, int],
                                line_types: List[type], line_type_weights: Optional[List[float]] = None,
-                               split_envs=False,
                                verbose=False,
                                n_workers: int = 1):
     """
@@ -254,9 +250,9 @@ def gen_closures_and_deltas_mp(closures_loc_prefix: str, deltas_loc_prefix: str,
                      [(i,
                        f'{closures_loc_prefix}closures_{i}.dat',
                        f'{deltas_loc_prefix}deltas_{i}.dat',
-                       n_envs * (2 if split_envs else 1), n_programs_per_worker, n_lines,
+                       n_envs, n_programs_per_worker, n_lines,
                        arg_exprs, rand_arg_bounds, line_types, line_type_weights,
-                       split_envs, verbose)
+                       verbose)
                       for n_lines in range(n_lines_lo, n_lines_hi + 1)
                       for i in range(n_workers)])
     # separate closure and delta gen? might allow better allocation of workers
@@ -339,7 +335,6 @@ if __name__ == '__main__':
                 line_types=[Rect, Point],
                 line_type_weights=[3, 1],
                 n_workers=1,
-                split_envs=False,
                 verbose=True
             )
             util.join_glob(f"{dir}/{code}/{t}/{mode}/deltas_*.dat",
