@@ -27,26 +27,7 @@ def simplify_envs(f, envs):
             for env in envs]
     return envs
 
-def to_delta_examples_with_params(f: Expr, envs):
-    envs = simplify_envs(f, envs)
-    f = f.simplify_indices()
-    f_toks = f.serialize()
-    f_lines = f.lines()
-    f_bmps = T.stack([f.eval(env) for env in envs])
-    for i in range(len(f_lines) + 1):
-        p = Seq(*f_lines[:i])
-        p_bmps = T.stack([p.eval(env) for env in envs])  # well-defined on envs b/c f is
-        p_toks = p.serialize()
-        d_toks = f_lines[i].serialize() if i < len(f_lines) else []
-        yield (p_toks, envs, p_bmps), (f_toks, envs, f_bmps), d_toks
-
-def to_delta_examples(f: Expr, envs_choices):
-    """
-    Converts a closure (f: program, z: environment) into examples of teacher-forcing deltas (B, f', B' -> d')
-    for each program f, where:
-     - f' is a prefix of f, B' is f'(z), and
-     - d' is the next line in f after the lines in f'.
-    """
+def to_delta_examples(f: Expr, envs_choices: List[Envs]):
     # simplifying envs wrt f is fine b/c p is a prefix of f
     envs_choices = [simplify_envs(f, envs) for envs in envs_choices]
     f = f.simplify_indices()
@@ -56,7 +37,7 @@ def to_delta_examples(f: Expr, envs_choices):
         f_bmps = T.stack([f.eval(env) for env in f_envs])
         for i in range(len(f_lines) + 1):
             p = Seq(*f_lines[:i])
-            p_bmps = T.stack([p.eval(env) for env in p_envs])  # well-defined on envs b/c f is
+            p_bmps = T.stack([p.eval(env) for env in p_envs])
             p_toks = p.serialize()
             d_toks = f_lines[i].serialize() if i < len(f_lines) else []
             yield (p_toks, p_envs, p_bmps), (f_toks, f_envs, f_bmps), d_toks
@@ -207,20 +188,29 @@ def gen_closures_and_deltas(worker_id: int, closures_loc: str, deltas_loc: str,
                             arg_exprs: List[Expr],
                             rand_arg_bounds: Tuple[int, int],
                             line_types: List[type], line_type_weights: List[float],
+                            hetero_zs=False,
                             verbose=False):
     util.make_parent_dir(closures_loc)
     util.make_parent_dir(deltas_loc)
     with open(closures_loc, 'wb') as closures_file, open(deltas_loc, 'wb') as deltas_file:
-        gen = gen_closures(n_envs=n_envs, n_programs=n_programs, n_lines=n_lines, arg_exprs=arg_exprs,
-                           rand_arg_bounds=rand_arg_bounds,
-                           line_types=line_types, line_type_weights=line_type_weights)
+        gen = gen_closures(
+            n_envs=n_envs * (1 + int(hetero_zs)),
+            n_programs=n_programs,
+            n_lines=n_lines,
+            arg_exprs=arg_exprs,
+            rand_arg_bounds=rand_arg_bounds,
+            line_types=line_types,
+            line_type_weights=line_type_weights
+        )
         for i, (f, envs) in enumerate(gen):
             pickle.dump((f, envs), closures_file)
             printed = False
-            for delta in to_delta_examples_with_params(f, envs):
+            if hetero_zs:
+                env_sets = [envs[:n_envs], envs[n_envs:]]
+            else:
+                env_sets = [envs]
+            for delta in to_delta_examples(f, env_sets):
                 (p_toks, p_envs, p_bmps), (f_toks, f_envs, f_bmps), d = delta
-                # print("delta example:", p_toks, p_envs, p_bmps, f_toks, f_envs, f_bmps, d,
-                #       sep='\n', end='\n\n')
                 pickle.dump(delta, deltas_file)
                 if not printed and verbose:
                     print(f'[{worker_id}][{i}/{n_programs}]: {f_toks}')
@@ -228,11 +218,15 @@ def gen_closures_and_deltas(worker_id: int, closures_loc: str, deltas_loc: str,
                     # if p.zs() and n_lines >= 2:
                     #     viz.viz_mult([p.eval(env) for env in f_envs])
                     printed = True
+                print("delta example:",
+                      (p_toks, p_envs), (f_toks, f_envs), d,
+                      sep='\n', end='\n\n')
 
 def gen_closures_and_deltas_mp(closures_loc_prefix: str, deltas_loc_prefix: str,
                                n_envs: int, n_programs: int, n_lines_bounds: Tuple[int, int],
                                rand_arg_bounds: Tuple[int, int],
                                line_types: List[type], line_type_weights: Optional[List[float]] = None,
+                               hetero_zs=False,
                                verbose=False,
                                n_workers: int = 1):
     """
@@ -252,6 +246,7 @@ def gen_closures_and_deltas_mp(closures_loc_prefix: str, deltas_loc_prefix: str,
                        f'{deltas_loc_prefix}deltas_{i}.dat',
                        n_envs, n_programs_per_worker, n_lines,
                        arg_exprs, rand_arg_bounds, line_types, line_type_weights,
+                       hetero_zs,
                        verbose)
                       for n_lines in range(n_lines_lo, n_lines_hi + 1)
                       for i in range(n_workers)])
@@ -335,7 +330,8 @@ if __name__ == '__main__':
                 line_types=[Rect, Point],
                 line_type_weights=[3, 1],
                 n_workers=1,
-                verbose=True
+                hetero_zs=True,
+                verbose=True,
             )
             util.join_glob(f"{dir}/{code}/{t}/{mode}/deltas_*.dat",
                            f"{dir}/{code}/{t}/{mode}_deltas.dat")
