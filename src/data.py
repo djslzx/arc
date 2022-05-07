@@ -218,9 +218,9 @@ def gen_closures_and_deltas(worker_id: int, closures_loc: str, deltas_loc: str,
                     # if p.zs() and n_lines >= 2:
                     #     viz.viz_mult([p.eval(env) for env in f_envs])
                     printed = True
-                print("delta example:",
-                      (p_toks, p_envs), (f_toks, f_envs), d,
-                      sep='\n', end='\n\n')
+                # print("delta example:",
+                #       (p_toks, p_envs), (f_toks, f_envs), d,
+                #       sep='\n', end='\n\n')
 
 def gen_closures_and_deltas_mp(closures_loc_prefix: str, deltas_loc_prefix: str,
                                n_envs: int, n_programs: int, n_lines_bounds: Tuple[int, int],

@@ -32,14 +32,13 @@ class SrcEncoding(nn.Module):
     """
     Add learned encoding to identify data sources
     """
-    
     def __init__(self, d_model: int, source_sizes: List[int], dropout=0.1):
         super().__init__()
         n_sources = len(source_sizes)
         self.d_model = d_model
         self.source_sizes = source_sizes
         self.dropout = nn.Dropout(p=dropout)
-        self.src_embedding = nn.Embedding(n_sources, d_model)
+        self.src_embedding = nn.Embedding(num_embeddings=n_sources, embedding_dim=d_model)
         
     def encoding(self):
         encoding = T.zeros(sum(self.source_sizes), 1, self.d_model).to(dev)
@@ -50,14 +49,14 @@ class SrcEncoding(nn.Module):
         return encoding
         
     def forward(self, x):
+        # need to cut off end b/c program might not be full length
         return self.dropout(x + self.encoding()[:x.size(0)])
 
 
 class PositionalEncoding(nn.Module):
     """
-    Use positional encoding from 'Attention is All You Need'
+    Positional encoding from 'Attention is All You Need'
     """
-    
     def __init__(self, d_model, dropout=0.1, max_len=5000):
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
@@ -70,7 +69,7 @@ class PositionalEncoding(nn.Module):
         self.register_buffer('pe', pe)
     
     def forward(self, x):
-        # x: (sequence length, batch size)
+        # x: (sequence length, batch size, d_model)
         # x.size(0) -> sequence length
         # self.pe[x.size(0)] -> get positional encoding up to seq length
         return self.dropout(x + self.pe[:x.size(0)])
@@ -86,6 +85,7 @@ class Model(nn.Module):
                  N: int, C: int, H: int, W: int,
                  Z_LO: int, Z_HI: int,
                  lexicon: List[str],
+                 learn_zs=False,
                  d_model=512,
                  n_conv_channels=16,
                  n_tf_encoder_layers=6,
@@ -112,6 +112,7 @@ class Model(nn.Module):
         self.n_tf_encoder_layers = n_tf_encoder_layers
         self.n_tf_decoder_layers = n_tf_decoder_layers
         self.n_value_heads = n_value_heads
+        self.learn_zs = learn_zs
         self.batch_size = batch_size
         self.max_line_length = max_line_length
         self.max_program_length = max_program_length
@@ -147,15 +148,14 @@ class Model(nn.Module):
             nn.Linear(n_conv_channels * H * W, d_model),
         )
         # Add embedding to track source of different tensors passed into the transformer encoder
-        self.src_encoding = SrcEncoding(d_model=d_model,
-                                        source_sizes=[N, N, max_program_length])
+        self.src_encoding = SrcEncoding(d_model, [N, N, max_program_length + N * g.LIB_SIZE])
         self.tf_encoder = nn.TransformerEncoder(encoder_layer=nn.TransformerEncoderLayer(d_model=d_model, nhead=8),
                                                 num_layers=n_tf_encoder_layers)
         
         # policy heads: receive transformer encoding of the triple (B, B', f') and
         # generate a program embedding + random params
-        self.tf_decoder = nn.TransformerDecoder(decoder_layer=nn.TransformerDecoderLayer(d_model=self.d_model, nhead=8),
-                                                num_layers=self.n_tf_decoder_layers)
+        self.tf_decoder = nn.TransformerDecoder(decoder_layer=nn.TransformerDecoderLayer(d_model=d_model, nhead=8),
+                                                num_layers=n_tf_decoder_layers)
         # take the d_model-dimensional vector output from the decoder and map it to a probability distribution over
         # the program/parameter alphabet
         self.tf_out = nn.Linear(self.d_model, self.n_tokens)
@@ -169,7 +169,7 @@ class Model(nn.Module):
                 nn.ReLU(),
             )
         self.value_fn = nn.Sequential(
-            lin_block((2 * self.N + self.max_program_length) * self.d_model, self.d_model),
+            lin_block((2 * self.N + self.max_program_length + N * g.LIB_SIZE) * self.d_model, self.d_model),
             lin_block(self.d_model, self.d_model),
             lin_block(self.d_model, self.d_model),
             nn.Linear(self.d_model, self.n_value_heads)
@@ -207,14 +207,23 @@ class Model(nn.Module):
         e_b = e_b.transpose(0, 1)  # swap batch and sequence dims
         return e_b
     
-    def forward(self, f_bmps, p_bmps, p, delta_z):
-        """Overloads delta_z to carry both program and parameters"""
+    def bitmap_pos_encoding(self, v):
+        if self.learn_zs:
+            return self.pos_encoding(v)
+        else:
+            return v
+    
+    # TODO: incorporate p_envs here
+    #  - include in p?
+    #  - add as a separate argument?
+    def forward(self, f_bmps, p_bmps, p_z, delta_z):
+        """Overloads delta_z to carry both program and parameters (same with p_z)"""
         
         # compute embeddings for bitmaps, programs
         batch_size = f_bmps.shape[0]  # need this b/c last batch might not be the full size
-        e_f_bmps = self.embed_bitmaps(f_bmps, batch_size)
-        e_p_bmps = self.embed_bitmaps(p_bmps, batch_size)
-        e_p = self.pos_encoding(self.p_embedding(p).transpose(0, 1))
+        e_f_bmps = self.bitmap_pos_encoding(self.embed_bitmaps(f_bmps, batch_size))
+        e_p_bmps = self.bitmap_pos_encoding(self.embed_bitmaps(p_bmps, batch_size))
+        e_p = self.pos_encoding(self.p_embedding(p_z).transpose(0, 1))
         e_delta_z = self.pos_encoding(self.p_embedding(delta_z).transpose(0, 1))
 
         # concat e_B, e_B', e_p', add source encoding, then pass through tf_encoder
@@ -324,7 +333,7 @@ class Model(nn.Module):
                 tgt_in = tgt[:, :-1]
                 tgt_out = tgt[:, 1:]
 
-                policy_out, value_out = self.forward(f_bmps, p_bmps, p, tgt_in)
+                policy_out, value_out = self.forward(f_bmps, p_bmps, T.cat((p, p_envs), dim=1), tgt_in)
                 target = self.to_probabilities(tgt_out).transpose(0, 1)  # [seq-len, batch, lexicon-size]
                 # mask = self.stretched_env_mask(f_envs)
                 mask = self.env_mask(f_envs)
@@ -407,7 +416,7 @@ class Model(nn.Module):
             tgt = T.cat((d, f_envs), dim=1)
             tgt_in = tgt[:, :-1]
             tgt_out = tgt[:, 1:]
-            policy_out, _ = self.forward(f_bmps, p_bmps, p, tgt_in)
+            policy_out, _ = self.forward(f_bmps, p_bmps, T.cat((p, p_envs), dim=1), tgt_in)
             target = self.to_probabilities(tgt_out).transpose(0, 1)
             # mask = self.stretched_env_mask(f_envs)
             mask = self.env_mask(f_envs)
@@ -486,6 +495,7 @@ class Model(nn.Module):
 
     def train_value(self, dataloader: DataLoader, epochs: int, lr=10 ** -4,
                     assess_freq=10_000, checkpoint_freq=100_000):
+        # FIXME: this function needs to be updated to handle z's
         self.train()
         optimizer = T.optim.Adam(self.parameters(), lr=lr)
         writer = tb.SummaryWriter(comment=f'_{self.name}_value')
@@ -566,11 +576,12 @@ class Model(nn.Module):
         return T.stack(bitmaps).to(dev)
         
     def sample_line_rollouts(self, b, b_hat, f_hat):
+        # FIXME: this fn needs to be updated
         self.eval()
         batch_size = b.shape[0]
         rollouts = T.tensor([[self.PROGRAM_START]] * batch_size).long().to(dev)  # [b, 1]
         for i in range(self.max_line_length - 1):
-            p_outs, _ = self.forward(f_bmps=b, p_bmps=b_hat, p=f_hat, delta=rollouts)  # [i, b, n_tokens]
+            p_outs, _ = self.forward(b, b_hat, f_hat, rollouts)  # [i, b, n_tokens]
             next_prs = p_outs.softmax(-1)[-1]  # convert p_outs to probabilities -> [i, b]
             next_indices = T.multinomial(util.filter_top_p(next_prs), 1)
             rollouts = T.cat((rollouts, next_indices), dim=1)
@@ -664,8 +675,8 @@ class PolicyDataset(IterableDataset):
                         p_bmps = p_bmps.unsqueeze(1).to(dev)
                         
                         # convert envs into vectors of length N * lib_size
-                        p_envs_indices = self.to_indices([z.item() for env in p_envs for z in env['z']], False).to(dev)
-                        f_envs_indices = self.to_indices([z.item() for env in f_envs for z in env['z']], False).to(dev)
+                        p_envs_indices = self.to_indices([util.unwrap_tensor(z) for env in p_envs for z in env['z']], False).to(dev)
+                        f_envs_indices = self.to_indices([util.unwrap_tensor(z) for env in f_envs for z in env['z']], False).to(dev)
                         
                         # convert program tokens into padded vectors of indices
                         p_indices = util.pad(self.to_indices(p_toks, True), self.program_length, self.padding).to(dev)
@@ -709,7 +720,8 @@ def run(pretrain_policy: bool,
                   n_tf_encoder_layers=6,
                   n_tf_decoder_layers=6,
                   n_value_heads=5,
-                  max_program_length=50,
+                  max_program_length=53,
+                  max_line_length=17,
                   batch_size=16,
                   save_dir=model_prefix).to(dev)
     
@@ -744,40 +756,40 @@ def run(pretrain_policy: bool,
 
 
 if __name__ == '__main__':
-    # run on g2
-    run(
-        pretrain_policy=True,
-        train_value=False,
-        sample=False,
-        data_prefix='/home/djl328/arc/data/policy-pretraining',
-        model_prefix='/home/djl328/arc/models',
-        data_code='100k-RLP-5e1l0~1z',
-        data_t='May03_22_01-46-06',
-        model_code='100k-RLP-5e1~3l0~1z',
-        model_t=util.timecode(),
-        assess_freq=1000, checkpoint_freq=10_000,
-        model_n_steps=10_000,
-        check_vloss_gap=False, # vloss_gap=2,
-        tloss_thresh=10 ** -3, vloss_thresh=10 ** -3,
-    )
-
-    # run locally
+    # # run on g2
     # run(
     #     pretrain_policy=True,
     #     train_value=False,
     #     sample=False,
-    #     data_prefix='../data/policy-pretraining',
-    #     model_prefix='../models',
-    #     data_code='10-RLP-5e1l0~1z',
-    #     data_t='May03_22_01-34-53',
-    #     # model_code='100k-RLP-5e1~3l0~1z',  # remote
-    #     # model_t='Apr21_22_22-59-46',  # remote
-    #     model_code='10-RLP-5e1l0~1z',  # local
-    #     # model_t='Apr28_22_17-11-50',  # local
+    #     data_prefix='/home/djl328/arc/data/policy-pretraining',
+    #     model_prefix='/home/djl328/arc/models',
+    #     data_code='100k-RLP-5e1l0~1z',
+    #     data_t='May03_22_01-46-06',
+    #     model_code='100k-RLP-5e1~3l0~1z',
     #     model_t=util.timecode(),
-    #     model_n_steps=300,
-    #     assess_freq=10, checkpoint_freq=200,
-    #     tloss_thresh=0.0001, vloss_thresh=0.0001,
-    #     check_vloss_gap=False,
-    #     # vloss_gap=2,
+    #     assess_freq=1000, checkpoint_freq=10_000,
+    #     model_n_steps=10_000,
+    #     check_vloss_gap=False, # vloss_gap=2,
+    #     tloss_thresh=10 ** -3, vloss_thresh=10 ** -3,
     # )
+
+    # run locally
+    run(
+        pretrain_policy=True,
+        train_value=False,
+        sample=False,
+        data_prefix='../data/policy-pretraining',
+        model_prefix='../models',
+        data_code='10-RP-5e1l0~1z',
+        data_t='May06_22_17-17-22',
+        # model_code='100k-RLP-5e1~3l0~1z',  # remote
+        # model_t='Apr21_22_22-59-46',  # remote
+        model_code='10-RP-5e1l0~1z',  # local
+        # model_t='Apr28_22_17-11-50',  # local
+        model_t=util.timecode(),
+        model_n_steps=300,
+        assess_freq=10, checkpoint_freq=200,
+        tloss_thresh=0.0001, vloss_thresh=0.0001,
+        check_vloss_gap=False,
+        # vloss_gap=2,
+    )
