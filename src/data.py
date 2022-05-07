@@ -5,6 +5,7 @@ import pdb
 import pickle
 from typing import Optional, List, Tuple, Iterable, Generator, Dict
 import multiprocessing as mp
+import torch.utils.tensorboard as tb
 
 from grammar import *
 import util
@@ -252,6 +253,16 @@ def gen_closures_and_deltas_mp(closures_loc_prefix: str, deltas_loc_prefix: str,
                       for i in range(n_workers)])
     # separate closure and delta gen? might allow better allocation of workers
 
+def viz_data(dataset: Iterable):
+    """Use Tensorbaord to visualize the data in a dataset"""
+    writer = tb.SummaryWriter(comment='_dataviz')
+    for i, ((p, z_p, b_p), (f, z_f, b_f), d) in enumerate(dataset):
+        writer.add_text('p-d-f', f'p={p}\n'
+                                 f'd={d}\n'
+                                 f'f={f}', i)
+        writer.add_images('b_f', b_f.unsqueeze(1), i)
+        writer.add_images('b_p', b_p.unsqueeze(1), i)
+
 # Examine datasets
 def collect_stats(dataset: Iterable, max_line_count=3):
     by_len = {
@@ -311,35 +322,45 @@ if __name__ == '__main__':
     # demo_gen_policy_data()
 
     # dir = '/home/djl328/arc/data/policy-pretraining'
-    dir = '../data/policy-pretraining'
-    n_envs = 5
-    n_zs = (0, 1)
-    z_code = f'{min(n_zs)}~{max(n_zs)}' if min(n_zs) < max(n_zs) else f'{min(n_zs)}'
-    t = util.timecode()
-    for n_lines in [1, 2, 3]:
-        code = f'10-RP-{n_envs}e{n_lines}l{z_code}z'
+    gen = False
+    inspect = True
+    
+    if gen:
+        dir = '../data/policy-pretraining'
+        n_envs = 5
+        n_zs = (0, 1)
+        z_code = f'{min(n_zs)}~{max(n_zs)}' if min(n_zs) < max(n_zs) else f'{min(n_zs)}'
+        t = util.timecode()
+        for n_lines in [1, 2, 3]:
+            code = f'10-RP-{n_envs}e{n_lines}l{z_code}z'
+            for mode in ['training', 'validation']:
+                print(f"Generating policy data for mode={mode}")
+                gen_closures_and_deltas_mp(
+                    closures_loc_prefix=f'{dir}/{code}/{t}/{mode}/',
+                    deltas_loc_prefix=f'{dir}/{code}/{t}/{mode}/',
+                    n_envs=n_envs,
+                    n_programs=10,
+                    n_lines_bounds=(n_lines, n_lines),
+                    rand_arg_bounds=n_zs,
+                    line_types=[Rect, Point],
+                    line_type_weights=[3, 1],
+                    n_workers=1,
+                    hetero_zs=False,
+                    verbose=True,
+                )
+                util.join_glob(f"{dir}/{code}/{t}/{mode}/deltas_*.dat",
+                               f"{dir}/{code}/{t}/{mode}_deltas.dat")
+
         for mode in ['training', 'validation']:
-            print(f"Generating policy data for mode={mode}")
-            gen_closures_and_deltas_mp(
-                closures_loc_prefix=f'{dir}/{code}/{t}/{mode}/',
-                deltas_loc_prefix=f'{dir}/{code}/{t}/{mode}/',
-                n_envs=n_envs,
-                n_programs=10,
-                n_lines_bounds=(n_lines, n_lines),
-                rand_arg_bounds=n_zs,
-                line_types=[Rect, Point],
-                line_type_weights=[3, 1],
-                n_workers=1,
-                hetero_zs=True,
-                verbose=True,
-            )
-            util.join_glob(f"{dir}/{code}/{t}/{mode}/deltas_*.dat",
-                           f"{dir}/{code}/{t}/{mode}_deltas.dat")
+            util.join_glob(f"{dir}/10-RP-{n_envs}e*l{z_code}z/{t}/{mode}_deltas.dat",
+                           f"{dir}/10-RP-{n_envs}e1~3l{z_code}z/{t}/{mode}_deltas.dat")
 
-    for mode in ['training', 'validation']:
-        util.join_glob(f"{dir}/10-RP-{n_envs}e*l{z_code}z/{t}/{mode}_deltas.dat",
-                       f"{dir}/10-RP-{n_envs}e1~3l{z_code}z/{t}/{mode}_deltas.dat")
-
+    if inspect:
+        data = util.load_incremental(
+            '../data/policy-pretraining/10-RP-5e1~3l0~1z/May07_22_15-52-44/training_deltas.dat'
+        )
+        viz_data(data)
+    
     # collect_stats(util.load_incremental(f"{dir}/{code}/{t}/training_deltas.dat"),
     #               max_line_count=1)
     # collect_stats(util.load_incremental(f"{dir}/{code}/{t}/validation_deltas.dat"),
