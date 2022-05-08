@@ -85,7 +85,6 @@ class Model(nn.Module):
                  N: int, C: int, H: int, W: int,
                  Z_LO: int, Z_HI: int,
                  lexicon: List[str],
-                 learn_zs=False,
                  d_model=512,
                  n_conv_channels=16,
                  n_tf_encoder_layers=6,
@@ -112,7 +111,6 @@ class Model(nn.Module):
         self.n_tf_encoder_layers = n_tf_encoder_layers
         self.n_tf_decoder_layers = n_tf_decoder_layers
         self.n_value_heads = n_value_heads
-        self.learn_zs = learn_zs
         self.batch_size = batch_size
         self.max_line_length = max_line_length
         self.max_program_length = max_program_length
@@ -129,6 +127,8 @@ class Model(nn.Module):
         self.Z_IGNORE       = self.token_to_index[g.Z_IGNORE]
         self.pos_encoding   = PositionalEncoding(self.d_model)
         self.p_embedding    = nn.Embedding(num_embeddings=self.n_tokens, embedding_dim=self.d_model)
+        
+        src_sizes = [N, N, max_program_length]
         
         # bitmap embedding: convolve HxW bitmaps into d_model-size tensors
         def conv_block(in_channels: int, out_channels: int, kernel_size=3) -> nn.Module:
@@ -148,7 +148,7 @@ class Model(nn.Module):
             nn.Linear(n_conv_channels * H * W, d_model),
         )
         # Add embedding to track source of different tensors passed into the transformer encoder
-        self.src_encoding = SrcEncoding(d_model, [N, N, max_program_length + N * g.LIB_SIZE])
+        self.src_encoding = SrcEncoding(d_model, src_sizes)
         self.tf_encoder = nn.TransformerEncoder(encoder_layer=nn.TransformerEncoderLayer(d_model=d_model, nhead=8),
                                                 num_layers=n_tf_encoder_layers)
         
@@ -169,7 +169,7 @@ class Model(nn.Module):
                 nn.ReLU(),
             )
         self.value_fn = nn.Sequential(
-            lin_block((2 * self.N + self.max_program_length + N * g.LIB_SIZE) * self.d_model, self.d_model),
+            lin_block(sum(src_sizes) * self.d_model, self.d_model),
             lin_block(self.d_model, self.d_model),
             lin_block(self.d_model, self.d_model),
             nn.Linear(self.d_model, self.n_value_heads)
@@ -206,25 +206,19 @@ class Model(nn.Module):
         e_b = self.conv(b_flat).reshape(batch_size, -1, self.d_model)  # apply conv, portion embeddings into batches
         e_b = e_b.transpose(0, 1)  # swap batch and sequence dims
         return e_b
-    
-    def bitmap_pos_encoding(self, v):
-        if self.learn_zs:
-            return self.pos_encoding(v)
-        else:
-            return v
-    
+
     # TODO: incorporate p_envs here
     #  - include in p?
     #  - add as a separate argument?
-    def forward(self, f_bmps, p_bmps, p_z, delta_z):
+    def forward(self, f_bmps, p_bmps, p, d):
         """Overloads delta_z to carry both program and parameters (same with p_z)"""
         
         # compute embeddings for bitmaps, programs
         batch_size = f_bmps.shape[0]  # need this b/c last batch might not be the full size
-        e_f_bmps = self.bitmap_pos_encoding(self.embed_bitmaps(f_bmps, batch_size))
-        e_p_bmps = self.bitmap_pos_encoding(self.embed_bitmaps(p_bmps, batch_size))
-        e_p = self.pos_encoding(self.p_embedding(p_z).transpose(0, 1))
-        e_delta_z = self.pos_encoding(self.p_embedding(delta_z).transpose(0, 1))
+        e_f_bmps = self.embed_bitmaps(f_bmps, batch_size)
+        e_p_bmps = self.embed_bitmaps(p_bmps, batch_size)
+        e_p = self.pos_encoding(self.p_embedding(p).transpose(0, 1))
+        e_d = self.pos_encoding(self.p_embedding(d).transpose(0, 1))
 
         # concat e_B, e_B', e_p', add source encoding, then pass through tf_encoder
         src = T.cat((e_f_bmps, e_p_bmps, e_p))
@@ -232,11 +226,11 @@ class Model(nn.Module):
         tf_code = self.tf_encoder.forward(src)
 
         # pass tf_code through v and pi -> value, policy
-        padding_mask = T.eq(delta_z, self.PADDING).to(dev)
-        tgt_mask = nn.Transformer.generate_square_subsequent_mask(sz=e_delta_z.shape[0]).to(dev)
+        padding_mask = T.eq(d, self.PADDING).to(dev)
+        tgt_mask = nn.Transformer.generate_square_subsequent_mask(sz=e_d.shape[0]).to(dev)
         # TODO MAYBE: use tgt_mask to mask out unwanted values of z?
         # pass in delta tokens + environment tokens to transformer as tgt
-        policy = self.tf_out(self.tf_decoder.forward(tgt=e_delta_z,
+        policy = self.tf_out(self.tf_decoder.forward(tgt=e_d,
                                                      memory=tf_code,
                                                      tgt_mask=tgt_mask,
                                                      tgt_key_padding_mask=padding_mask))
@@ -321,54 +315,38 @@ class Model(nn.Module):
         self.train()
         t_start = time.time()
         step, tloss, vloss = 0, 0, 0
-        tloss_f, tloss_z = 0, 0
+        # tloss_f, tloss_z = 0, 0
         min_vloss = T.inf
         training_complete = False
         for epoch in range(epochs):
-            round_tloss, round_tloss_f, round_tloss_z = 0, 0, 0
+            round_tloss = 0
             for (p, p_envs, p_bmps), (f, f_envs, f_bmps), d in tloader:
                 step += 1
                 
-                tgt = T.cat((d, f_envs), dim=1)
-                tgt_in = tgt[:, :-1]
-                tgt_out = tgt[:, 1:]
-
-                policy_out, value_out = self.forward(f_bmps, p_bmps, T.cat((p, p_envs), dim=1), tgt_in)
-                target = self.to_probabilities(tgt_out).transpose(0, 1)  # [seq-len, batch, lexicon-size]
-                # mask = self.stretched_env_mask(f_envs)
-                mask = self.env_mask(f_envs)
-                p_loss, z_loss = self.program_params_loss(target, policy_out, mask)
-                loss = p_loss + z_loss
+                d_in = d[:, :-1]
+                d_out = d[:, 1:]
+                policy_out, value_out = self.forward(f_bmps, p_bmps, p, d_in)
+                target = self.to_probabilities(d_out).transpose(0, 1)  # [seq-len, batch, lexicon-size]
+                loss = self.word_loss(target, policy_out)
         
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
                 round_tloss += loss.item()
-                round_tloss_f += p_loss.item()
-                round_tloss_z += z_loss.item()
         
                 # assess and record current performance
                 if step % assess_freq == 0:
                     tloss = round_tloss / assess_freq
-                    tloss_f = round_tloss_f / assess_freq
-                    tloss_z = round_tloss_z / assess_freq
-                    vloss_f, vloss_z = self.pretrain_validate(vloader, n_steps=assess_freq)
-                    vloss = vloss_f + vloss_z
+                    vloss = self.pretrain_validate(vloader, n_steps=assess_freq)
                     self.train()
                     if vloss < min_vloss: min_vloss = vloss
                     
                     # record losses
                     print(f" [step={step}, epoch={epoch}]: "
                           f"training loss={tloss:.5f}, validation loss={vloss:.5f}, "
-                          f"training program loss={tloss_f}, training parameter loss={tloss_z}, "
-                          f"validation program loss={vloss_f}, validation parameter loss={vloss_z}, "
                           f" {time.time() - t_start:.2f}s elapsed")
                     writer.add_scalar('training loss', tloss, step)
-                    writer.add_scalar('training loss, program', tloss_f, step)
-                    writer.add_scalar('training loss, parameters', tloss_z, step)
                     writer.add_scalar('validation loss', vloss, step)
-                    writer.add_scalar('validation loss, program', vloss_f, step)
-                    writer.add_scalar('validation loss, parameters', vloss_z, step)
                     round_tloss = 0
             
                     # check exit conditions (train for at least one epoch)
@@ -392,7 +370,7 @@ class Model(nn.Module):
         
         path = self.model_path(step)
         print(f"Finished training at step {step} with tloss={tloss}, vloss={vloss},"
-              f"tloss_f={tloss_f}, tloss_z={tloss_z}. Saving to {path}...")
+              f"Saving to {path}...")
         T.save({
             'step': step,
             'model_state_dict': self.state_dict(),
@@ -407,23 +385,19 @@ class Model(nn.Module):
     def pretrain_validate(self, dataloader, n_steps=None):
         """Compute validation loss of the policy network on the (validation data) dataloader."""
         self.eval()
-        epoch_p_loss, epoch_z_loss = 0, 0
+        epoch_loss = 0
         if n_steps is None: n_steps = len(dataloader)
         i = 0
         for (p, p_envs, p_bmps), (f, f_envs, f_bmps), d in dataloader:
             i += 1
             if i > n_steps: break
-            tgt = T.cat((d, f_envs), dim=1)
-            tgt_in = tgt[:, :-1]
-            tgt_out = tgt[:, 1:]
-            policy_out, _ = self.forward(f_bmps, p_bmps, T.cat((p, p_envs), dim=1), tgt_in)
-            target = self.to_probabilities(tgt_out).transpose(0, 1)
-            # mask = self.stretched_env_mask(f_envs)
-            mask = self.env_mask(f_envs)
-            f_loss, z_loss = self.program_params_loss(target, policy_out, mask)
-            epoch_p_loss += f_loss.detach().item()
-            epoch_z_loss += z_loss.detach().item()
-        return epoch_p_loss/n_steps, epoch_z_loss/n_steps
+            d_in = d[:, :-1]
+            d_out = d[:, 1:]
+            policy_out, _ = self.forward(f_bmps, p_bmps, p, d_in)
+            target = self.to_probabilities(d_out).transpose(0, 1)
+            loss = self.word_loss(target, policy_out)
+            epoch_loss += loss.detach().item()
+        return epoch_loss/n_steps
 
     def estimate_value(self, delta, b, b_hat, f_hat, f):
         """
@@ -781,7 +755,7 @@ if __name__ == '__main__':
         data_prefix='../data/policy-pretraining',
         model_prefix='../models',
         data_code='10-RP-5e1l0~1z',
-        data_t='May06_22_17-17-22',
+        data_t='May07_22_15-52-44',
         # model_code='100k-RLP-5e1~3l0~1z',  # remote
         # model_t='Apr21_22_22-59-46',  # remote
         model_code='10-RP-5e1l0~1z',  # local
