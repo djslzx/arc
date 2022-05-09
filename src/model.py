@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import torch as T
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import TensorDataset, DataLoader, IterableDataset, ChainDataset
+from torch.utils.data import DataLoader, IterableDataset
 import torch.utils.tensorboard as tb
 from typing import Optional, Iterable, List, Dict, Callable, Tuple
 from collections import namedtuple
@@ -207,9 +207,6 @@ class Model(nn.Module):
         e_b = e_b.transpose(0, 1)  # swap batch and sequence dims
         return e_b
 
-    # TODO: incorporate p_envs here
-    #  - include in p?
-    #  - add as a separate argument?
     def forward(self, f_bmps, p_bmps, p, d):
         """Overloads delta_z to carry both program and parameters (same with p_z)"""
         
