@@ -5,6 +5,7 @@ import pdb
 import pickle
 from typing import Optional, List, Tuple, Iterable, Generator, Dict
 import multiprocessing as mp
+import torch.utils.tensorboard as tb
 
 from grammar import *
 import util
@@ -250,6 +251,16 @@ def gen_closures_and_deltas_mp(closures_loc_prefix: str, deltas_loc_prefix: str,
                       for i in range(n_workers)])
     # separate closure and delta gen? might allow better allocation of workers
 
+def viz_data(dataset: Iterable):
+    """Use Tensorbaord to visualize the data in a dataset"""
+    writer = tb.SummaryWriter(comment='_dataviz')
+    for i, ((p, z_p, b_p), (f, z_f, b_f), d) in enumerate(dataset):
+        writer.add_text('p-d-f', f'p={p}\n'
+                                 f'd={d}\n'
+                                 f'f={f}', i)
+        writer.add_images('b_f', b_f.unsqueeze(1), i)
+        writer.add_images('b_p', b_p.unsqueeze(1), i)
+
 # Examine datasets
 def collect_stats(dataset: Iterable, max_line_count=3):
     by_len = {
@@ -344,9 +355,3 @@ if __name__ == '__main__':
         print(f"Joining across line numbers for mode={mode}...")
         util.join_glob(f"{dir}/100k-R-{n_envs}e*l{z_code}z/{t}/{mode}_deltas.dat",
                        f"{dir}/100k-R-{n_envs}e1~3l{z_code}z/{t}/{mode}_deltas.dat")
-
-    # collect_stats(util.load_incremental(f"{dir}/{code}/{t}/training_deltas.dat"),
-    #               max_line_count=1)
-    # collect_stats(util.load_incremental(f"{dir}/{code}/{t}/validation_deltas.dat"),
-    #               max_line_count=1)
-    

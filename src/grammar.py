@@ -84,8 +84,8 @@ class Expr(Visited):
     def simplify_indices(self, zs=None):
         if zs is None:
             zs = self.zs()
-        sprites = self.sprites()
-        return self.accept(SimplifyIndices(zs, sprites))
+        # sprites = self.sprites()
+        return self.accept(SimplifyIndices(zs, []))
     def serialize(self): return self.accept(Serialize())
     def well_formed(self):
         try:
@@ -781,7 +781,9 @@ class SimplifyIndices(Visitor):
     def visit_Rect(self, x_min, y_min, x_max, y_max, color): return Rect(x_min.accept(self), y_min.accept(self),
                                                                          x_max.accept(self), y_max.accept(self),
                                                                          color.accept(self))
-    def visit_Sprite(self, i, x, y): return Sprite(self.sprite_mapping[i], x.accept(self), y.accept(self))
+    def visit_Sprite(self, i, x, y):
+        raise AssertionError("Tried to simplify sprite")
+        # return Sprite(self.sprite_mapping[i], x.accept(self), y.accept(self))
     def visit_Seq(self, bmps): return Seq(*[bmp.accept(self) for bmp in bmps])
     def visit_Join(self, bmp1, bmp2): return Join(bmp1.accept(self), bmp2.accept(self))
     # def visit_Intersect(self, bmp): return Intersect(bmp.accept(self))
