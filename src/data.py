@@ -218,9 +218,7 @@ def gen_closures_and_deltas(worker_id: int, closures_loc: str, deltas_loc: str,
                     # if p.zs() and n_lines >= 2:
                     #     viz.viz_mult([p.eval(env) for env in f_envs])
                     printed = True
-                print("delta example:",
-                      (p_toks, p_envs), (f_toks, f_envs), d,
-                      sep='\n', end='\n\n')
+                print(f'[{worker_id}][{i}/{n_programs}]:', p_toks, d, f_toks, sep='\n', end='\n\n')
 
 def gen_closures_and_deltas_mp(closures_loc_prefix: str, deltas_loc_prefix: str,
                                n_envs: int, n_programs: int, n_lines_bounds: Tuple[int, int],
@@ -310,35 +308,42 @@ if __name__ == '__main__':
     # demo_gen_closures()
     # demo_gen_policy_data()
 
-    # dir = '/home/djl328/arc/data/policy-pretraining'
-    dir = '../data/policy-pretraining'
+    dir = '/home/djl328/arc/data/policy-pretraining'
+    # dir = '../data/policy-pretraining'
     n_envs = 5
     n_zs = (0, 1)
     z_code = f'{min(n_zs)}~{max(n_zs)}' if min(n_zs) < max(n_zs) else f'{min(n_zs)}'
     t = util.timecode()
-    for n_lines in [1, 2, 3]:
-        code = f'10-RP-{n_envs}e{n_lines}l{z_code}z'
+    for n_lines in [3]:
+        code = f'100k-R-{n_envs}e{n_lines}l{z_code}z'
         for mode in ['training', 'validation']:
             print(f"Generating policy data for mode={mode}")
             gen_closures_and_deltas_mp(
                 closures_loc_prefix=f'{dir}/{code}/{t}/{mode}/',
                 deltas_loc_prefix=f'{dir}/{code}/{t}/{mode}/',
                 n_envs=n_envs,
-                n_programs=10,
+                n_programs=100_000,
                 n_lines_bounds=(n_lines, n_lines),
                 rand_arg_bounds=n_zs,
-                line_types=[Rect, Point],
-                line_type_weights=[3, 1],
-                n_workers=1,
-                hetero_zs=True,
+                line_types=[Rect],
+                line_type_weights=[1],
+                n_workers=100,
+                hetero_zs=False,
                 verbose=True,
             )
+            print(f"Finished generating data for mode={mode}")
+
+    for n_lines in [3]:
+        code = f'100k-R-{n_envs}e{n_lines}l{z_code}z'
+        for mode in ['training', 'validation']:
+            print(f"Joining for code={code}, mode={mode}")
             util.join_glob(f"{dir}/{code}/{t}/{mode}/deltas_*.dat",
                            f"{dir}/{code}/{t}/{mode}_deltas.dat")
 
     for mode in ['training', 'validation']:
-        util.join_glob(f"{dir}/10-RP-{n_envs}e*l{z_code}z/{t}/{mode}_deltas.dat",
-                       f"{dir}/10-RP-{n_envs}e1~3l{z_code}z/{t}/{mode}_deltas.dat")
+        print(f"Joining across line numbers for mode={mode}...")
+        util.join_glob(f"{dir}/100k-R-{n_envs}e*l{z_code}z/{t}/{mode}_deltas.dat",
+                       f"{dir}/100k-R-{n_envs}e1~3l{z_code}z/{t}/{mode}_deltas.dat")
 
     # collect_stats(util.load_incremental(f"{dir}/{code}/{t}/training_deltas.dat"),
     #               max_line_count=1)

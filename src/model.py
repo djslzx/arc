@@ -91,8 +91,8 @@ class Model(nn.Module):
                  n_tf_encoder_layers=6,
                  n_tf_decoder_layers=6,
                  n_value_heads=3,
-                 max_program_length=50,
-                 max_line_length=15,
+                 max_program_length=53,
+                 max_line_length=17,
                  batch_size=32,
                  save_dir='.'):
         super().__init__()
@@ -664,8 +664,8 @@ class PolicyDataset(IterableDataset):
                         p_bmps = p_bmps.unsqueeze(1).to(dev)
                         
                         # convert envs into vectors of length N * lib_size
-                        p_envs_indices = self.to_indices([z.item() for env in p_envs for z in env['z']], False).to(dev)
-                        f_envs_indices = self.to_indices([z.item() for env in f_envs for z in env['z']], False).to(dev)
+                        p_envs_indices = self.to_indices([util.unwrap_tensor(z) for env in p_envs for z in env['z']], False).to(dev)
+                        f_envs_indices = self.to_indices([util.unwrap_tensor(z) for env in f_envs for z in env['z']], False).to(dev)
                         
                         # convert program tokens into padded vectors of indices
                         p_indices = util.pad(self.to_indices(p_toks, True), self.program_length, self.padding).to(dev)
@@ -709,17 +709,18 @@ def run(pretrain_policy: bool,
                   n_tf_encoder_layers=6,
                   n_tf_decoder_layers=6,
                   n_value_heads=5,
-                  max_program_length=50,
+                  max_program_length=53,
+                  max_line_length=17,
                   batch_size=16,
                   save_dir=model_prefix).to(dev)
     
     print("Making dataloaders...")
-    tloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/{data_t}/training_deltas.dat')
-    vloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/{data_t}/validation_deltas.dat')
+    tloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/{data_t}/training/deltas_*.dat')
+    vloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/{data_t}/validation/deltas_*.dat')
     
     if pretrain_policy:
         print("Pretraining policy....")
-        epochs = 1000 if model_n_steps is None else model_n_steps
+        epochs = model_n_steps if model_n_steps is not None else 1000
         model.pretrain_policy(tloader=tloader, vloader=vloader, epochs=epochs,
                               assess_freq=assess_freq, checkpoint_freq=checkpoint_freq,
                               tloss_thresh=tloss_thresh, vloss_thresh=vloss_thresh,
@@ -751,12 +752,12 @@ if __name__ == '__main__':
         sample=False,
         data_prefix='/home/djl328/arc/data/policy-pretraining',
         model_prefix='/home/djl328/arc/models',
-        data_code='100k-RLP-5e1l0~1z',
-        data_t='May03_22_01-46-06',
-        model_code='100k-RLP-5e1~3l0~1z',
+        data_code='100k-R-5e1l0~1z',
+        data_t='May08_22_17-03-43',
+        model_code='100k-R-5e1l0~1z',
         model_t=util.timecode(),
-        assess_freq=1000, checkpoint_freq=10_000,
-        model_n_steps=10_000,
+        assess_freq=1000, checkpoint_freq=100_000,
+        model_n_steps=10_000_000,
         check_vloss_gap=False, # vloss_gap=2,
         tloss_thresh=10 ** -3, vloss_thresh=10 ** -3,
     )
