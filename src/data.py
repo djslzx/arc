@@ -98,7 +98,6 @@ def create_program(envs: List[dict], arg_exprs: List[Expr], n_lines: int, rand_a
     assert rand_arg_bounds[0] <= rand_arg_bounds[1], 'Invalid rand argument bounds'
     rand_exprs, const_exprs = util.split(arg_exprs, lambda expr: expr.zs())
     lines = []
-    colors = [Num(c) for c in random.sample(range(1, 10), n_lines)]
     while len(lines) < n_lines:
         n_tries = 0
         line_type = random.choices(population=line_types, weights=line_type_weights)[0]
@@ -115,13 +114,17 @@ def create_program(envs: List[dict], arg_exprs: List[Expr], n_lines: int, rand_a
             rand_args = random.choices(population=rand_exprs, k=n_rand_args)
             const_args = random.choices(population=const_exprs, k=n_const_args)
             args = util.shuffled(const_args + rand_args)
-            cand = line_type(*args, color=colors[len(lines)])
+            # choose a random color not currently used
+            color = Num(random.choice([x for x in range(1, 10) if x not in [line.color for line in lines]]))
+            cand = line_type(*args, color=color)
             if is_valid(cand):
                 line = cand
+            print(lines, line)
         lines.append(line)
         lines = canonical_ordering(lines)
         lines = rm_dead_code(lines, envs)
         if verbose: print(f'[{len(lines)}, {line_type.__name__}]: {n_tries} tries')
+
     return Seq(*lines)
 
 def rm_dead_code(lines: List[Expr], envs):
