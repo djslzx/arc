@@ -98,7 +98,6 @@ def create_program(envs: List[dict], arg_exprs: List[Expr], n_lines: int, rand_a
     assert rand_arg_bounds[0] <= rand_arg_bounds[1], 'Invalid rand argument bounds'
     rand_exprs, const_exprs = util.split(arg_exprs, lambda expr: expr.zs())
     lines = []
-    colors = [Num(c) for c in random.sample(range(1, 10), n_lines)]
     while len(lines) < n_lines:
         n_tries = 0
         line_type = random.choices(population=line_types, weights=line_type_weights)[0]
@@ -115,13 +114,17 @@ def create_program(envs: List[dict], arg_exprs: List[Expr], n_lines: int, rand_a
             rand_args = random.choices(population=rand_exprs, k=n_rand_args)
             const_args = random.choices(population=const_exprs, k=n_const_args)
             args = util.shuffled(const_args + rand_args)
-            cand = line_type(*args, color=colors[len(lines)])
+            # choose a random color not currently used
+            color = Num(random.choice([x for x in range(1, 10) if x not in [line.color for line in lines]]))
+            cand = line_type(*args, color=color)
             if is_valid(cand):
                 line = cand
+            print(lines, line)
         lines.append(line)
         lines = canonical_ordering(lines)
         lines = rm_dead_code(lines, envs)
         if verbose: print(f'[{len(lines)}, {line_type.__name__}]: {n_tries} tries')
+
     return Seq(*lines)
 
 def rm_dead_code(lines: List[Expr], envs):
@@ -322,8 +325,8 @@ if __name__ == '__main__':
     # demo_gen_policy_data()
 
     # dir = '/home/djl328/arc/data/policy-pretraining'
-    gen = False
-    inspect = True
+    gen = True
+    inspect = False
     
     if gen:
         dir = '../data/policy-pretraining'
@@ -331,8 +334,8 @@ if __name__ == '__main__':
         n_zs = (0, 1)
         z_code = f'{min(n_zs)}~{max(n_zs)}' if min(n_zs) < max(n_zs) else f'{min(n_zs)}'
         t = util.timecode()
-        for n_lines in [1, 2, 3]:
-            code = f'10-RP-{n_envs}e{n_lines}l{z_code}z'
+        for n_lines in [3]:
+            code = f'10-R-{n_envs}e{n_lines}l{z_code}z'
             for mode in ['training', 'validation']:
                 print(f"Generating policy data for mode={mode}")
                 gen_closures_and_deltas_mp(
@@ -342,8 +345,8 @@ if __name__ == '__main__':
                     n_programs=10,
                     n_lines_bounds=(n_lines, n_lines),
                     rand_arg_bounds=n_zs,
-                    line_types=[Rect, Point],
-                    line_type_weights=[3, 1],
+                    line_types=[Rect],
+                    line_type_weights=[1],
                     n_workers=1,
                     hetero_zs=False,
                     verbose=True,
@@ -352,14 +355,14 @@ if __name__ == '__main__':
                                f"{dir}/{code}/{t}/{mode}_deltas.dat")
 
         for mode in ['training', 'validation']:
-            util.join_glob(f"{dir}/10-RP-{n_envs}e*l{z_code}z/{t}/{mode}_deltas.dat",
-                           f"{dir}/10-RP-{n_envs}e1~3l{z_code}z/{t}/{mode}_deltas.dat")
+            util.join_glob(f"{dir}/10-R-{n_envs}e*l{z_code}z/{t}/{mode}_deltas.dat",
+                           f"{dir}/10-R-{n_envs}e1~3l{z_code}z/{t}/{mode}_deltas.dat")
 
-    if inspect:
-        data = util.load_incremental(
-            '../data/policy-pretraining/10-RP-5e1~3l0~1z/May07_22_15-52-44/training_deltas.dat'
-        )
-        viz_data(data)
+    # if inspect:
+    #     data = util.load_incremental(
+    #         '../data/policy-pretraining/10-RP-5e1~3l0~1z/May07_22_15-52-44/training_deltas.dat'
+    #     )
+    #     viz_data(data)
     
     # collect_stats(util.load_incremental(f"{dir}/{code}/{t}/training_deltas.dat"),
     #               max_line_count=1)

@@ -529,7 +529,8 @@ class Model(nn.Module):
             assert len(envs) == self.N, \
                 f'When evaluating a program on multiple environments, ' \
                 f'the number of environments should be the same as N, ' \
-                f'the number of bitmaps rendered per program.'
+                f'the number of bitmaps rendered per program, but got ' \
+                f'len(envs)={len(envs)}, while self.N={self.N}.'
         program = self.to_program(indices)
         if program is None: program = g.Seq()
 
@@ -547,7 +548,6 @@ class Model(nn.Module):
         return T.stack(bitmaps).to(dev)
         
     def sample_line_rollouts(self, b, b_hat, f_hat):
-        # FIXME: this fn needs to be updated
         self.eval()
         batch_size = b.shape[0]
         rollouts = T.tensor([[self.PROGRAM_START]] * batch_size).long().to(dev)  # [b, 1]
@@ -558,19 +558,19 @@ class Model(nn.Module):
             rollouts = T.cat((rollouts, next_indices), dim=1)
         return rollouts
 
-    def append_delta(self, indices: T.Tensor, delta: T.Tensor) -> Result:
+    def append_delta(self, indices: T.Tensor, delta_indices: T.Tensor) -> Result:
         """
         Append a 'delta' (a new line) to a program.
         """
-        p_seq = self.to_program(indices)
-        if p_seq is None:
+        p = self.to_program(indices)
+        if p is None:
             return Result(indices=indices, completed=False, well_formed=False)
-        if p_seq == g.Seq():  # a bit hacky: use the empty program to denote an empty delta
+        # if p == g.Seq():  # a bit hacky: use the empty program to denote an empty delta
+        #     return Result(indices=indices, completed=True, well_formed=True)
+        delta = self.to_program(delta_indices)
+        if delta is None or delta == g.Seq():
             return Result(indices=indices, completed=True, well_formed=True)
-        p_delta = self.to_program(delta)
-        if p_delta is None:
-            return Result(indices=indices, completed=True, well_formed=True)
-        return Result(indices=self.to_indices(p_seq.add_line(p_delta).serialize()).to(dev),
+        return Result(indices=self.to_indices(p.add_line(delta).serialize()).to(dev),
                       completed=False,
                       well_formed=True)
 
@@ -579,7 +579,7 @@ class Model(nn.Module):
     
     def sample_program_rollouts(self, bitmaps: T.Tensor) -> List[T.Tensor]:
         """Take samples from the model wrt a (batched) set of bitmaps"""
-        
+        # pdb.set_trace()
         self.eval()
         batch_size = bitmaps.shape[0]
         # track whether a rollout is completed in tandem with the rollout data
@@ -660,15 +660,16 @@ class PolicyDataset(IterableDataset):
                         break
 
 def sample_model(model: Model, dataloader: DataLoader):
-    for (b, b_hat, f_hat), (delta, _) in dataloader:
-        in_bitmaps = b.squeeze().cpu()[0]
-        rollouts = model.sample_program_rollouts(b)
-
-        for rollout in rollouts:
+    for (p, p_envs, p_bmps), (f, f_envs, f_bmps), d in dataloader:
+        rollouts = model.sample_program_rollouts(f_bmps)
+        envs = [[{'z': t} for t in batch.split(g.LIB_SIZE)]
+                for batch in f_envs]
+        for i, rollout in enumerate(rollouts):
             program = model.to_program(rollout)
-            print(program)
-            out_bitmaps = model.render(rollout).squeeze().cpu()
-            # viz.viz_sample(xs=in_bitmaps, ys=out_bitmaps, text=program)
+            print(f'expected={model.to_program(f[i])}, actual={program}')
+            in_bitmaps = f_bmps.squeeze().cpu()[i]
+            out_bitmaps = model.render(rollout, envs=envs[i]).squeeze().cpu()
+            viz.viz_sample(xs=in_bitmaps, ys=out_bitmaps, text=program)
         print()
 
 def run(pretrain_policy: bool,
@@ -745,20 +746,21 @@ if __name__ == '__main__':
     # )
 
     # run locally
+    # model_100k-R-5e1~2l0~1z_May09_22_21-21-10_740000.pt
     run(
-        pretrain_policy=True,
+        pretrain_policy=False,
         train_value=False,
-        sample=False,
+        sample=True,
         data_prefix='../data/policy-pretraining',
         model_prefix='../models',
-        data_code='10-RP-5e1l0~1z',
-        data_t='May07_22_15-52-44',
+        data_code='10-R-5e1~3l0~1z',
+        data_t='May11_22_12-09-30',
         # model_code='100k-RLP-5e1~3l0~1z',  # remote
         # model_t='Apr21_22_22-59-46',  # remote
-        model_code='10-RP-5e1l0~1z',  # local
-        # model_t='Apr28_22_17-11-50',  # local
-        model_t=util.timecode(),
-        model_n_steps=300,
+        model_code='100k-R-5e1~3l0~1z',  # local
+        model_t='May09_22_21-41-20',  # local
+        # model_t=util.timecode(),
+        model_n_steps=740000,
         assess_freq=10, checkpoint_freq=200,
         tloss_thresh=0.0001, vloss_thresh=0.0001,
         check_vloss_gap=False,
