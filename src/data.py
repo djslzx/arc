@@ -328,7 +328,9 @@ if __name__ == '__main__':
     n_zs = (0, 1)
     z_code = f'{min(n_zs)}~{max(n_zs)}' if min(n_zs) < max(n_zs) else f'{min(n_zs)}'
     t = util.timecode()
-    for n_lines in [3]:
+    line_range = [1, 2, 3]
+
+    for n_lines in line_range:
         code = f'100k-R-{n_envs}e{n_lines}l{z_code}z'
         for mode in ['training', 'validation']:
             print(f"Generating policy data for mode={mode}")
@@ -347,7 +349,7 @@ if __name__ == '__main__':
             )
             print(f"Finished generating data for mode={mode}")
 
-    for n_lines in [3]:
+    for n_lines in line_range:
         code = f'100k-R-{n_envs}e{n_lines}l{z_code}z'
         for mode in ['training', 'validation']:
             print(f"Joining for code={code}, mode={mode}")
@@ -357,4 +359,4 @@ if __name__ == '__main__':
     for mode in ['training', 'validation']:
         print(f"Joining across line numbers for mode={mode}...")
         util.join_glob(f"{dir}/100k-R-{n_envs}e*l{z_code}z/{t}/{mode}_deltas.dat",
-                       f"{dir}/100k-R-{n_envs}e1~3l{z_code}z/{t}/{mode}_deltas.dat")
+                       f"{dir}/100k-R-{n_envs}e{min(line_range)}~{max(line_range)}l{z_code}z/{t}/{mode}_deltas.dat")
