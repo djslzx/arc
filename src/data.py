@@ -119,7 +119,6 @@ def create_program(envs: List[dict], arg_exprs: List[Expr], n_lines: int, rand_a
             cand = line_type(*args, color=color)
             if is_valid(cand):
                 line = cand
-            print(lines, line)
         lines.append(line)
         lines = canonical_ordering(lines)
         lines = rm_dead_code(lines, envs)
@@ -322,35 +321,38 @@ if __name__ == '__main__':
     # demo_gen_closures()
     # demo_gen_policy_data()
 
-    dir = '/home/djl328/arc/data/policy-pretraining'
-    # dir = '../data/policy-pretraining'
+    # dir = '/home/djl328/arc/data/policy-pretraining'
+    dir = '../data/policy-pretraining'
     n_envs = 5
     n_zs = (0, 1)
     z_code = f'{min(n_zs)}~{max(n_zs)}' if min(n_zs) < max(n_zs) else f'{min(n_zs)}'
     t = util.timecode()
     line_range = [1, 2, 3]
+    n_programs = 10
+    s_n_programs = '10'
+    n_workers = 1
 
     for n_lines in line_range:
-        code = f'100k-R-{n_envs}e{n_lines}l{z_code}z'
+        code = f'{s_n_programs}-R-{n_envs}e{n_lines}l{z_code}z'
         for mode in ['training', 'validation']:
             print(f"Generating policy data for mode={mode}")
             gen_closures_and_deltas_mp(
                 closures_loc_prefix=f'{dir}/{code}/{t}/{mode}/',
                 deltas_loc_prefix=f'{dir}/{code}/{t}/{mode}/',
                 n_envs=n_envs,
-                n_programs=100_000,
+                n_programs=n_programs,
                 n_lines_bounds=(n_lines, n_lines),
                 rand_arg_bounds=n_zs,
                 line_types=[Rect],
                 line_type_weights=[1],
-                n_workers=100,
+                n_workers=n_workers,
                 hetero_zs=False,
                 verbose=True,
             )
             print(f"Finished generating data for mode={mode}")
 
     for n_lines in line_range:
-        code = f'100k-R-{n_envs}e{n_lines}l{z_code}z'
+        code = f'{s_n_programs}-R-{n_envs}e{n_lines}l{z_code}z'
         for mode in ['training', 'validation']:
             print(f"Joining for code={code}, mode={mode}")
             util.join_glob(f"{dir}/{code}/{t}/{mode}/deltas_*.dat",
@@ -358,5 +360,8 @@ if __name__ == '__main__':
 
     for mode in ['training', 'validation']:
         print(f"Joining across line numbers for mode={mode}...")
-        util.join_glob(f"{dir}/100k-R-{n_envs}e*l{z_code}z/{t}/{mode}_deltas.dat",
-                       f"{dir}/100k-R-{n_envs}e{min(line_range)}~{max(line_range)}l{z_code}z/{t}/{mode}_deltas.dat")
+        prefix = f'{dir}/{s_n_programs}-R-{n_envs}e'
+        line_code = f'{min(line_range)}~{max(line_range)}'
+        util.join_glob(f"{prefix}*l{z_code}z/{t}/{mode}_deltas.dat",
+                       f"{prefix}{line_code}l{z_code}z/{t}/"
+                       f"{mode}_deltas.dat")

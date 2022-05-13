@@ -75,7 +75,7 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x + self.pe[:x.size(0)])
 
 
-Result = namedtuple('Result', 'indices completed well_formed')
+Rollout = namedtuple('Result', 'indices completed well_formed')
 
 
 class Model(nn.Module):
@@ -189,7 +189,7 @@ class Model(nn.Module):
         indices = [self.to_index(t) for t in tokens]
         if decorate:
             indices = [self.PROGRAM_START] + indices + [self.PROGRAM_END]
-        return T.tensor(indices)
+        return T.tensor(indices).to(dev)
 
     def to_token(self, index):
         return self.lexicon[index]
@@ -516,7 +516,7 @@ class Model(nn.Module):
         except (AssertionError, IndexError):
             return None
 
-    def render(self, indices, envs=None, k=1) -> T.Tensor:
+    def render(self, indices, envs=None, k=1, check_env_size=True) -> T.Tensor:
         def try_render(f) -> Optional[T.Tensor]:
             try:
                 return f.eval(env)
@@ -525,12 +525,13 @@ class Model(nn.Module):
 
         if envs is None:
             envs = g.seed_libs(self.N * k)
-        else:
-            assert len(envs) == self.N, \
+        elif check_env_size:
+            assert len(envs) >= self.N, \
                 f'When evaluating a program on multiple environments, ' \
                 f'the number of environments should be the same as N, ' \
                 f'the number of bitmaps rendered per program, but got ' \
                 f'len(envs)={len(envs)}, while self.N={self.N}.'
+        n_envs = len(envs)
         program = self.to_program(indices)
         if program is None: program = g.Seq()
 
@@ -538,59 +539,58 @@ class Model(nn.Module):
         for env in envs:
             if (bitmap := try_render(program)) is not None:
                 bitmaps.append(bitmap.unsqueeze(0))  # add channel dimension
-                if len(bitmaps) == self.N:
+                if len(bitmaps) == n_envs:
                     break
         # add blank bitmaps until we reach the quota
-        if len(bitmaps) < self.N:
-            bitmaps += [T.zeros(1, self.H, self.W)] * (self.N - len(bitmaps))
+        if len(bitmaps) < n_envs:
+            bitmaps += [T.zeros(1, self.H, self.W)] * (n_envs - len(bitmaps))
 
-        assert(len(bitmaps) == self.N)
+        assert(len(bitmaps) == n_envs)
         return T.stack(bitmaps).to(dev)
         
-    def sample_line_rollouts(self, b, b_hat, f_hat):
+    def sample_line_rollouts(self, f_bmps, p_bmps, p):
         self.eval()
-        batch_size = b.shape[0]
+        batch_size = f_bmps.shape[0]
         rollouts = T.tensor([[self.PROGRAM_START]] * batch_size).long().to(dev)  # [b, 1]
         for i in range(self.max_line_length - 1):
-            p_outs, _ = self.forward(b, b_hat, f_hat, rollouts)  # [i, b, n_tokens]
+            p_outs, _ = self.forward(f_bmps, p_bmps, p, rollouts)  # [i, b, n_tokens]
             next_prs = p_outs.softmax(-1)[-1]  # convert p_outs to probabilities -> [i, b]
             next_indices = T.multinomial(util.filter_top_p(next_prs), 1)
             rollouts = T.cat((rollouts, next_indices), dim=1)
         return rollouts
 
-    def append_delta(self, indices: T.Tensor, delta_indices: T.Tensor) -> Result:
+    def append_delta(self, indices: T.Tensor, delta_indices: T.Tensor) -> Rollout:
         """
         Append a 'delta' (a new line) to a program.
         """
         p = self.to_program(indices)
         if p is None:
-            return Result(indices=indices, completed=False, well_formed=False)
-        # if p == g.Seq():  # a bit hacky: use the empty program to denote an empty delta
-        #     return Result(indices=indices, completed=True, well_formed=True)
+            return Rollout(indices=indices, completed=False, well_formed=False)
         delta = self.to_program(delta_indices)
-        if delta is None or delta == g.Seq():
-            return Result(indices=indices, completed=True, well_formed=True)
-        return Result(indices=self.to_indices(p.add_line(delta).serialize()).to(dev),
-                      completed=False,
-                      well_formed=True)
+        if delta is None:
+            return Rollout(indices=indices, completed=True, well_formed=False)
+        if delta == g.Seq():  # a bit hacky: use the empty program to denote an empty delta
+            return Rollout(indices=indices, completed=True, well_formed=True)
+        return Rollout(indices=self.to_indices(p.add_line(delta).serialize()),
+                       completed=False,
+                       well_formed=True)
 
     def pad_program(self, indices: T.Tensor) -> T.Tensor:
         return util.pad(indices, self.max_program_length, self.PADDING).to(dev)
     
     def sample_program_rollouts(self, bitmaps: T.Tensor) -> List[T.Tensor]:
         """Take samples from the model wrt a (batched) set of bitmaps"""
-        # pdb.set_trace()
         self.eval()
         batch_size = bitmaps.shape[0]
         # track whether a rollout is completed in tandem with the rollout data
-        rollouts: List[Result] = [Result(indices=self.to_indices(['{', '}'], decorate=True),
-                                         completed=False,
-                                         well_formed=True)
-                                  for _ in range(batch_size)]
+        rollouts: List[Rollout] = [Rollout(indices=self.to_indices(['{', '}'], decorate=True),
+                                           completed=False,
+                                           well_formed=True)
+                                   for _ in range(batch_size)]
         while any(not r.completed for r in rollouts):
             rollout_renders = T.stack([self.render(r.indices) for r in rollouts])
             padded_rollouts = T.stack([self.pad_program(r.indices) for r in rollouts])
-            deltas = self.sample_line_rollouts(b=bitmaps, b_hat=rollout_renders, f_hat=padded_rollouts)
+            deltas = self.sample_line_rollouts(f_bmps=bitmaps, p_bmps=rollout_renders, p=padded_rollouts)
             rollouts = [self.append_delta(r.indices, delta) if r.well_formed and not r.completed else r
                         for r, delta in zip(rollouts, deltas)]
         return [r.indices for r in rollouts]
@@ -661,17 +661,25 @@ class PolicyDataset(IterableDataset):
 
 def sample_model(model: Model, dataloader: DataLoader):
     for (p, p_envs, p_bmps), (f, f_envs, f_bmps), d in dataloader:
+        batch_size = f.size(0)
         rollouts = model.sample_program_rollouts(f_bmps)
-        envs = [[{'z': t} for t in batch.split(g.LIB_SIZE)]
-                for batch in f_envs]
-        for i, rollout in enumerate(rollouts):
-            program = model.to_program(rollout)
-            print(f'expected={model.to_program(f[i])}, actual={program}')
-            in_bitmaps = f_bmps.squeeze().cpu()[i]
-            out_bitmaps = model.render(rollout, envs=envs[i]).squeeze().cpu()
-            viz.viz_sample(xs=in_bitmaps, ys=out_bitmaps, text=program)
-        print()
-
+        envs = g.seed_libs(model.N ** 2)
+        print(f'envs={envs}')
+        # batched_envs = [[{'z': t} for t in batch.split(g.LIB_SIZE)]
+        #                 for batch in f_envs]
+        for i in range(batch_size):
+            output = model.to_program(rollouts[i])
+            expected = model.to_program(f[i])
+            print(f'expected={expected}, actual={output}')
+            
+            in_bmps = f_bmps.squeeze().cpu()[i]
+            out_bmps = model.render(rollouts[i], envs=envs, check_env_size=False).squeeze().cpu()
+            bmps = T.cat((in_bmps, out_bmps)).reshape(-1, model.N, model.H, model.W)
+            text = f'expected={expected}\n'\
+                   f'actual={output}'
+            viz.viz_grid(bmps, text)
+            
+            
 def run(pretrain_policy: bool,
         train_value: bool,
         sample: bool,
@@ -698,8 +706,8 @@ def run(pretrain_policy: bool,
                   save_dir=model_prefix).to(dev)
     
     print("Making dataloaders...")
-    tloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/{data_t}/training/deltas_*.dat')
-    vloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/{data_t}/validation/deltas_*.dat')
+    tloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/{data_t}/training_deltas.dat')
+    vloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/{data_t}/validation_deltas.dat')
     
     if pretrain_policy:
         print("Pretraining policy....")
@@ -729,40 +737,38 @@ def run(pretrain_policy: bool,
 
 if __name__ == '__main__':
     # # run on g2
-    run(
-        pretrain_policy=True,
-        train_value=False,
-        sample=False,
-        data_prefix='/home/djl328/arc/data/policy-pretraining',
-        model_prefix='/home/djl328/arc/models',
-        data_code='100k-RLP-5e1l0~1z',
-        data_t='May03_22_01-46-06',
-        model_code='100k-RLP-5e1~3l0~1z',
-        model_t=util.timecode(),
-        assess_freq=1000, checkpoint_freq=10_000,
-        model_n_steps=10_000,
-        check_vloss_gap=False, # vloss_gap=2,
-        tloss_thresh=10 ** -3, vloss_thresh=10 ** -3,
-    )
+    # run(
+    #     pretrain_policy=True,
+    #     train_value=False,
+    #     sample=False,
+    #     data_prefix='/home/djl328/arc/data/policy-pretraining',
+    #     model_prefix='/home/djl328/arc/models',
+    #     data_code='100k-RLP-5e1l0~1z',
+    #     data_t='May03_22_01-46-06',
+    #     model_code='100k-RLP-5e1~3l0~1z',
+    #     model_t=util.timecode(),
+    #     assess_freq=1000, checkpoint_freq=10_000,
+    #     model_n_steps=10_000,
+    #     check_vloss_gap=False, # vloss_gap=2,
+    #     tloss_thresh=10 ** -3, vloss_thresh=10 ** -3,
+    # )
 
     # run locally
     # model_100k-R-5e1~2l0~1z_May09_22_21-21-10_740000.pt
-    # run(
-    #     pretrain_policy=False,
-    #     train_value=False,
-    #     sample=True,
-    #     data_prefix='../data/policy-pretraining',
-    #     model_prefix='../models',
-    #     data_code='10-R-5e1~3l0~1z',
-    #     data_t='May11_22_12-09-30',
-    #     # model_code='100k-RLP-5e1~3l0~1z',  # remote
-    #     # model_t='Apr21_22_22-59-46',  # remote
-    #     model_code='100k-R-5e1~3l0~1z',  # local
-    #     model_t='May09_22_21-41-20',  # local
-    #     # model_t=util.timecode(),
-    #     model_n_steps=740000,
-    #     assess_freq=10, checkpoint_freq=200,
-    #     tloss_thresh=0.0001, vloss_thresh=0.0001,
-    #     check_vloss_gap=False,
-    #     # vloss_gap=2,
-    # )
+    run(
+        pretrain_policy=False,
+        train_value=False,
+        sample=True,
+        data_prefix='../data/policy-pretraining',
+        model_prefix='../models',
+        data_code='10-R-5e1~3l0~1z',
+        data_t='May11_22_12-09-30',
+        model_code='100k-R-5e1~3l0~1z',
+        model_t='May09_22_21-41-20',
+        # model_t=util.timecode(),
+        model_n_steps=740000,
+        assess_freq=10, checkpoint_freq=200,
+        tloss_thresh=0.0001, vloss_thresh=0.0001,
+        check_vloss_gap=False,
+        # vloss_gap=2,
+    )

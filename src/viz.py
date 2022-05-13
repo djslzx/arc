@@ -80,15 +80,16 @@ def viz(t, title='', subtitle='', fname=None, label=False):
     show(ax, t, label=label)
     output(fname, show=True)
 
-def viz_grid(samples, text=''):
-    '''Visualize an nxn grid of samples'''
-    n = floor(sqrt(len(samples)))
-    f, ax = plt.subplots(n, n)
-    plt.figtext(0.5, 0.01, text, wrap=True, horizontalalignment='center', fontsize=9)    
-    for i, sample in enumerate(samples[:n**2]):
-        x, y = i%n, i//n
-        show(ax[y, x], sample)
+def viz_grid(grid, text=''):
+    """Visualize a grid of samples"""
+    h, w = grid.shape[:2]
+    f, ax = plt.subplots(w, h)
+    plt.figtext(0.5, 0.01, text, wrap=True, horizontalalignment='center', fontsize=9)
+    for r, row in enumerate(grid):
+        for c, cell in enumerate(row):
+            show(ax[c, r], cell)
     output()
+
 
 if __name__ == '__main__':
     if len(sys.argv) != 2:
