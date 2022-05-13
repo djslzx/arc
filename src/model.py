@@ -690,6 +690,7 @@ def run(pretrain_policy: bool,
         assess_freq: int, checkpoint_freq: int,
         tloss_thresh: float, vloss_thresh: float,
         model_n_steps: Optional[int] = None,
+        learning_rate: Optional[float] = None,
         check_vloss_gap: bool = True, vloss_gap: float = 1):
     
     model = Model(name=f'{model_code}_{model_t}',
@@ -714,6 +715,7 @@ def run(pretrain_policy: bool,
         print("Pretraining policy....")
         epochs = model_n_steps if model_n_steps is not None else 1000
         model.pretrain_policy(tloader=tloader, vloader=vloader, epochs=epochs,
+                              lr=10 ** -5 if learning_rate is None else learning_rate,
                               assess_freq=assess_freq, checkpoint_freq=checkpoint_freq,
                               tloss_thresh=tloss_thresh, vloss_thresh=vloss_thresh,
                               check_vloss_gap=check_vloss_gap, vloss_gap=vloss_gap)
@@ -737,39 +739,40 @@ def run(pretrain_policy: bool,
 
 
 if __name__ == '__main__':
-    # # run on g2
-    # run(
-    #     pretrain_policy=True,
-    #     train_value=False,
-    #     sample=False,
-    #     data_prefix='/home/djl328/arc/data/policy-pretraining',
-    #     model_prefix='/home/djl328/arc/models',
-    #     data_code='100k-RLP-5e1l0~1z',
-    #     data_t='May03_22_01-46-06',
-    #     model_code='100k-RLP-5e1~3l0~1z',
-    #     model_t=util.timecode(),
-    #     assess_freq=1000, checkpoint_freq=10_000,
-    #     model_n_steps=10_000,
-    #     check_vloss_gap=False, # vloss_gap=2,
-    #     tloss_thresh=10 ** -3, vloss_thresh=10 ** -3,
-    # )
-
-    # run locally
-    # model_100k-R-5e1~2l0~1z_May09_22_21-21-10_740000.pt
+    # run on g2
     run(
         pretrain_policy=True,
         train_value=False,
         sample=False,
-        data_prefix='../data/policy-pretraining',
-        model_prefix='../models',
-        data_code='10-R-5e1~3l0~1z',
-        data_t='May11_22_12-09-30',
+        data_prefix='/home/djl328/arc/data/policy-pretraining',
+        model_prefix='/home/djl328/arc/models',
+        data_code='100k-R-5e1~3l0~1z',
+        data_t='May11_22_13-05-55',
         model_code='100k-R-5e1~3l0~1z',
-        model_t='May09_22_21-41-20',
-        # model_t=util.timecode(),
-        model_n_steps=740000,
-        assess_freq=10, checkpoint_freq=200,
-        tloss_thresh=0.0001, vloss_thresh=0.0001,
-        check_vloss_gap=False,
-        # vloss_gap=2,
+        model_t=util.timecode(),
+        assess_freq=1000, checkpoint_freq=50_000,
+        model_n_steps=10_000_000,
+        check_vloss_gap=False, # vloss_gap=2,
+        tloss_thresh=10 ** -3,
+        vloss_thresh=10 ** -3,
     )
+
+    # # run locally
+    # # model_100k-R-5e1~2l0~1z_May09_22_21-21-10_740000.pt
+    # run(
+    #     pretrain_policy=True,
+    #     train_value=False,
+    #     sample=False,
+    #     data_prefix='../data/policy-pretraining',
+    #     model_prefix='../models',
+    #     data_code='10-R-5e1~3l0~1z',
+    #     data_t='May11_22_12-09-30',
+    #     model_code='100k-R-5e1~3l0~1z',
+    #     model_t='May09_22_21-41-20',
+    #     # model_t=util.timecode(),
+    #     model_n_steps=740000,
+    #     assess_freq=10, checkpoint_freq=200,
+    #     tloss_thresh=0.0001, vloss_thresh=0.0001,
+    #     check_vloss_gap=False,
+    #     # vloss_gap=2,
+    # )
