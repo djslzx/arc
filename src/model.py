@@ -82,7 +82,7 @@ class Model(nn.Module):
     
     def __init__(self,
                  name: str,
-                 N: int, C: int, H: int, W: int,
+                 N: int, H: int, W: int,
                  Z_LO: int, Z_HI: int,
                  lexicon: List[str],
                  d_model=512,
@@ -99,8 +99,8 @@ class Model(nn.Module):
 
         # grammar/bitmap parameters
         self.N = N        # number of rendered bitmaps per sample
-        self.C = C        # number of channels per bitmap
         self.H = H        # height (in pixels) of each bitmap
+        self.C = 10       # color channel (one-hot)
         self.W = W        # width of each bitmap
         self.Z_LO = Z_LO  # minimum value of z
         self.Z_HI = Z_HI  # max value of z
@@ -138,7 +138,7 @@ class Model(nn.Module):
                 nn.ReLU(),
             )
         self.conv = nn.Sequential(
-            conv_block(C, n_conv_channels),
+            conv_block(self.C, n_conv_channels),
             conv_block(n_conv_channels, n_conv_channels),
             conv_block(n_conv_channels, n_conv_channels),
             conv_block(n_conv_channels, n_conv_channels),
@@ -197,15 +197,16 @@ class Model(nn.Module):
     def to_tokens(self, indices: Iterable):
         return [self.to_token(i) for i in indices]
 
-    def embed_bitmaps(self, b, batch_size):
+    def embed_bitmaps(self, bmps, batch_size):
         """
         Map the batched bitmap set b (of shape [batch, H, W])
         to bitmap embeddings (of shape [N, batch, d_model])
         """
-        b_flat = b.to(dev).reshape(-1, self.C, self.H, self.W)  # add channel dim, flatten bitmap collection
-        e_b = self.conv(b_flat).reshape(batch_size, -1, self.d_model)  # apply conv, portion embeddings into batches
-        e_b = e_b.transpose(0, 1)  # swap batch and sequence dims
-        return e_b
+        bmps_w_channel = util.add_channels(bmps.long()).float()  # add channel dim
+        bmps_flat = bmps_w_channel.reshape(-1, self.C, self.H, self.W)  # flatten bitmap collection
+        bmps_enc = self.conv(bmps_flat).reshape(batch_size, -1, self.d_model)  # apply conv, batch
+        bmps_enc = bmps_enc.transpose(0, 1)  # swap batch and sequence dims
+        return bmps_enc
 
     def forward(self, f_bmps, p_bmps, p, d):
         """Overloads delta_z to carry both program and parameters (same with p_z)"""
@@ -538,7 +539,7 @@ class Model(nn.Module):
         bitmaps = []
         for env in envs:
             if (bitmap := try_render(program)) is not None:
-                bitmaps.append(bitmap.unsqueeze(0))  # add channel dimension
+                bitmaps.append(bitmap)
                 if len(bitmaps) == n_envs:
                     break
         # add blank bitmaps until we reach the quota
@@ -640,14 +641,14 @@ class PolicyDataset(IterableDataset):
                 while True:
                     try:
                         (p_toks, p_envs, p_bmps), (f_toks, f_envs, f_bmps), d_toks = pickle.load(fp)
-                        
-                        # add channel dimension to bitmaps
-                        f_bmps = f_bmps.unsqueeze(1).to(dev)
-                        p_bmps = p_bmps.unsqueeze(1).to(dev)
+                        f_bmps = f_bmps.to(dev)
+                        p_bmps = p_bmps.to(dev)
                         
                         # convert envs into vectors of length N * lib_size
-                        p_envs_indices = self.to_indices([util.unwrap_tensor(z) for env in p_envs for z in env['z']], False).to(dev)
-                        f_envs_indices = self.to_indices([util.unwrap_tensor(z) for env in f_envs for z in env['z']], False).to(dev)
+                        p_envs_indices = self.to_indices([util.unwrap_tensor(z)
+                                                          for env in p_envs for z in env['z']], False).to(dev)
+                        f_envs_indices = self.to_indices([util.unwrap_tensor(z)
+                                                          for env in f_envs for z in env['z']], False).to(dev)
                         
                         # convert program tokens into padded vectors of indices
                         p_indices = util.pad(self.to_indices(p_toks, True), self.program_length, self.padding).to(dev)
@@ -672,8 +673,8 @@ def sample_model(model: Model, dataloader: DataLoader):
             expected = model.to_program(f[i])
             print(f'expected={expected}, actual={output}')
             
-            in_bmps = f_bmps.squeeze().cpu()[i]
-            out_bmps = model.render(rollouts[i], envs=envs, check_env_size=False).squeeze().cpu()
+            in_bmps = f_bmps.cpu()[i]
+            out_bmps = model.render(rollouts[i], envs=envs, check_env_size=False).cpu()
             bmps = T.cat((in_bmps, out_bmps)).reshape(-1, model.N, model.H, model.W)
             text = f'expected={expected}\n'\
                    f'actual={output}'
@@ -692,7 +693,7 @@ def run(pretrain_policy: bool,
         check_vloss_gap: bool = True, vloss_gap: float = 1):
     
     model = Model(name=f'{model_code}_{model_t}',
-                  N=5, C=1, H=g.B_H, W=g.B_W,
+                  N=5, H=g.B_H, W=g.B_W,
                   Z_HI=g.Z_HI, Z_LO=g.Z_LO,
                   lexicon=g.SIMPLE_LEXICON,
                   d_model=512,
@@ -756,9 +757,9 @@ if __name__ == '__main__':
     # run locally
     # model_100k-R-5e1~2l0~1z_May09_22_21-21-10_740000.pt
     run(
-        pretrain_policy=False,
+        pretrain_policy=True,
         train_value=False,
-        sample=True,
+        sample=False,
         data_prefix='../data/policy-pretraining',
         model_prefix='../models',
         data_code='10-R-5e1~3l0~1z',
