@@ -230,6 +230,35 @@ def join_glob(in_glob: str, out: str):
                         pickle.dump(x, f_out)
                     except EOFError:
                         break
+                        
+def weave_glob(glob_str: str, out: str):
+    """
+    Join all lines in globbed files by picking lines at random from each of the files and repeating.
+    """
+    filenames = glob(glob_str)
+    make_parent_dir(out)
+    print(f"Weaving {len(filenames)} files into {out}...")
+    with open(out, 'wb') as f_out:
+        file_objs = [open(filename, 'rb') for filename in filenames]
+        while file_objs:
+            f_in = random.choice(file_objs)
+            try:
+                x = pickle.load(f_in)
+                pickle.dump(x, f_out)
+            except EOFError:
+                file_objs.remove(f_in)
+
+def print_glob_contents(glob_str: str, verbose=False):
+    filenames = glob(glob_str)
+    for filename in filenames:
+        if verbose: print(f'START {filename}')
+        with open(filename, 'rb') as f:
+            while True:
+                try:
+                    print(pickle.load(f))
+                except EOFError:
+                    break
+        if verbose: print(f'END {filename}')
 
 def test_add_channels():
     cases = [
