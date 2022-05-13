@@ -1,6 +1,7 @@
 import torch as T
 import torch.nn.functional as F
 import pickle
+import pdb
 import os
 from glob import glob
 from math import floor, ceil
@@ -9,6 +10,13 @@ import random
 from datetime import datetime
 
 dirname = os.path.dirname(__file__)
+
+def add_channels(img, n_classes=10):
+    """
+    Turns a W x H tensor into a C x W x H tensor, where the C dimension is a one-hot encoding for the color
+    values in the image
+    """
+    return F.one_hot(img, n_classes).transpose(-1, -2).transpose(-2, -3)
 
 def unwrap_tensor(t):
     if isinstance(t, T.Tensor):
@@ -223,17 +231,62 @@ def join_glob(in_glob: str, out: str):
                     except EOFError:
                         break
 
+def test_add_channels():
+    cases = [
+        (T.tensor([[[1]],  # image 1
+                   [[2]],  # image 2
+                   [[0]]   # image 3
+                  ]),
+         T.tensor([[[[0]], [[1]], [[0]]],  # image 1
+                   [[[0]], [[0]], [[1]]],  # image 2
+                   [[[1]], [[0]], [[0]]]   # image 3
+                  ])
+         ),
+        (T.tensor([[[0, 0, 0],
+                    [2, 1, 1]]]),
+         T.tensor([[[[1, 1, 1],
+                     [0, 0, 0]],
+                    [[0, 0, 0],
+                     [0, 1, 1]],
+                    [[0, 0, 0],
+                     [1, 0, 0]]]])
+         ),
+        (T.tensor([
+            [  # batch 1
+                [[0, 1]],  # image 1
+                [[1, 0]]   # image 2
+            ],
+            [  # batch 2
+                [[1, 1]],  # image 1
+                [[0, 0]]   # image 2
+            ],
+            [  # batch 3
+                [[1, 1]],  # image 1
+                [[0, 0]]  # image 2
+            ]
+        ]),
+         T.tensor([
+            [  # batch 1
+                [[[1, 0]], [[0, 1]]],  # image 1
+                [[[0, 1]], [[1, 0]]]   # image 2
+            ],
+            [  # batch 2
+                [[[0, 0]], [[1, 1]]],  # image 1
+                [[[1, 1]], [[0, 0]]]   # image 2
+            ],
+            [  # batch 3
+                [[[0, 0]], [[1, 1]]],  # image 1
+                [[[1, 1]], [[0, 0]]]   # image 2
+            ]
+         ])),
+    ]
+    for img, ans in cases:
+        out = add_channels(img, -1)
+        assert T.equal(out, ans), f'Expected {ans} of shape {ans.shape}; ' \
+                                  f'Got {out} of shape {out.shape}.'
+    print("[+] test_add_channels passed")
+
 
 if __name__ == '__main__':
-    print(img_to_tensor(['_#_',
-                         '#_#',
-                         '__#']))
-    print(img_to_tensor(['_#_',
-                         '#_#',
-                         '__#'], 2, 2))
-    print(img_to_tensor(['_#_',
-                         '#_#',
-                         '__#'], 4, 4))
-    print(img_to_tensor(['_1_',
-                         '2_2',
-                         '__3'], 4, 4))
+    test_add_channels()
+    
