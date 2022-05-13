@@ -83,8 +83,8 @@ class Model(nn.Module):
     def __init__(self,
                  name: str,
                  N: int, H: int, W: int,
-                 Z_LO: int, Z_HI: int,
-                 lexicon: List[str],
+                 Z_LO: int, Z_HI: int, lexicon: List[str],
+                 C=10,
                  d_model=512,
                  n_conv_channels=16,
                  n_tf_encoder_layers=6,
@@ -92,15 +92,14 @@ class Model(nn.Module):
                  n_value_heads=3,
                  max_program_length=53,
                  max_line_length=17,
-                 batch_size=32,
-                 save_dir='.'):
+                 batch_size=32):
         super().__init__()
         self.name = name
 
         # grammar/bitmap parameters
         self.N = N        # number of rendered bitmaps per sample
         self.H = H        # height (in pixels) of each bitmap
-        self.C = 10       # color channel (one-hot)
+        self.C = C        # color channel (one-hot)
         self.W = W        # width of each bitmap
         self.Z_LO = Z_LO  # minimum value of z
         self.Z_HI = Z_HI  # max value of z
@@ -114,7 +113,6 @@ class Model(nn.Module):
         self.batch_size = batch_size
         self.max_line_length = max_line_length
         self.max_program_length = max_program_length
-        self.save_dir = save_dir
         
         # program embedding: embed program tokens as d_model-size tensors
         # lexicon includes both the program alphabet and the range of valid z's
@@ -145,7 +143,7 @@ class Model(nn.Module):
             conv_block(n_conv_channels, n_conv_channels),
             conv_block(n_conv_channels, n_conv_channels),
             nn.Flatten(),
-            nn.Linear(n_conv_channels * H * W, d_model),
+            nn.Linear(n_conv_channels * H * W, d_model),  # [..., C', H, W] --> [..., d_model]
         )
         # Add embedding to track source of different tensors passed into the transformer encoder
         self.src_encoding = SrcEncoding(d_model, src_sizes)
@@ -163,9 +161,9 @@ class Model(nn.Module):
         # feed in z's appended to the end of each program
 
         # value head: receives code from tf_encoder and maps to evaluation of program
-        def lin_block(in_channels: int, out_channels:int) -> nn.Module:
+        def lin_block(in_features: int, out_features: int) -> nn.Module:
             return nn.Sequential(
-                nn.Linear(in_channels, out_channels),
+                nn.Linear(in_features, out_features),
                 nn.ReLU(),
             )
         self.value_fn = nn.Sequential(
@@ -175,8 +173,8 @@ class Model(nn.Module):
             nn.Linear(self.d_model, self.n_value_heads)
         )
 
-    def model_path(self, epoch):
-        return f'{self.save_dir}/model_{self.name}_{epoch}.pt'
+    def model_path(self, dir, epoch):
+        return f'{dir}/model_{self.name}_{epoch}.pt'
 
     def load_model(self, checkpoint_loc: str):
         checkpoint = T.load(checkpoint_loc, map_location=dev)
@@ -202,15 +200,17 @@ class Model(nn.Module):
         Map the batched bitmap set b (of shape [batch, H, W])
         to bitmap embeddings (of shape [N, batch, d_model])
         """
-        bmps_w_channel = util.add_channels(bmps.long()).float()  # add channel dim
+        # add channel dim: [b, n, h, w] -> [b, n, c, h, w]
+        bmps_w_channel = util.add_channels(bmps.long()).float()
+        # flatten: [b, n, c, h, w] -> [b * n, c, h, w]
         bmps_flat = bmps_w_channel.reshape(-1, self.C, self.H, self.W)  # flatten bitmap collection
-        bmps_enc = self.conv(bmps_flat).reshape(batch_size, -1, self.d_model)  # apply conv, batch
-        bmps_enc = bmps_enc.transpose(0, 1)  # swap batch and sequence dims
+        # apply conv, batch: [b * n, c, h, w] -> [b * n, d_model] -> [b, n, d_model]
+        bmps_enc = self.conv(bmps_flat).reshape(batch_size, -1, self.d_model)
+        # swap batch and sequence dims [b, n, d_model] -> [n, b, d_model]
+        bmps_enc = bmps_enc.transpose(0, 1)
         return bmps_enc
 
     def forward(self, f_bmps, p_bmps, p, d):
-        """Overloads delta_z to carry both program and parameters (same with p_z)"""
-        
         # compute embeddings for bitmaps, programs
         batch_size = f_bmps.shape[0]  # need this b/c last batch might not be the full size
         e_f_bmps = self.embed_bitmaps(f_bmps, batch_size)
@@ -226,8 +226,8 @@ class Model(nn.Module):
         # pass tf_code through v and pi -> value, policy
         padding_mask = T.eq(d, self.PADDING).to(dev)
         tgt_mask = nn.Transformer.generate_square_subsequent_mask(sz=e_d.shape[0]).to(dev)
-        # TODO MAYBE: use tgt_mask to mask out unwanted values of z?
-        # pass in delta tokens + environment tokens to transformer as tgt
+
+        # pass in delta tokens to transformer as tgt
         policy = self.tf_out(self.tf_decoder.forward(tgt=e_d,
                                                      memory=tf_code,
                                                      tgt_mask=tgt_mask,
@@ -293,7 +293,7 @@ class Model(nn.Module):
         return mask
     
     def pretrain_policy(self,
-                        # TODO: add save_to str here instead of using self.save_to
+                        save_dir: str,
                         tloader: DataLoader, vloader: DataLoader,
                         epochs: int, lr=10 ** -4,
                         assess_freq=10_000, checkpoint_freq=100_000,
@@ -308,12 +308,11 @@ class Model(nn.Module):
 
         self.to(dev)
         optimizer = T.optim.Adam(self.parameters(), lr=lr)
-        writer = tb.SummaryWriter(comment=f'_{self.name}_policy_pretrain')
+        writer = tb.SummaryWriter(comment=f'_{self.name}_pretrain')
 
         self.train()
         t_start = time.time()
         step, tloss, vloss = 0, 0, 0
-        # tloss_f, tloss_z = 0, 0
         min_vloss = T.inf
         training_complete = False
         for epoch in range(epochs):
@@ -348,7 +347,7 @@ class Model(nn.Module):
                     round_tloss = 0
             
                     # check exit conditions (train for at least one epoch)
-                    if epoch > 0 and ((check_vloss_gap and vloss > min_vloss + vloss_gap) \
+                    if epoch > 0 and ((check_vloss_gap and vloss > min_vloss + vloss_gap)
                                       or tloss <= tloss_thresh or vloss <= vloss_thresh):
                         training_complete = True
                         break
@@ -361,12 +360,12 @@ class Model(nn.Module):
                             'optimizer_state_dict': optimizer.state_dict(),
                             'training loss': tloss,
                             'validation loss': vloss,
-                            }, self.model_path(step))
+                            }, self.model_path(save_dir, step))
             
             # TODO: sample from model during training and record using tensorboard
             if training_complete: break
         
-        path = self.model_path(step)
+        path = self.model_path(save_dir, step)
         print(f"Finished training at step {step} with tloss={tloss}, vloss={vloss},"
               f"Saving to {path}...")
         T.save({
@@ -467,7 +466,6 @@ class Model(nn.Module):
 
     def train_value(self, dataloader: DataLoader, epochs: int, lr=10 ** -4,
                     assess_freq=10_000, checkpoint_freq=100_000):
-        # FIXME: this function needs to be updated to handle z's
         self.train()
         optimizer = T.optim.Adam(self.parameters(), lr=lr)
         writer = tb.SummaryWriter(comment=f'_{self.name}_value')
@@ -692,7 +690,7 @@ def run(pretrain_policy: bool,
         model_n_steps: Optional[int] = None,
         check_vloss_gap: bool = True, vloss_gap: float = 1):
     
-    model = Model(name=f'{model_code}_{model_t}',
+    model = Model(name=model_code,
                   N=5, H=g.B_H, W=g.B_W,
                   Z_HI=g.Z_HI, Z_LO=g.Z_LO,
                   lexicon=g.SIMPLE_LEXICON,
@@ -703,8 +701,7 @@ def run(pretrain_policy: bool,
                   n_value_heads=5,
                   max_program_length=53,
                   max_line_length=17,
-                  batch_size=16,
-                  save_dir=model_prefix).to(dev)
+                  batch_size=16).to(dev)
     
     print("Making dataloaders...")
     tloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/{data_t}/training_deltas.dat')
@@ -716,11 +713,12 @@ def run(pretrain_policy: bool,
         model.pretrain_policy(tloader=tloader, vloader=vloader, epochs=epochs,
                               assess_freq=assess_freq, checkpoint_freq=checkpoint_freq,
                               tloss_thresh=tloss_thresh, vloss_thresh=vloss_thresh,
-                              check_vloss_gap=check_vloss_gap, vloss_gap=vloss_gap)
+                              check_vloss_gap=check_vloss_gap, vloss_gap=vloss_gap,
+                              save_dir=model_prefix)
     else:
         print("Loading trained policy...")
         assert model_n_steps is not None
-        model.load_model(f'../models/model_{model_code}_{model_t}_{model_n_steps}.pt')
+        model.load_model(f'../models/model_{model_code}_{model_n_steps}.pt')
     
     if train_value:
         print("Training value net...")
@@ -768,7 +766,7 @@ if __name__ == '__main__':
         model_t='May09_22_21-41-20',
         # model_t=util.timecode(),
         model_n_steps=740000,
-        assess_freq=10, checkpoint_freq=200,
+        assess_freq=10, checkpoint_freq=50,
         tloss_thresh=0.0001, vloss_thresh=0.0001,
         check_vloss_gap=False,
         # vloss_gap=2,
