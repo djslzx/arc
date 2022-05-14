@@ -705,8 +705,8 @@ def run(pretrain_policy: bool,
                   batch_size=16).to(dev)
     
     print("Making dataloaders...")
-    tloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/{data_t}/training_deltas.dat')
-    vloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/{data_t}/validation_deltas.dat')
+    tloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/{data_t}/training_deltas_weave.dat')
+    vloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/{data_t}/validation_deltas_weave.dat')
     
     if pretrain_policy:
         print("Pretraining policy....")
