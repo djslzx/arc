@@ -334,7 +334,7 @@ class Model(nn.Module):
                 # assess and record current performance
                 if step % assess_freq == 0:
                     tloss = round_tloss / assess_freq
-                    vloss = self.pretrain_validate(vloader, n_steps=assess_freq)
+                    vloss = self.pretrain_validate(vloader, n_examples=assess_freq)
                     self.train()
                     if vloss < min_vloss: min_vloss = vloss
                     
@@ -379,22 +379,33 @@ class Model(nn.Module):
     def to_probabilities(self, indices):
         return F.one_hot(indices, num_classes=self.n_tokens).float()
     
-    def pretrain_validate(self, dataloader, n_steps=None):
+    def pretrain_validate(self, dataloader, n_examples=None):
         """Compute validation loss of the policy network on the (validation data) dataloader."""
         self.eval()
         epoch_loss = 0
-        if n_steps is None: n_steps = len(dataloader)
+        if n_examples is None: n_examples = len(dataloader)
         i = 0
+        total_toks = 0
         for (p, p_envs, p_bmps), (f, f_envs, f_bmps), d in dataloader:
             i += 1
-            if i > n_steps: break
+            if i > n_examples: break
             d_in = d[:, :-1]
             d_out = d[:, 1:]
             policy_out, _ = self.forward(f_bmps, p_bmps, p, d_in)
             target = self.to_probabilities(d_out).transpose(0, 1)
             loss = self.word_loss(target, policy_out)
             epoch_loss += loss.detach().item()
-        return epoch_loss/n_steps
+            
+            # record lengths of programs observed in dataloader
+            f_len = T.ne(f, self.PADDING).sum()
+            total_toks += f_len
+        
+        avg_toks = total_toks / (n_examples * self.batch_size)
+        avg_lines = (avg_toks - 4)/6  # remove START, END, {, }; each rect takes 6 tokens (R, color, 2 corners)
+        print(f"    "
+              f"Validation loss computed with {avg_toks} tokens per example, "
+              f"or about {avg_lines:.2f} lines")
+        return epoch_loss / n_examples
 
     def estimate_value(self, delta, b, b_hat, f_hat, f):
         """
@@ -726,7 +737,7 @@ def run(pretrain_policy: bool,
         model.train_value(dataloader=vloader, epochs=epochs,
                           assess_freq=assess_freq, checkpoint_freq=checkpoint_freq)
     
-    loss = model.pretrain_validate(tloader, n_steps=100)
+    loss = model.pretrain_validate(tloader, n_examples=100)
     print(f"Model loaded. Training loss={loss}")
     
     if sample:
