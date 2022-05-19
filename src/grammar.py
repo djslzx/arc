@@ -7,10 +7,10 @@ import random
 import ant
 
 # bitmap size constants
-B_W = 10
-B_H = 10
+B_W = 32
+B_H = 32
 
-LIB_SIZE = 10                   # number of z's, sprites
+LIB_SIZE = 16                   # number of z's, sprites
 Z_LO = 0                        # min poss value in z_n
 Z_HI = max(B_W, B_H)            # max poss value in z_n
 Z_IGNORE = -1                   # ignore z's that have this value
