@@ -17,7 +17,7 @@ import viz
 dev_name = 'cuda:0' if T.cuda.is_available() else 'cpu'
 device = T.device(dev_name)
 
-# TODO: pay attention to batch dim/sequence length dim
+# pay attention to batch dim/sequence length dim
 class PositionalEncoding(nn.Module):
     """
     Use positional encoding from 'Attention is All You Need'
@@ -48,7 +48,8 @@ class ArcTransformer(nn.Module):
                  N, H, W,       # bitmap count, height, width
                  lexicon,       # list of program grammar components
                  d_model=512,
-                 n_conv_layers=6, 
+                 n_value_heads=4,
+                 n_conv_layers=6,
                  n_conv_channels=16,
                  batch_size=16):
 
@@ -81,26 +82,36 @@ class ArcTransformer(nn.Module):
                 nn.BatchNorm2d(n_conv_channels),
                 nn.ReLU(),
             ])
-        k = n_conv_channels * H * W
+        conv_out_dim = n_conv_channels * H * W
         self.conv = nn.Sequential(*conv_stack)
         self.linear = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(k, d_model),
+            nn.Linear(conv_out_dim, d_model),
         )
 
-        # transformer
+        # transformer (proposer)
         self.transformer = nn.Transformer(self.d_model,
                                           num_encoder_layers=6,
                                           num_decoder_layers=6)
 
         # value function
         # two sets of bmps in; convolve using conv_stack; MLP to score vector
-        self.value_fn = nn.Sequential(
-        
+        self.n_value_heads = n_value_heads
+        value_dim = conv_out_dim * 2  # account for two bmp sets
+        self.value_fn_linear = nn.Sequential(
+            nn.Linear(value_dim, value_dim),
+            nn.ReLU(),
+            nn.Linear(value_dim, value_dim),
+            nn.ReLU(),
+            nn.Linear(value_dim, value_dim),
+            nn.ReLU(),
+            nn.Linear(value_dim, value_dim),
+            nn.ReLU(),
+            nn.Linear(value_dim, self.n_value_heads),
         )
 
         # output linear+softmax
-        self.out = nn.Linear(self.d_model, self.n_tokens)
+        self.tf_out = nn.Linear(self.d_model, self.n_tokens)
 
     def padding_mask(self, mat):
         return mat == self.pad_token
@@ -129,21 +140,25 @@ class ArcTransformer(nn.Module):
         src = self.conv(src)
         src = self.linear(src)
         src = src.reshape(batch_size, self.N, self.d_model)
-        src = src.transpose(0,1)
+        src = src.transpose(0, 1)
 
         # compute program embeddings w/ positional encoding
         tgt = P.to(device)
         tgt = T.stack([self.p_embedding(p) for p in tgt])
         tgt = tgt.transpose(0, 1)
         tgt = self.pos_encoder(tgt)
+        
         # compute masks
         tgt_mask = self.transformer.generate_square_subsequent_mask(tgt.shape[0]).to(device)
         tgt_padding_mask = self.padding_mask(P).to(device)
 
-        out = self.transformer(src=src, tgt=tgt, tgt_mask=tgt_mask,
-                               tgt_key_padding_mask=tgt_padding_mask)
-        out = self.out(out)
-        return out
+        tf_out = self.transformer(src=src, tgt=tgt, tgt_mask=tgt_mask, tgt_key_padding_mask=tgt_padding_mask)
+        tf_out = self.tf_out(tf_out)
+        
+        # run value function
+        
+        
+        return tf_out
 
     def make_dataloader(self, get_data, blind=False):
         B, P = [], []
@@ -170,10 +185,10 @@ class ArcTransformer(nn.Module):
     @staticmethod
     def token_loss(expected, actual):
         """
-        log_softmax: get probabilities
-        sum at dim=-1: pull out nonzero components
-        mean: avg diff
-        negation: max the mean (a score) by minning -mean (a loss)
+        log_softmax   : get probabilities
+        sum at dim=-1 : pull out nonzero components
+        mean          : avg diff
+        negation      : max mean (score) by minimizing -mean (loss)
         """
         return -T.mean(T.sum(F.log_softmax(actual, dim=-1) * expected, dim=-1))
 
@@ -194,8 +209,8 @@ class ArcTransformer(nn.Module):
         self.train()
         epoch_loss = 0
         for B, P in dataloader:
-            B.to(device)
-            P.to(device)
+            B = B.to(device)
+            P = P.to(device)
             P_input    = P[:, :-1].to(device)
             P_expected = F.one_hot(P[:, 1:], num_classes=self.n_tokens).float().transpose(0, 1).to(device)
             out = self(B, P_input)
@@ -379,26 +394,13 @@ class ArcTransformer(nn.Module):
 
         self.eval()
         batch_size = B.shape[0]
-
-        def filter_top_p(v):
-            assert v.shape[0] == batch_size
-            values, indices = T.sort(v, descending=True)
-            sums = T.cumsum(values, dim=-1)
-            mask = sums >= p
-            # right-shift indices to keep first sum >= p
-            mask[..., 1:] = mask[..., :-1].clone() 
-            mask[..., 0] = False
-            # filter out elements in v
-            for b in range(batch_size):
-                v[b, indices[b, mask[b]]] = 0
-            return v
-
         prompt = T.tensor([[self.start_token]] * batch_size).long().to(device) # [b, 1]
         for i in range(max_length):
             # TODO: don't run CNN repeatedly
             outs = self(B, prompt)   # [i, b, L] where L is size of alphabet
             outs = T.softmax(outs, 2) # softmax across L dim
-            indices = [T.multinomial(filter_top_p(out.clone()), 1) for out in outs] # sample from distribution of predictions
+            indices = [T.multinomial(util.filter_top_p(out.clone(), p), 1)
+                       for out in outs] # sample from distribution of predictions
             next_index = indices[-1]
             prompt = T.cat((prompt, next_index), dim=1)
         return prompt
@@ -408,12 +410,6 @@ def recover_model(checkpoint_loc, name, N, H, W, d_model, batch_size, lexicon=LE
     checkpoint = T.load(checkpoint_loc, map_location=device)
     model.load_state_dict(checkpoint['model_state_dict'])
     return model
-
-def get_lines(seq):
-    try:
-        return seq.bmps
-    except AttributeError:
-        return []
 
 def eval_expr(expr, env):
     try:
@@ -446,8 +442,8 @@ def track_stats(model, dataloader, envs, max_length=50, visualize=False):
         sample = model.sample_programs(B, P, max_length)
         e_exprs, o_exprs = sample['expected exprs'], sample['out exprs']
         for j, (e_expr, o_expr) in enumerate(zip(e_exprs, o_exprs)):
-            e_lines = get_lines(e_expr)
-            o_lines = get_lines(o_expr)
+            e_lines = e_expr.lines()
+            o_lines = o_expr.lines()
             e_len = len(e_lines)
             o_len = len(o_lines)
             max_len = max(o_len, e_len)
@@ -544,8 +540,8 @@ def train_models(training_data_loc, test_data_loc, batch_size=32, vloss_margin=1
         ).to(device)
         
         # train models
-        tloader = model.make_dataloader(lambda: util.load_multi_incremental(training_data_loc), blind=False)
-        vloader = model.make_dataloader(lambda: util.load_multi_incremental(test_data_loc), blind=False)
+        tloader = model.make_dataloader(lambda: util.load_incremental(training_data_loc), blind=False)
+        vloader = model.make_dataloader(lambda: util.load_incremental(test_data_loc), blind=False)
         model.learn(
             tloader=tloader,
             vloader=vloader,
@@ -561,7 +557,7 @@ def test_model(name, d_model, N, batch_size, data_loc, envs_loc, checkpoint_loc,
     model = recover_model(checkpoint_loc=checkpoint_loc, name=name,
                           N=N, H=B_H, W=B_W, d_model=d_model, batch_size=batch_size)
     envs = util.load(envs_loc)['envs']
-    dataloader = model.make_dataloader(lambda: util.load_multi_incremental(data_loc))
+    dataloader = model.make_dataloader(lambda: util.load_incremental(data_loc))
     track_stats(model, dataloader, envs, visualize=visualize)
 
 

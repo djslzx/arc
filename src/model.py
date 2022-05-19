@@ -553,7 +553,7 @@ class Model(nn.Module):
                     break
         # add blank bitmaps until we reach the quota
         if len(bitmaps) < n_envs:
-            bitmaps += [T.zeros(1, self.H, self.W)] * (n_envs - len(bitmaps))
+            bitmaps += [T.zeros(self.H, self.W)] * (n_envs - len(bitmaps))
 
         assert(len(bitmaps) == n_envs)
         return T.stack(bitmaps).to(dev)
@@ -569,13 +569,16 @@ class Model(nn.Module):
             rollouts = T.cat((rollouts, next_indices), dim=1)
         return rollouts
 
-    def append_delta(self, indices: T.Tensor, delta_indices: T.Tensor) -> Rollout:
+    def append_delta(self, indices: T.Tensor, delta_indices: T.Tensor, line_cap=4) -> Rollout:
         """
         Append a 'delta' (a new line) to a program.
         """
         p = self.to_program(indices)
+        # cap length of p by number of lines
         if p is None:
             return Rollout(indices=indices, completed=False, well_formed=False)
+        if len(p.lines()) >= line_cap:
+            return Rollout(indices=indices, completed=True, well_formed=True)
         delta = self.to_program(delta_indices)
         if delta is None:
             return Rollout(indices=indices, completed=True, well_formed=False)
@@ -677,12 +680,18 @@ def sample_model(model: Model, dataloader: DataLoader):
         print(f'envs={envs}')
         # batched_envs = [[{'z': t} for t in batch.split(g.LIB_SIZE)]
         #                 for batch in f_envs]
+        current_bmps = None
         for i in range(batch_size):
             output = model.to_program(rollouts[i])
             expected = model.to_program(f[i])
             print(f'expected={expected}, actual={output}')
             
             in_bmps = f_bmps.cpu()[i]
+            if current_bmps is not None and T.equal(in_bmps, current_bmps):
+                continue
+            else:
+                current_bmps = in_bmps
+            
             out_bmps = model.render(rollouts[i], envs=envs, check_env_size=False).cpu()
             bmps = T.cat((in_bmps, out_bmps)).reshape(-1, model.N, model.H, model.W)
             text = f'expected={expected}\n'\
@@ -695,7 +704,7 @@ def run(pretrain_policy: bool,
         sample: bool,
         data_prefix: str, model_prefix: str,
         data_code: str, model_code: str,
-        data_t: str, model_t: str,
+        data_t: str,
         assess_freq: int, checkpoint_freq: int,
         tloss_thresh: float, vloss_thresh: float,
         model_n_steps: Optional[int] = None,
@@ -750,7 +759,7 @@ def run(pretrain_policy: bool,
 if __name__ == '__main__':
     # run on g2
     run(
-        pretrain_policy=True,
+        pretrain_policy=False,
         train_value=False,
         sample=False,
         data_prefix='/home/djl328/arc/data/policy-pretraining',
@@ -771,17 +780,16 @@ if __name__ == '__main__':
     # run(
     #     pretrain_policy=True,
     #     train_value=False,
-    #     sample=False,
+    #     sample=True,
     #     data_prefix='../data/policy-pretraining',
     #     model_prefix='../models',
     #     data_code='10-R-5e1~3l0~1z',
     #     data_t='May11_22_12-09-30',
     #     model_code='100k-R-5e1~3l0~1z',
-    #     model_t='May09_22_21-41-20',
     #     # model_t=util.timecode(),
-    #     model_n_steps=740000,
-    #     assess_freq=10, checkpoint_freq=200,
+    #     model_n_steps=2700000,
+    #     assess_freq=10, checkpoint_freq=50,
     #     tloss_thresh=0.0001, vloss_thresh=0.0001,
     #     check_vloss_gap=False,
     #     # vloss_gap=2,
-    # )
+    # # )
