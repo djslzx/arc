@@ -8,8 +8,16 @@ from math import floor, ceil
 from pathlib import Path
 import random
 from datetime import datetime
+from typing import List
 
 dirname = os.path.dirname(__file__)
+
+def uniq(l: List) -> List:
+    joined = []
+    for x in l:
+        if x not in joined:
+            joined.append(x)
+    return joined
 
 def add_channels(img, n_classes=10):
     """
