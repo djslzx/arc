@@ -44,10 +44,10 @@ class Expr(Visited):
     def __lt__(self, other): return str(self) < str(other)
     def eval(self, env={}):
         return self.accept(Eval(env))
-    def zs(self):
-        def f_map(type, *args):
-            if type == Z:
-                assert len(args) == 1, "Visited Z but got an unexpected number of args"
+    def extract_indices(self, type):
+        def f_map(t, *args):
+            if t == type:
+                assert len(args) == 1, f"Visited {type} but got an unexpected number of args"
                 i = args[0]
                 return [i]
             else:
@@ -55,17 +55,10 @@ class Expr(Visited):
         def f_reduce(type, *children):
             return util.uniq([x for child in children for x in child])
         return self.accept(MapReduce(f_reduce, f_map))
+    def zs(self):
+        return self.extract_indices(Z)
     def sprites(self):
-        def f_map(type, *args):
-            if type == Sprite:
-                assert len(args) == 1, "Visited Sprite but got an unexpected number of args"
-                i = args[0]
-                return [i]
-            else:
-                return []
-        def f_reduce(type, *children):
-                return util.uniq([x for child in children for x in child])
-        return self.accept(MapReduce(f_reduce, f_map))
+        return self.extract_indices(Sprite)
     def count_leaves(self):
         def f_map(type, *args): return 1
         def f_reduce(type, *children): return sum(children)
