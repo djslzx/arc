@@ -42,8 +42,8 @@ class Expr(Visited):
     def __ne__(self, other): return str(self) != str(other)
     def __gt__(self, other): return str(self) > str(other)
     def __lt__(self, other): return str(self) < str(other)
-    def eval(self, env={}):
-        return self.accept(Eval(env))
+    def eval(self, env={}, height=B_H, width=B_W):
+        return self.accept(Eval(env, height, width))
     def extract_indices(self, type):
         def f_map(t, *args):
             if t == type:
@@ -1415,6 +1415,30 @@ def test_leaves():
         assert leaves == ans, f"leaves failed: in={expr}, expected={ans}, actual={leaves}"
     print(" [+] passed test_leaves")
 
+def test_eval_variable_sizes():
+    cases = [
+        (Rect(Num(0), Num(0), Num(1), Num(1)), 6, 6,
+         util.img_to_tensor(["##____",
+                             "##____",
+                             "______",
+                             "______",
+                             "______",
+                             "______",], h=6, w=6)),
+        (Rect(Num(0), Num(0), Num(2), Num(2)), 3, 3,
+         util.img_to_tensor(["###",
+                             "###",
+                             "###",], h=3, w=3)),
+        # should fail with assertion error:
+        # (Rect(Num(0), Num(0), Num(2), Num(2)), 1, 1,
+        #  util.img_to_tensor(["###",
+        #                      "###",
+        #                      "###", ], h=3, w=3))
+    ]
+    for expr, h, w, ans in cases:
+        render = expr.eval(height=h, width=w)
+        assert T.equal(render, ans), f"Expected={ans}, but got {render}"
+    print(" [+] passed test_eval_variable_sizes")
+
 def demo_perturb_leaves():
     cases = [
         Num(0),
@@ -1442,4 +1466,5 @@ if __name__ == '__main__':
     test_well_formed()
     test_deserialize_breaking()
     test_leaves()
+    test_eval_variable_sizes()
     # demo_perturb_leaves()
