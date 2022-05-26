@@ -109,8 +109,19 @@ class Expr(Visited):
         except (AssertionError, AttributeError):
             return False
     def range(self, envs): return self.accept(Range(envs))
-    def __len__(self): return self.accept(Size())
-    def __str__(self): return self.accept(Print())
+    def size(self):
+        """Counts both leaves and non-leaf nodes"""
+        def f_map(type, *args): return 1 if type != Sprite else 0
+        def f_reduce(type, *children): return 1 + sum(children)
+        self.accept(MapReduce(f_reduce, f_map))
+    def literal_str(self):
+        def to_str(type: Type[Expr], *args):
+            arg_str = " ".join([str(arg) for arg in args])
+            return f'({type.__name__} {arg_str})'
+        return self.accept(MapReduce(to_str, to_str))
+    def __len__(self): return self.size()
+    def __str__(self):
+        return self.accept(Print())
 
 class Grammar:
     def __init__(self, ops, consts):
@@ -146,6 +157,18 @@ class Num(Expr):
     out_type = 'int'
     def __init__(self, n): self.n = n
     def accept(self, v): return v.visit_Num(self.n)
+
+class XMax(Expr):
+    in_types = []
+    out_type = 'int'
+    def __init__(self): pass
+    def accept(self, v): return v.visit_XMax()
+    
+class YMax(Expr):
+    in_types = []
+    out_type = 'int'
+    def __init__(self): pass
+    def accept(self, v): return v.visit_YMax()
 
 class Z(Expr):
     in_types = []
@@ -329,6 +352,8 @@ class Visitor:
     def fail(self, s): raise UnimplementedError(f"`visit_{s}` unimplemented for `{type(self).__name__}`")
     def visit_Nil(self): self.fail('Nil')
     def visit_Num(self, n): self.fail('Num')
+    def visit_XMax(self): self.fail('XMax')
+    def visit_YMax(self): self.fail('YMax')
     def visit_Z(self, i): self.fail('Z')
     def visit_Not(self, b): self.fail('Not')
     def visit_Plus(self, x, y): self.fail('Plus')
@@ -383,6 +408,12 @@ class Eval(Visitor):
 
     def visit_Num(self, n):
         return n
+
+    def visit_XMax(self):
+        return self.width - 1
+    
+    def visit_YMax(self):
+        return self.height - 1
 
     def visit_Z(self, i):
         assert 'z' in self.env, "Eval env missing Z"
@@ -530,42 +561,12 @@ class Eval(Visitor):
         f, bmp = f.accept(self), bmp.accept(self)
         return self.overlay(f(bmp), bmp)
 
-class Size(Visitor):
-    def __init__(self): pass
-    def visit_Nil(self): return 1
-    def visit_Num(self, n): return 1
-    def visit_Z(self, i): return 1
-    def visit_Not(self, b): return b.accept(self) + 1
-    def visit_Plus(self, x, y): return x.accept(self) + y.accept(self) + 1
-    def visit_Minus(self, x, y): return x.accept(self) + y.accept(self) + 1
-    def visit_Times(self, x, y): return x.accept(self) + y.accept(self) + 1
-    def visit_Lt(self, x, y): return x.accept(self) + y.accept(self) + 1
-    def visit_And(self, x, y): return x.accept(self) + y.accept(self) + 1
-    def visit_If(self, b, x, y): return b.accept(self) + x.accept(self) + y.accept(self) + 1
-    def visit_Point(self, x, y, color): return x.accept(self) + y.accept(self) + color.accept(self) + 1
-    def visit_Line(self, x1, y1, x2, y2, color):
-        return x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self) + color.accept(self) + 1
-    def visit_Rect(self, x_min, y_min, x_max, y_max, color):
-        return x_min.accept(self) + y_min.accept(self) + \
-               x_max.accept(self) + y_max.accept(self) + \
-               color.accept(self) + 1
-    def visit_Sprite(self, i, x, y):
-        return x.accept(self) + y.accept(self) + 1
-    def visit_Seq(self, bmps): return sum(bmp.accept(self) for bmp in bmps) + 1
-    def visit_Join(self, bmp1, bmp2): return bmp1.accept(self) + bmp2.accept(self) + 1
-    # def visit_Intersect(self, bmp): return bmp.accept(self) + 1
-    def visit_HFlip(self): return 1
-    def visit_VFlip(self): return 1
-    def visit_Translate(self, dx, dy): return dx.accept(self) + dy.accept(self) + 1
-    def visit_Recolor(self, c): return c.accept(self) + 1
-    def visit_Compose(self, f, g): return f.accept(self) + g.accept(self) + 1
-    def visit_Apply(self, f, bmp): return f.accept(self) + bmp.accept(self) + 1
-    def visit_Repeat(self, f, n): return f.accept(self) + n.accept(self) + 1
-
 class Print(Visitor):
     def __init__(self): pass
     def visit_Nil(self): return 'False'
     def visit_Num(self, n): return f'{n}'
+    def visit_XMax(self): return 'x_max'
+    def visit_YMax(self): return 'y_max'
     def visit_Z(self, i): return f'z_{i}'
     def visit_Not(self, b): return f'(not {b.accept(self)})'
     def visit_Plus(self, x, y): return f'(+ {x.accept(self)} {y.accept(self)})'
@@ -613,6 +614,10 @@ def deserialize(tokens):
                 return [Z(int(h[2:]))] + t
             if h.startswith('S'):
                 return [Sprite(int(h[2:]), t[0], t[1])] + t[2:]
+            if h == 'x_max':
+                return [XMax()] + t
+            if h == 'y_max':
+                return [YMax()] + t
         if h == '~':
             return [Not(t[0])] + t[1:]
         if h == '+':
@@ -670,6 +675,8 @@ class Serialize(Visitor):
         self.label_zs = label_zs
     def visit_Nil(self): return [False]
     def visit_Num(self, n): return [n]
+    def visit_XMax(self): return ['x_max']
+    def visit_YMax(self): return ['y_max']
     def visit_Z(self, i): return [f'z_{i}'] if self.label_zs else ['z']
     def visit_Not(self, b): return ['~'] + b.accept(self)
     def visit_Plus(self, x, y): return ['+'] + x.accept(self) + y.accept(self)
@@ -720,6 +727,8 @@ class SimplifyIndices(Visitor):
     # Recursive cases
     def visit_Nil(self): return Nil()
     def visit_Num(self, n): return Num(n)
+    def visit_XMax(self): return XMax()
+    def visit_YMax(self): return YMax()
     def visit_Not(self, b): return Not(b.accept(self))
     def visit_Plus(self, x, y): return Plus(x.accept(self), y.accept(self))
     def visit_Minus(self, x, y): return Minus(x.accept(self), y.accept(self))
@@ -750,6 +759,8 @@ class WellFormed(Visitor):
     def __init__(self): pass
     def visit_Nil(self): return True
     def visit_Num(self, n): return isinstance(n, int)
+    def visit_XMax(self): return True
+    def visit_YMax(self): return True
     def visit_Z(self, i): return isinstance(i, int)
     def visit_Not(self, b): 
         return b.out_type == 'bool' and b.accept(self)
@@ -816,6 +827,8 @@ class MapReduce(Visitor):
     # Map (apply f)
     def visit_Nil(self): return self.f(Nil)
     def visit_Num(self, n): return self.f(Num, n)
+    def visit_XMax(self): return self.f(XMax)
+    def visit_YMax(self): return self.f(YMax)
     def visit_Z(self, i): return self.f(Z, i)
     def visit_HFlip(self): return self.f(HFlip)
     def visit_VFlip(self): return self.f(VFlip)
@@ -850,9 +863,16 @@ class MapReduce(Visitor):
     def visit_Repeat(self, f, n): return self.reduce(Repeat, f.accept(self), n.accept(self))
 
 class Range(Visitor):
-    def __init__(self, envs): self.envs = envs
+    def __init__(self, envs, height=B_H, width=B_W):
+        self.envs = envs
+        self.height = height
+        self.width = width
     def visit_Num(self, n):
         return n, n
+    def visit_XMax(self):
+        return self.width - 1, self.width - 1
+    def visit_YMax(self):
+        return self.height - 1, self.height - 1
     def visit_Z(self, i):
         return (min(env['z'][i] for env in self.envs),
                 max(env['z'][i] for env in self.envs))
@@ -897,6 +917,10 @@ def test_eval():
                                        "##__",
                                        "##__",
                                        "____"], w=B_W, h=B_H)),
+        (XMax(),
+         lambda z: B_W - 1),
+        (YMax(),
+         lambda z: B_H - 1),
     ]
     for expr, correct_semantics in tests:
         for x in range(10):
@@ -1298,6 +1322,7 @@ def test_simplify_indices():
 def test_serialize():
     test_cases = [
         (Nil(), [False]),
+        (XMax(), ['x_max']),
         (Plus(Z(0), Z(1)), ['+', 'z_0', 'z_1']),
         (Plus(Times(Num(1), Num(0)), Minus(Num(3), Num(2))), ['+', '*', 1, 0, '-', 3, 2]),
         (And(Not(Nil()), Nil()), ['&', '~', False, False]),
@@ -1366,6 +1391,7 @@ def test_deserialize_breaking():
     
 def test_well_formed():
     test_cases = [
+        (XMax(), True),
         (Point(Num(0), Num(1)), True),
         (Point(0, 1), False),
         (Line(Num(1), Num(1), Num(3), Num(3), Num(1)), True),
@@ -1390,6 +1416,7 @@ def test_range():
         (Plus(Z(0), Z(1)), -7, 13),
         (Minus(Z(0), Z(1)), -8, 12),
         (Times(Z(0), Z(1)), -32, 40),
+        (Times(XMax(), Z(1)), (B_W - 1) * -4, (B_W - 1) * 5),
     ]
     for expr, lo, hi in test_cases:
         out = expr.range(envs)
@@ -1439,6 +1466,35 @@ def test_eval_variable_sizes():
         assert T.equal(render, ans), f"Expected={ans}, but got {render}"
     print(" [+] passed test_eval_variable_sizes")
 
+def test_eval_using_xy_max():
+    cases = [
+        (Rect(Num(0), Num(0), XMax(), YMax()), 6, 6,
+         util.img_to_tensor(["######",
+                             "######",
+                             "######",
+                             "######",
+                             "######",
+                             "######",], h=6, w=6)),
+        (Rect(Num(0), Num(0), XMax(), YMax()), 3, 3,
+         util.img_to_tensor(["###",
+                             "###",
+                             "###",], h=3, w=3)),
+        (Rect(Num(1), Num(1), XMax(), YMax()), 3, 3,
+         util.img_to_tensor(["___",
+                             "_##",
+                             "_##",], h=3, w=3)),
+        (Rect(Num(1), Num(1), XMax(), YMax()), 5, 5,
+         util.img_to_tensor(["_____",
+                             "_####",
+                             "_####",
+                             "_####",
+                             "_####",], h=5, w=5)),
+    ]
+    for expr, h, w, ans in cases:
+        render = expr.eval(height=h, width=w)
+        assert T.equal(render, ans), f"Expected={ans}, but got {render}"
+    print(" [+] passed test_eval_using_xy_max")
+
 def demo_perturb_leaves():
     cases = [
         Num(0),
@@ -1454,17 +1510,18 @@ def demo_perturb_leaves():
         # assert out != expr, f"perturb_leaves failed: in={expr}, out={out}"
 
 if __name__ == '__main__':
-    # test_eval()
-    # test_eval_bitmap()
-    # test_eval_color()
+    test_eval()
+    test_eval_bitmap()
+    test_eval_color()
     test_sprite()
     test_sprites()
     test_simplify_indices()
-    # test_range()
+    test_range()
     test_zs()
     test_serialize()
     test_well_formed()
     test_deserialize_breaking()
     test_leaves()
     test_eval_variable_sizes()
+    test_eval_using_xy_max()
     # demo_perturb_leaves()
