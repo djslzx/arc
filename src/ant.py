@@ -1,6 +1,7 @@
 import torch as T
 import random as R 
 import itertools as it
+from typing import Callable, List, Dict, Tuple
 
 import util
 import viz
@@ -29,25 +30,40 @@ def shift(pts, x0, y0):
         ys = [y + (y0 - min_y) for y in ys]
     return list(zip(xs, ys))
 
-def ant(w, h):
+def orthogonal_ant(w, h):
+    def step(prev_dx, prev_dy):
+        dx, dy = 0, 0
+        if R.randint(0, 1):
+            dx = R.choice([-1, 1])
+        else:
+            dy = R.choice([-1, 1])
+        return dx, dy
+    return random_walk(w, h, step)
+
+def diagonal_ant(w, h):
+    def step(prev_dx, prev_dy):
+        return R.choice([
+            (dx, dy) for (dx, dy) in it.product([-1, 0, 1], [-1, 0, 1])
+            if not (dx == 0 and dy == 0) and not (prev_dx == -dx and prev_dy == -dy)
+        ])
+    return random_walk(w, h, step)
+
+def random_walk(w, h, step: Callable[[int, int], Tuple[int, int]]):
     x, y = 0, 0
     pts = []
     prev_dx, prev_dy = 0, 0
     while in_bounds(pts + [(x, y)], w, h):
         pts.append((x, y))
-        dx, dy = R.choice([
-            (dx, dy) for (dx, dy) in it.product([-1, 0, 1], [-1, 0, 1])
-            if not (dx == 0 and dy == 0) and not (prev_dx == -dx and prev_dy == -dy)
-        ])
+        dx, dy = step(prev_dx, prev_dy)
+        prev_dx, prev_dy = dx, dy
         x += dx
         y += dy
-        prev_dx, prev_dy = dx, dy
     return shift(pts, 0, 0)
 
 def make_sprite(w, h, W, H):
     # ensure that generated pts do not define a point, line, or rect
     assert w > 1 and h > 1, f"Sprites of width/height 1 are either points or lines"
-    while classify(pts := ant(w, h)) != 'Sprite': pass
+    while classify(pts := orthogonal_ant(w, h)) != 'Sprite': pass
     return util.make_bitmap(lambda p: p in pts, W, H)
 
 def connected(pts):
@@ -165,7 +181,7 @@ if __name__ == '__main__':
     w, h = 4, 4
     test_connected()
     test_classify(W, H)
-    for n in range(2, 10):
-        for i in range(10):
-            s = make_sprite(n, n, 32, 32)
-            viz.viz(s)
+    for n in range(2, 32):
+        sprites = T.stack([T.stack([make_sprite(n, n, 32, 32) for i in range(3)])
+                           for j in range(3)])
+        viz.viz_grid(sprites)
