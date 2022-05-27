@@ -1,5 +1,7 @@
 import torch as T
 import random as R 
+import itertools as it
+
 import util
 import viz
 
@@ -14,9 +16,9 @@ def in_bounds(pts, w, h):
     return width <= w and height <= h
 
 def shift(pts, x0, y0):
-    '''
+    """
     Shift pts so that min_x {pts} = x0, min_y {pts} = y0
-    '''
+    """
     if not pts: return pts
     xs, ys = util.unzip(pts)
     min_x = min(xs)
@@ -30,10 +32,16 @@ def shift(pts, x0, y0):
 def ant(w, h):
     x, y = 0, 0
     pts = []
-    while in_bounds(pts + [(x,y)], w, h):
+    prev_dx, prev_dy = 0, 0
+    while in_bounds(pts + [(x, y)], w, h):
         pts.append((x, y))
-        if R.randint(0,1): x += R.choice([-1, 1])
-        else:              y += R.choice([-1, 1])
+        dx, dy = R.choice([
+            (dx, dy) for (dx, dy) in it.product([-1, 0, 1], [-1, 0, 1])
+            if not (dx == 0 and dy == 0) and not (prev_dx == -dx and prev_dy == -dy)
+        ])
+        x += dx
+        y += dy
+        prev_dx, prev_dy = dx, dy
     return shift(pts, 0, 0)
 
 def make_sprite(w, h, W, H):
@@ -43,9 +51,9 @@ def make_sprite(w, h, W, H):
     return util.make_bitmap(lambda p: p in pts, W, H)
 
 def connected(pts):
-    '''
+    """
     Checks whether a sequence of points represents a connected subgrid (diagonal connections OK)
-    '''
+    """
     for i in [0, 1]:
         s = sorted(pts, key=lambda p: p[i])
         for j in range(1, len(s)):
@@ -151,8 +159,13 @@ def test_classify(W, H):
             f"Classified {t} as {o}, expected {ans}"
     print("[+] passed test_classify")
 
+
 if __name__ == '__main__':
     W, H = 8, 8
     w, h = 4, 4
     test_connected()
     test_classify(W, H)
+    for n in range(2, 10):
+        for i in range(10):
+            s = make_sprite(n, n, 32, 32)
+            viz.viz(s)

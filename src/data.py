@@ -6,6 +6,8 @@ import pickle
 from typing import Optional, List, Tuple, Iterable, Generator, Dict
 import multiprocessing as mp
 import torch.utils.tensorboard as tb
+import matplotlib.pyplot as plt
+import sys
 
 from grammar import *
 import util
@@ -238,7 +240,7 @@ def gen_closures_and_deltas_mp(closures_loc_prefix: str, deltas_loc_prefix: str,
     assert n_lines_lo >= 0, f'Expected n_lines_bounds > 1, found {n_lines_bounds}'
     
     # run n_workers workers to generate a total of n_programs programs of each size in n_lines
-    arg_exprs = [Z(i) for i in range(LIB_SIZE)] + [Num(i) for i in range(Z_LO, Z_HI+1)]
+    arg_exprs = [Z(i) for i in range(LIB_SIZE)] + [Num(i) for i in range(Z_LO, Z_HI+1)] + [XMax(), YMax()]
     n_programs_per_worker = n_programs // n_workers
     with mp.Pool(processes=n_workers) as pool:
         pool.starmap(gen_closures_and_deltas,
@@ -253,7 +255,7 @@ def gen_closures_and_deltas_mp(closures_loc_prefix: str, deltas_loc_prefix: str,
                       for i in range(n_workers)])
     # separate closure and delta gen? might allow better allocation of workers
 
-def viz_data(dataset: Iterable):
+def tb_viz_data(dataset: Iterable):
     """Use Tensorbaord to visualize the data in a dataset"""
     writer = tb.SummaryWriter(comment='_dataviz')
     for i, ((p, z_p, b_p), (f, z_f, b_f), d) in enumerate(dataset):
@@ -262,6 +264,14 @@ def viz_data(dataset: Iterable):
                                  f'f={f}', i)
         writer.add_images('b_f', b_f.unsqueeze(1), i)
         writer.add_images('b_p', b_p.unsqueeze(1), i)
+
+def viz_data(dataset: Iterable):
+    for i, ((p, z_p, b_p), (f, z_f, b_f), d) in enumerate(dataset):
+        print('p:', p)
+        print('d:', d)
+        print('f:', f)
+        viz.viz_mult(b_f, f)
+        print()
 
 # Examine datasets
 def collect_stats(dataset: Iterable, max_line_count=3):

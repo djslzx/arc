@@ -20,13 +20,14 @@ IMG_IGNORE = -1                 # ignore pixels that have this value
 FULL_LEXICON = ([i for i in range(Z_LO, Z_HI+1)] +
                 [f'z_{i}' for i in range(LIB_SIZE)] +
                 [f'S_{i}' for i in range(LIB_SIZE)] +
-                ['~', '+', '-', '*', '<', '&', '?',
+                ['x_max', 'y_max',
+                 '~', '+', '-', '*', '<', '&', '?',
                  'P', 'L', 'R',
                  'H', 'V', 'T', '#', 'o', '@', '!', '{', '}', '(', ')'])
 SIMPLE_LEXICON = (
     [i for i in range(Z_LO, Z_HI+1)] +
     [f'z_{i}' for i in range(LIB_SIZE)] +
-    ['P', 'L', 'R', '{', '}', '(', ')']
+    ['x_max', 'y_max', 'P', 'L', 'R', '{', '}', '(', ')']
 )
 SEQ_END = "SEQ_END"
 
