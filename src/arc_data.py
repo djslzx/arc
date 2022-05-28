@@ -18,7 +18,7 @@ def read_arc_files(filename_glob: str) -> List[Dict]:
     filenames = glob(filename_glob)
     return [read_arc_file(filename) for filename in filenames]
 
-def dim(arc_task: Dict) -> List[Dict[str, int]]:
+def dim(arc_task: Dict, pair_keys: List[str]) -> List[Dict[str, int]]:
     """
     Measure the dimensions (height, width) of the bitmap instances in the task.
     """
@@ -28,11 +28,11 @@ def dim(arc_task: Dict) -> List[Dict[str, int]]:
             'width': len(mat[0])
         }
         for pair in arc_task['train'] + arc_task['test']
-        for mat in [pair['input'], pair['output']]
+        for mat in [pair[k] for k in pair_keys]
     ]
 
-def dims(arc_tasks: List[Dict]) -> List[Dict[str, int]]:
-    return list(it.chain.from_iterable(dim(task) for task in arc_tasks))
+def dims(arc_tasks: List[Dict], pair_keys: List[str]) -> List[Dict[str, int]]:
+    return list(it.chain.from_iterable(dim(task, pair_keys) for task in arc_tasks))
 
 def plot_dims(dims: List[Dict[str, int]]):
     heights = [x['height'] for x in dims]
@@ -42,9 +42,9 @@ def plot_dims(dims: List[Dict[str, int]]):
     for h, w in zip(heights, widths):
         mat[h, w] += 1
 
-    vmax = mat.max()
     plt.imshow(mat, cmap='gray')
     plt.scatter(widths, heights, s=2, alpha=0.5, color='white')
+    plt.title('all')
     plt.show()
 
 def n_tasks_within_dim(height: int, width: int, dims: List[Dict]) -> int:
@@ -59,7 +59,7 @@ def n_tasks_within_dim(height: int, width: int, dims: List[Dict]) -> int:
 if __name__ == '__main__':
     ARC_GLOB = '../chollet/data/*/*.json'
     tasks = read_arc_files(ARC_GLOB)
-    dimensions = dims(tasks)
+    dimensions = dims(tasks, ['input', 'output'])
     print(plot_dims(dimensions))
     n_dims = len(dimensions)
     for n in range(18, 32):

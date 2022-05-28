@@ -3,16 +3,17 @@ Generate data to train value & policy nets
 """
 import pdb
 import pickle
+import random
 from typing import Optional, List, Tuple, Iterable, Generator, Dict
 import multiprocessing as mp
 import torch.utils.tensorboard as tb
+import matplotlib.pyplot as plt
 import sys
 
 from grammar import *
 import util
 import viz
 
-Envs = List[Dict]
 
 def render(p, envs):
     return T.stack([p.eval(env) for env in envs])
@@ -21,7 +22,10 @@ def filter_zs(env, zs):
     return {'z': T.tensor([z if i in zs else Z_IGNORE
                            for i, z in enumerate(env['z'])])}
 
-def simplify_envs(f, envs):
+def mask_envs(f, envs):
+    """
+    Mask out z's that aren't used by setting them to Z_IGNORE
+    """
     used_z_indices = f.zs()
     n_used = len(used_z_indices)
     # reorder the envs to place used_zs at the front (where they've been remapped) and blank out all other z's
@@ -29,9 +33,23 @@ def simplify_envs(f, envs):
             for env in envs]
     return envs
 
-def to_delta_examples(f: Expr, envs_choices: List[Envs]):
+def reorder_envs(f: Expr, envs: List[Dict]):
+    z_indices = f.zs()
+    sprite_indices = f.sprites()
+
+    # reorder envs to place used indices at the front (to where they will be remapped)
+    return [
+        {'z': [util.unwrap_tensor(env['z'][i]) for i in z_indices] +
+              [util.unwrap_tensor(env['z'][i]) for i in range(LIB_SIZE) if i not in z_indices],
+         'sprites': [env['sprites'][i] for i in sprite_indices] +
+                    [env['sprites'][i] for i in range(LIB_SIZE) if i not in sprite_indices],
+        }
+        for env in envs
+    ]
+
+def to_delta_examples(f: Expr, envs_choices: List[List[Dict]]):
     # simplifying envs wrt f is fine b/c p is a prefix of f
-    envs_choices = [simplify_envs(f, envs) for envs in envs_choices]
+    envs_choices = [reorder_envs(f, envs) for envs in envs_choices]
     f = f.simplify_indices()
     f_toks = f.serialize()
     f_lines = f.lines()
@@ -75,21 +93,39 @@ def compute_value(expr, bitmaps):
     """
     pass
 
-def create_program(envs: List[dict], arg_exprs: List[Expr], n_lines: int, rand_arg_bounds: Tuple[int, int],
+def is_valid(expr: Expr, envs: List[Dict]):
+    for env in envs:
+        try:
+            expr.eval(env)
+        except AssertionError:
+            return False
+    return True
+
+def choose_random_sprite(envs: List[Dict], render_height: int, render_width: int):
+    # Choose one of the sprites at random and position it in a random location
+    sprite_index = random.randint(0, LIB_SIZE - 1)
+    
+    # Progressively bound the random location closer to the origin (0, 0) to
+    # ensure that we eventually find a good place to put the sprite
+    # -- this should terminate b/c all sprites are smaller than (B_H, B_W)
+    height_bound, width_bound = render_height, render_width
+    while height_bound >= 0 and width_bound >= 0:
+        x, y = Num(random.randint(0, height_bound)), Num(random.randint(0, width_bound))
+        if is_valid((sprite := Sprite(sprite_index, x, y)), envs):
+            return sprite
+        height_bound -= 1
+        width_bound -= 1
+    raise UnimplementedError("Shouldn't get here")
+
+def create_program(envs: List[dict], arg_exprs: List[Expr],
+                   n_lines: int, rand_arg_bounds: Tuple[int, int],
                    line_types: List[type], line_type_weights: List[float] = None,
+                   render_height=B_H, render_width=B_W,
                    verbose=False):
     """
     Creates a new program matching the spec. Uses expressions containing randomness for arguments
     of each line object, but doesn't allow random colors.
     """
-    def is_valid(expr):
-        for env in envs:
-            try:
-                expr.eval(env)
-            except AssertionError:
-                return False
-        return True
-    
     def choose_n_rand_args(cap):
         lo, hi = rand_arg_bounds
         lo = util.clamp(lo, 0, cap)
@@ -101,25 +137,33 @@ def create_program(envs: List[dict], arg_exprs: List[Expr], n_lines: int, rand_a
     lines = []
     while len(lines) < n_lines:
         n_tries = 0
-        line_type = random.choices(population=line_types, weights=line_type_weights)[0]
-        n_args = len(line_type.in_types) - 1
-        
-        # try choosing valid args for the line type
-        # note: assumes that all in_types are integers (not true in general, but true of shapes)
-        line = None
-        while line is None:
-            n_tries += 1
-            if verbose and n_tries % 1000 == 0: print(f'[{len(lines)}, {line_type.__name__}]: {n_tries} tries')
-            n_rand_args = choose_n_rand_args(n_args)
-            n_const_args = n_args - n_rand_args
-            rand_args = random.choices(population=rand_exprs, k=n_rand_args)
-            const_args = random.choices(population=const_exprs, k=n_const_args)
-            args = util.shuffled(const_args + rand_args)
-            # choose a random color not currently used
+        is_sprite = random.choices(population=[True, False], weights=[1, len(line_types) * 2], k=1)[0]
+        if is_sprite:
+            line_type = Sprite
+            line = choose_random_sprite(envs, render_height - 1, render_width - 1)
             color = Num(random.choice([x for x in range(1, 10) if x not in [line.color for line in lines]]))
-            cand = line_type(*args, color=color)
-            if is_valid(cand):
-                line = cand
+            line.color = color
+        else:
+            line_type = random.choices(population=line_types, weights=line_type_weights)[0]
+            n_args = len(line_type.in_types) - 1
+        
+            # TODO: refactor this
+            # try choosing valid args for the line type
+            # note: assumes that all in_types are integers (not true in general, but true of shapes)
+            line = None
+            while line is None:
+                n_tries += 1
+                if verbose and n_tries % 1000 == 0: print(f'[{len(lines)}, {line_type.__name__}]: {n_tries} tries')
+                n_rand_args = choose_n_rand_args(n_args)
+                n_const_args = n_args - n_rand_args
+                rand_args = random.choices(population=rand_exprs, k=n_rand_args)
+                const_args = random.choices(population=const_exprs, k=n_const_args)
+                args = util.shuffled(const_args + rand_args)
+                # choose a random color not currently used
+                color = Num(random.choice([x for x in range(1, 10) if x not in [line.color for line in lines]]))
+                cand = line_type(*args, color=color)
+                if is_valid(cand, envs):
+                    line = cand
         lines.append(line)
         lines = canonical_ordering(lines)
         lines = rm_dead_code(lines, envs)
@@ -143,7 +187,6 @@ def rm_dead_code(lines: List[Expr], envs):
     return out
 
 def canonical_ordering(lines: List[Expr]):
-    
     def destructure(e):
         if isinstance(e, Point):
             return 0, e.x, e.y
@@ -151,6 +194,8 @@ def canonical_ordering(lines: List[Expr]):
             return 1, e.x1, e.y1, e.x2, e.y2
         elif isinstance(e, Rect):
             return 2, e.x_min, e.y_min, e.x_max, e.y_max
+        if isinstance(e, Sprite):
+            return 3, e.i, e.x, e.y
     
     return sorted(lines, key=destructure)
 
@@ -239,7 +284,11 @@ def gen_closures_and_deltas_mp(closures_loc_prefix: str, deltas_loc_prefix: str,
     assert n_lines_lo >= 0, f'Expected n_lines_bounds > 1, found {n_lines_bounds}'
     
     # run n_workers workers to generate a total of n_programs programs of each size in n_lines
-    arg_exprs = [Z(i) for i in range(LIB_SIZE)] + [Num(i) for i in range(Z_LO, Z_HI+1)]
+    arg_exprs = (
+            # [XMax(), YMax()] +
+            [Z(i) for i in range(LIB_SIZE)] +
+            [Num(i) for i in range(Z_LO, Z_HI+1)]
+    )
     n_programs_per_worker = n_programs // n_workers
     with mp.Pool(processes=n_workers) as pool:
         pool.starmap(gen_closures_and_deltas,
@@ -254,7 +303,7 @@ def gen_closures_and_deltas_mp(closures_loc_prefix: str, deltas_loc_prefix: str,
                       for i in range(n_workers)])
     # separate closure and delta gen? might allow better allocation of workers
 
-def viz_data(dataset: Iterable):
+def tb_viz_data(dataset: Iterable):
     """Use Tensorbaord to visualize the data in a dataset"""
     writer = tb.SummaryWriter(comment='_dataviz')
     for i, ((p, z_p, b_p), (f, z_f, b_f), d) in enumerate(dataset):
@@ -263,6 +312,14 @@ def viz_data(dataset: Iterable):
                                  f'f={f}', i)
         writer.add_images('b_f', b_f.unsqueeze(1), i)
         writer.add_images('b_p', b_p.unsqueeze(1), i)
+
+def viz_data(dataset: Iterable):
+    for i, ((p, z_p, b_p), (f, z_f, b_f), d) in enumerate(dataset):
+        print('p:', p)
+        print('d:', d)
+        print('f:', f)
+        viz.viz_mult(b_f, f)
+        print()
 
 # Examine datasets
 def collect_stats(dataset: Iterable, max_line_count=3):
@@ -316,12 +373,54 @@ def collect_stats(dataset: Iterable, max_line_count=3):
           *[f"  {i}: {by_len[i]['overlap']}" for i in range(1, max_line_count+1)],
           sep="\n")
 
+def test_reorder_envs():
+    cases = [
+        (Seq(Rect(Z(7), Z(2), Z(9), Z(10)), Sprite(2), Sprite(1)),
+         [{'z': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+           'sprites': [util.img_to_tensor(["###",
+                                           "#_#",
+                                           "###"]),
+                       util.img_to_tensor(["##",
+                                           "_#",
+                                           "_#"]),
+                       util.img_to_tensor(["###",
+                                           "_#_",
+                                           "###"])]},
+          ],
+         [{'z': [7, 2, 9, 10, 0, 1, 3, 4, 5, 6, 8],
+           'sprites': [
+               util.img_to_tensor(["###",
+                                   "_#_",
+                                   "###"]),
+               util.img_to_tensor(["##",
+                                   "_#",
+                                   "_#"]),
+               util.img_to_tensor(["###",
+                                   "#_#",
+                                   "###"]),
+           ]},
+          ]),
+    ]
+    
+    def equal(a: List[Dict], b: List[Dict]) -> bool:
+        for e1, e2 in zip(a, b):
+            if e1['z'] != e2['z']: return False
+            for s1, s2 in zip(e1['sprites'], e2['sprites']):
+                if not T.equal(s1, s2): return False
+        return True
+        
+    for f, envs, expected in cases:
+        out = reorder_envs(f, envs)
+        assert equal(expected, out), f'Expected={expected}, but got {out}'
+    print(" [+] passed test_reorder_envs")
+
 
 if __name__ == '__main__':
     # demo_gen_program()
     # demo_gen_closures()
     # demo_gen_policy_data()
-
+    # test_reorder_envs()
+    
     dir = '/home/djl328/arc/data/policy-pretraining'
     # dir = '../data/policy-pretraining'
     n_envs = 5
@@ -337,7 +436,6 @@ if __name__ == '__main__':
     def get_code(n_lines):
         return f'{s_n_programs}-R-{n_envs}e{n_lines}l{z_code}z'
 
-    # for n_lines in line_range:
     n_lines = int(sys.argv[1])
     mode = sys.argv[2]
     code = get_code(n_lines)
@@ -356,8 +454,11 @@ if __name__ == '__main__':
         verbose=True,
     )
 
+    # viz_data(util.load_incremental('../data/policy-pretraining/10-R-5e1l0~1z/'
+    #                                f'{t}/training/deltas_*.dat'))
+
     # for n_lines in line_range:
-    #     code = get_code(n_lines)
+    #     code = f'{s_n_programs}-R-{n_envs}e{n_lines}l{z_code}z'
     #     for mode in ['training', 'validation']:
     #         print(f"Joining for code={code}, mode={mode}")
     #         util.join_glob(f"{dir}/{code}/{t}/{mode}/deltas_*.dat",
@@ -369,4 +470,3 @@ if __name__ == '__main__':
     #     line_code = f'{min(line_range)}~{max(line_range)}'
     #     util.weave_glob(f"{prefix}*l{z_code}z/{t}/{mode}_deltas.dat",
     #                     f"{prefix}{line_code}l{z_code}z/{t}/{mode}_deltas_weave.dat")
-        
