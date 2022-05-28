@@ -702,9 +702,11 @@ def sample_model(model: Model, dataloader: DataLoader):
 def run(pretrain_policy: bool,
         train_value: bool,
         sample: bool,
-        data_prefix: str, model_prefix: str,
-        data_code: str, model_code: str,
-        data_t: str,
+        data_prefix: str,
+        data_code: str,
+        model_prefix: str,
+        model_code: str,
+        # data_t: str,
         assess_freq: int, checkpoint_freq: int,
         tloss_thresh: float, vloss_thresh: float,
         model_n_steps: Optional[int] = None,
@@ -725,8 +727,8 @@ def run(pretrain_policy: bool,
                   batch_size=16).to(dev)
     
     print("Making dataloaders...")
-    tloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/{data_t}/training_deltas_weave.dat')
-    vloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/{data_t}/validation_deltas_weave.dat')
+    tloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/[1-3]l/training/deltas_*.dat')
+    vloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/[1-3]l/validation/deltas_*.dat')
     
     if pretrain_policy:
         print("Pretraining policy....")
@@ -740,7 +742,7 @@ def run(pretrain_policy: bool,
     else:
         print("Loading trained policy...")
         assert model_n_steps is not None
-        model.load_model(f'../models/model_{model_code}_{model_n_steps}.pt')
+        model.load_model(f'{model_prefix}/model_{model_code}_{model_n_steps}.pt')
     
     if train_value:
         print("Training value net...")
@@ -759,15 +761,14 @@ def run(pretrain_policy: bool,
 if __name__ == '__main__':
     # run on g2
     run(
-        pretrain_policy=False,
+        pretrain_policy=True,
         train_value=False,
         sample=False,
         data_prefix='/home/djl328/arc/data/policy-pretraining',
         model_prefix='/home/djl328/arc/models',
-        data_code='100k-R-5e1~3l0~1z',
-        data_t='May11_22_13-05-55',
+        data_code='100k-R-5e1~4l0~1z',
+        # data_t='May11_22_13-05-55',
         model_code='100k-R-5e1~3l0~1z',
-        model_t=util.timecode(),
         assess_freq=1000, checkpoint_freq=50_000,
         model_n_steps=10_000_000,
         check_vloss_gap=False, # vloss_gap=2,
