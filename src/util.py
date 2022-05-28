@@ -12,6 +12,14 @@ from typing import List
 
 dirname = os.path.dirname(__file__)
 
+def fill_height(t: T.Tensor) -> int:
+    assert len(t.shape) >= 2
+    return (t.sum(dim=1) > 0).sum().item()
+
+def fill_width(t: T.Tensor) -> int:
+    assert len(t.shape) >= 2
+    return (t.sum(dim=0) > 0).sum().item()
+
 def uniq(l: List) -> List:
     joined = []
     for x in l:
@@ -323,7 +331,23 @@ def test_add_channels():
                                   f'Got {out} of shape {out.shape}.'
     print("[+] test_add_channels passed")
 
+def test_fill_measure():
+    cases = [
+        (img_to_tensor(["###  "]), 1, 3),
+        (img_to_tensor(["###  ",
+                        "##   "]), 2, 3),
+        (img_to_tensor([" ####",
+                        "##   "]), 2, 5),
+    ]
+    for mat, height, width in cases:
+        h = fill_height(mat)
+        w = fill_width(mat)
+        assert height == h and width == w, \
+            f"[-] failed test_fill_measure:\n" \
+            f"  Expected height={height} and width={width}, but got {h, w}"
+    print("[+] passed test_fill_measure")
+
 
 if __name__ == '__main__':
     test_add_channels()
-    
+    test_fill_measure()
