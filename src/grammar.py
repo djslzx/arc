@@ -270,11 +270,12 @@ class Rect(Expr):
 class Sprite(Expr):
     in_types = ['int', 'int', 'int']
     out_type = 'bitmap'
-    def __init__(self, i, x=Num(0), y=Num(0)):
+    def __init__(self, i, x=Num(0), y=Num(0), color=Num(1)):
         self.i = i
         self.x = x
         self.y = y
-    def accept(self, v): return v.visit_Sprite(self.i, self.x, self.y)
+        self.color = color
+    def accept(self, v): return v.visit_Sprite(self.i, self.x, self.y, self.color)
 
 class Seq(Expr):
     in_types = ['list(bitmap)']
@@ -367,7 +368,7 @@ class Visitor:
     def visit_Point(self, x, y, color): self.fail('Point')
     def visit_Line(self, x1, y1, x2, y2, color): self.fail('Line')
     def visit_Rect(self, x_min, y_min, x_max, y_max, color): self.fail('Rect')
-    def visit_Sprite(self, i, x, y): self.fail('Sprite')
+    def visit_Sprite(self, i, x, y, color): self.fail('Sprite')
     def visit_Join(self, bmp1, bmp2): self.fail('Join')
     def visit_Seq(self, bmps): self.fail('Seq')
     # def visit_Intersect(self, bmp): self.fail('Intersect')
@@ -487,9 +488,9 @@ class Eval(Visitor):
         assert 0 <= x_min <= x_max < self.width and 0 <= y_min <= y_max < self.height
         return self.make_bitmap(lambda p: (x_min <= p[0] <= x_max and y_min <= p[1] <= y_max) * c)
 
-    def visit_Sprite(self, i, x, y):
-        x, y = x.accept(self), y.accept(self)
-        return self.translate(self.env['sprites'][i], x, y)
+    def visit_Sprite(self, i, x, y, color):
+        x, y, c = x.accept(self), y.accept(self), color.accept(self)
+        return self.translate(self.env['sprites'][i] * c, x, y)
 
     def visit_Seq(self, bmps):
         bmps = [bmp.accept(self) for bmp in bmps]
@@ -584,8 +585,8 @@ class Print(Visitor):
     def visit_Rect(self, x_min, y_min, x_max, y_max, color):
         return f'(Rect[{color.accept(self)}] {x_min.accept(self)} {y_min.accept(self)} ' \
                f'{x_max.accept(self)} {y_max.accept(self)})'
-    def visit_Sprite(self, i, x, y):
-        return f'(Sprite_{i} {x.accept(self)} {y.accept(self)})'
+    def visit_Sprite(self, i, x, y, color):
+        return f'(Sprite_{i}[{color}] {x.accept(self)} {y.accept(self)})'
     def visit_Seq(self, bmps): return '(seq ' + ' '.join([bmp.accept(self) for bmp in bmps]) + ')'
     def visit_Join(self, bmp1, bmp2): return f'(join {bmp1.accept(self)} {bmp2.accept(self)})'
     # def visit_Intersect(self, bmp): return f'(intersect {bmp.accept(self)})'
@@ -615,7 +616,7 @@ def deserialize(tokens):
             if h.startswith('z'):
                 return [Z(int(h[2:]))] + t
             if h.startswith('S'):
-                return [Sprite(int(h[2:]), t[0], t[1])] + t[2:]
+                return [Sprite(int(h[2:]), t[1], t[2], color=t[0])] + t[3:]
             if h == 'x_max':
                 return [XMax()] + t
             if h == 'y_max':
@@ -693,8 +694,8 @@ class Serialize(Visitor):
     def visit_Rect(self, x_min, y_min, x_max, y_max, color):
         return ['R'] + color.accept(self) + x_min.accept(self) + y_min.accept(self) +\
                x_max.accept(self) + y_max.accept(self)
-    def visit_Sprite(self, i, x, y):
-        return [f'S_{i}'] + x.accept(self) + y.accept(self)
+    def visit_Sprite(self, i, x, y, color):
+        return [f'S_{i}'] + color.accept(self) + x.accept(self) + y.accept(self)
     def visit_Seq(self, bmps):
         tokens = ['{']  # start
         for bmp in bmps:
@@ -723,8 +724,8 @@ class SimplifyIndices(Visitor):
     # Base cases
     def visit_Z(self, i):
         return Z(self.z_mapping[i])
-    def visit_Sprite(self, i, x, y):
-        return Sprite(self.sprite_mapping[i], x.accept(self), y.accept(self))
+    def visit_Sprite(self, i, x, y, color):
+        return Sprite(self.sprite_mapping[i], x.accept(self), y.accept(self), color=color.accept(self))
     
     # Recursive cases
     def visit_Nil(self): return Nil()
@@ -787,9 +788,8 @@ class WellFormed(Visitor):
         return all(v.out_type == 'int' and v.accept(self) for v in [x1, y1, x2, y2, color])
     def visit_Rect(self, x_min, y_min, x_max, y_max, color):
         return all(v.out_type == 'int' and v.accept(self) for v in [x_min, y_min, x_max, y_max, color])
-    def visit_Sprite(self, i, x, y):
-        return x.out_type == 'int' and y.out_type == 'int' and isinstance(i, int) and \
-           x.accept(self) and y.accept(self)
+    def visit_Sprite(self, i, x, y, color):
+        return isinstance(i, int) and all(v.out_type == 'int' and v.accept(self) for v in [x, y, color])
     def visit_Seq(self, bmps): return all(bmp.out_type == 'bitmap' and bmp.accept(self) for bmp in bmps)
     def visit_Join(self, bmp1, bmp2): return all(bmp.out_type == 'bitmap' and bmp.accept(self) for bmp in [bmp1, bmp2])
     # def visit_Intersect(self, bmp):
@@ -836,7 +836,8 @@ class MapReduce(Visitor):
     def visit_VFlip(self): return self.f(VFlip)
 
     # Map and reduce
-    def visit_Sprite(self, i, x, y): return self.reduce(Sprite, self.f(Sprite, i), x.accept(self), y.accept(self))
+    def visit_Sprite(self, i, x, y, color):
+        return self.reduce(Sprite, self.f(Sprite, i), x.accept(self), y.accept(self), color.accept(self))
 
     # Reduce
     def visit_Not(self, b): return self.reduce(Not, b.accept(self))
@@ -1166,37 +1167,38 @@ def test_eval_bitmap():
             f" out=\n{out}"
     print(" [+] passed test_eval_bitmap")
 
-def test_sprite():
+def test_eval_sprite():
     tests = [
-        ([["2___",
-           "2___",
+        ([["1___",
+           "1___",
            "____",
            "____"]],
          Sprite(0),
-         ["2___",
-          "2___",
+         ["1___",
+          "1___",
           "____",
           "____"]),
-        ([["44",
-           "4_"],
+        ([["11",
+           "1_"],
           ["11",
            "_1"]],
-         Sprite(0),
+         Sprite(0, color=Num(4)),
          ["44",
           "4_"]),
-        ([["4",
-           "4_"],
+        ([["1",
+           "1_"],
           ["11",
            "_1"]],
          Sprite(1),
          ["11",
           "_1"]),
-        ([["4",
-           "4_"],
+        ([["1",
+           "1_"],
           ["11",
            "_1"]],
-         Sprite(1, Num(1), Num(1)),
+         Sprite(1, x=Num(1), y=Num(2)),
          ["___",
+          "___",
           "_11",
           "__1"]),
         ([["111",
@@ -1334,7 +1336,7 @@ def test_serialize():
         (Nil(), [False]),
         (XMax(), ['x_max']),
         (Plus(Z(0), Z(1)), ['+', 'z_0', 'z_1']),
-        (Sprite(0), ['S_0', 0, 0]),
+        (Sprite(0, color=Num(7)), ['S_0', 7, 0, 0]),
         (Plus(Times(Num(1), Num(0)), Minus(Num(3), Num(2))), ['+', '*', 1, 0, '-', 3, 2]),
         (And(Not(Nil()), Nil()), ['&', '~', False, False]),
         (Not(Lt(Num(3), Minus(Num(2), Num(7)))), ['~', '<', 3, '-', 2, 7]),
@@ -1345,12 +1347,12 @@ def test_serialize():
          ['?', '<', 'z_0', 'z_1',
           'P', 1, 'z_0', 'z_0',
           'R', 1, 'z_1', 'z_1', 2, 3]),
-        (Seq(Sprite(0), Sprite(1), Sprite(2), Sprite(3)),
+        (Seq(Sprite(0), Sprite(1, color=Num(6)), Sprite(2), Sprite(3)),
          ['{',
-          'S_0', 0, 0,
-          'S_1', 0, 0,
-          'S_2', 0, 0,
-          'S_3', 0, 0,
+          'S_0', 1, 0, 0,
+          'S_1', 6, 0, 0,
+          'S_2', 1, 0, 0,
+          'S_3', 1, 0, 0,
           '}']),
         (Apply(Translate(Num(1), Num(2)),
                Seq(Rect(Plus(Z(0), Num(1)),
@@ -1524,7 +1526,7 @@ if __name__ == '__main__':
     test_eval()
     test_eval_bitmap()
     test_eval_color()
-    test_sprite()
+    test_eval_sprite()
     test_sprites()
     test_simplify_indices()
     test_range()
