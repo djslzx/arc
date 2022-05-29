@@ -258,16 +258,18 @@ def gen_closures_and_deltas(worker_id: int, closures_loc: str, deltas_loc: str,
                 env_sets = [envs[:n_envs], envs[n_envs:]]
             else:
                 env_sets = [envs]
-            for delta in to_delta_examples(f, env_sets):
-                (p_toks, p_envs, p_bmps), (f_toks, f_envs, f_bmps), d = delta
-                pickle.dump(delta, deltas_file)
+            for (p_toks, p_envs, p_bmps), (f_toks, f_envs, f_bmps), d_toks in to_delta_examples(f, env_sets):
+                pickle.dump(
+                    ((p_toks, p_bmps), (f_toks, f_bmps), d_toks),  # ignore envs
+                    deltas_file
+                )
                 if not printed and verbose:
                     print(f'[{worker_id}][{i}/{n_programs}]: {f_toks}')
                     # p = deserialize(f_toks)
                     # if p.zs() and n_lines >= 2:
                     #     viz.viz_mult([p.eval(env) for env in f_envs])
                     printed = True
-                print(f'[{worker_id}][{i}/{n_programs}]:', p_toks, d, f_toks, sep='\n', end='\n\n')
+                print(f'[{worker_id}][{i}/{n_programs}]:', p_toks, d_toks, f_toks, sep='\n', end='\n\n')
 
 def gen_closures_and_deltas_mp(closures_loc_prefix: str, deltas_loc_prefix: str,
                                n_envs: int, n_programs: int, n_lines_bounds: Tuple[int, int],

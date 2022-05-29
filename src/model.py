@@ -245,7 +245,7 @@ class Model(nn.Module):
         x = log_softmax(actual, -1) : turn logits into probabilities
         x = (x * expected)          : pull out values from `actual` at nonzero locations in `expected`
         x = T.sum(x, -1)            : pull out nonzero values
-        x = T.sum(x, 0)             : take sum of log-probabilities for each example in the batch
+        x = T.sum(x, 0)             : take sum of log-probabilities over tokens for each example in the batch
         x = T.mean(x)               : compute mean probability of correctly generating each sequence in the batch
         x = -x                      : minimize loss (-mean) to maximize mean pr
         """
@@ -317,7 +317,7 @@ class Model(nn.Module):
         training_complete = False
         for epoch in range(epochs):
             round_tloss = 0
-            for (p, p_envs, p_bmps), (f, f_envs, f_bmps), d in tloader:
+            for (p, p_bmps), (f, f_bmps), d in tloader:
                 step += 1
                 
                 d_in = d[:, :-1]
@@ -386,7 +386,7 @@ class Model(nn.Module):
         if n_examples is None: n_examples = len(dataloader)
         i = 0
         total_toks = 0
-        for (p, p_envs, p_bmps), (f, f_envs, f_bmps), d in dataloader:
+        for (p, p_bmps), (f, f_bmps), d in dataloader:
             i += 1
             if i > n_examples: break
             d_in = d[:, :-1]
@@ -407,7 +407,7 @@ class Model(nn.Module):
               f"or about {avg_lines:.2f} lines")
         return epoch_loss / n_examples
 
-    def estimate_value(self, delta, b, b_hat, f_hat, f):
+    def estimate_value(self, delta, f_bmps, p_bmps, p, f):
         """
         (1) I[f' is a prefix of f]
         (2) min{g: f'g ~ f} |g|
@@ -427,8 +427,8 @@ class Model(nn.Module):
         #     new_fs.append(pp)
         # new_fs = T.stack(new_fs)
         v = [
-            [self.is_prefix(x, y) for x, y in zip(f_hat, f)],
-            [self.min_lines(x, y) for x, y in zip(f_hat, f)],
+            [self.is_prefix(x, y) for x, y in zip(p, f)],
+            [self.min_lines(x, y) for x, y in zip(p, f)],
             # [self.approx_likelihood(x, y) for x, y in zip(b, f_hat)],
             # [self.approx_likelihood(b, new_fs)],
         ]  # [n_heads, b]
@@ -485,7 +485,7 @@ class Model(nn.Module):
         t_start = time.time()
         for epoch in range(epochs):
             epoch_loss = 0
-            for (p, p_envs, p_bmps), (f, f_envs, f_bmps), d in dataloader:
+            for (p, p_bmps), (f, f_bmps), d in dataloader:
                 step += 1
                 # TODO: sample multiple rollouts per input in policy dataloader
                 # TODO: modify delta sampling so we can get multiple rollouts per instance in each batch
@@ -583,15 +583,14 @@ class Model(nn.Module):
         if delta is None:
             return Rollout(indices=indices, completed=True, well_formed=False)
         if delta == g.Seq():  # a bit hacky: use the empty program to denote an empty delta
+            # TODO: add an end-program token?
             return Rollout(indices=indices, completed=True, well_formed=True)
-        return Rollout(indices=self.to_indices(p.add_line(delta).serialize()),
-                       completed=False,
-                       well_formed=True)
+        return Rollout(indices=self.to_indices(p.add_line(delta).serialize()), completed=False, well_formed=True)
 
     def pad_program(self, indices: T.Tensor) -> T.Tensor:
         return util.pad(indices, self.max_program_length, self.PADDING).to(dev)
     
-    def sample_program_rollouts(self, bitmaps: T.Tensor) -> List[T.Tensor]:
+    def sample_program_rollouts(self, bitmaps: T.Tensor, line_cap=4) -> List[T.Tensor]:
         """Take samples from the model wrt a (batched) set of bitmaps"""
         self.eval()
         batch_size = bitmaps.shape[0]
@@ -604,7 +603,8 @@ class Model(nn.Module):
             rollout_renders = T.stack([self.render(r.indices) for r in rollouts])
             padded_rollouts = T.stack([self.pad_program(r.indices) for r in rollouts])
             deltas = self.sample_line_rollouts(f_bmps=bitmaps, p_bmps=rollout_renders, p=padded_rollouts)
-            rollouts = [self.append_delta(r.indices, delta) if r.well_formed and not r.completed else r
+            rollouts = [self.append_delta(r.indices, delta, line_cap=line_cap)
+                        if r.well_formed and not r.completed else r
                         for r, delta in zip(rollouts, deltas)]
         return [r.indices for r in rollouts]
     
@@ -652,23 +652,23 @@ class PolicyDataset(IterableDataset):
             with open(file, 'rb') as fp:
                 while True:
                     try:
-                        (p_toks, p_envs, p_bmps), (f_toks, f_envs, f_bmps), d_toks = pickle.load(fp)
+                        (p_toks, p_bmps), (f_toks, f_bmps), d_toks = pickle.load(fp)
                         f_bmps = f_bmps.to(dev)
                         p_bmps = p_bmps.to(dev)
                         
-                        # convert envs into vectors of length N * lib_size
-                        p_envs_indices = self.to_indices([util.unwrap_tensor(z)
-                                                          for env in p_envs for z in env['z']], False).to(dev)
-                        f_envs_indices = self.to_indices([util.unwrap_tensor(z)
-                                                          for env in f_envs for z in env['z']], False).to(dev)
+                        # # convert envs into vectors of length N * lib_size
+                        # p_envs_indices = self.to_indices([util.unwrap_tensor(z)
+                        #                                   for env in p_envs for z in env['z']], False).to(dev)
+                        # f_envs_indices = self.to_indices([util.unwrap_tensor(z)
+                        #                                   for env in f_envs for z in env['z']], False).to(dev)
                         
                         # convert program tokens into padded vectors of indices
                         p_indices = util.pad(self.to_indices(p_toks, True), self.program_length, self.padding).to(dev)
                         f_indices = util.pad(self.to_indices(f_toks, True), self.program_length, self.padding).to(dev)
                         d_indices = util.pad(self.to_indices(d_toks, True), self.line_length, self.padding).to(dev)
 
-                        yield (p_indices, p_envs_indices, p_bmps), (f_indices, f_envs_indices, f_bmps), d_indices
-                    
+                        yield (p_indices, p_bmps), (f_indices, f_bmps), d_indices
+
                     except EOFError:
                         break
 
@@ -765,7 +765,6 @@ if __name__ == '__main__':
     #     data_code='100k-RLP-5e1l0~1z',
     #     data_t='May03_22_01-46-06',
     #     model_code='100k-RLP-5e1~3l0~1z',
-    #     model_t=util.timecode(),
     #     assess_freq=1000, checkpoint_freq=10_000,
     #     model_n_steps=10_000,
     #     check_vloss_gap=False, # vloss_gap=2,
@@ -775,16 +774,17 @@ if __name__ == '__main__':
     # run locally
     # model_100k-R-5e1~2l0~1z_May09_22_21-21-10_740000.pt
     run(
-        pretrain_policy=False,
+        pretrain_policy=True,
         train_value=False,
-        sample=True,
+        sample=False,
         data_prefix='../data/policy-pretraining',
         model_prefix='../models',
-        data_code='10-R-5e1~3l0~1z',
-        data_t='May11_22_12-09-30',
-        model_code='100k-R-5e1~3l0~1z',
+        data_code='10-R-5e2l0~1z',
+        data_t='May29_22_02-46-39',
+        # data_t='May11_22_12-09-30',
+        model_code='10-R-5e2l0~1z',
         # model_t=util.timecode(),
-        model_n_steps=2700000,
+        model_n_steps=100,
         assess_freq=10, checkpoint_freq=50,
         tloss_thresh=0.0001, vloss_thresh=0.0001,
         check_vloss_gap=False,

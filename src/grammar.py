@@ -13,7 +13,7 @@ B_W = 32
 B_H = 32
 SPRITE_MAX_SIZE = 8
 
-LIB_SIZE = 16                   # number of z's, sprites
+LIB_SIZE = 8                    # number of z's, sprites
 Z_LO = 0                        # min poss value in z_n
 Z_HI = max(B_W, B_H)            # max poss value in z_n
 Z_IGNORE = -1                   # ignore z's that have this value
@@ -28,6 +28,7 @@ FULL_LEXICON = ([i for i in range(Z_LO, Z_HI+1)] +
 SIMPLE_LEXICON = (
     [i for i in range(Z_LO, Z_HI+1)] +
     [f'z_{i}' for i in range(LIB_SIZE)] +
+    [f'S_{i}' for i in range(LIB_SIZE)] +
     ['x_max', 'y_max', 'P', 'L', 'R', '{', '}', '(', ')']
 )
 SEQ_END = "SEQ_END"
