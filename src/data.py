@@ -423,12 +423,11 @@ if __name__ == '__main__':
     
     dir = '/home/djl328/arc/data/policy-pretraining'
     # dir = '../data/policy-pretraining'
+    # line_range = [1, 2, 3, 4]
     n_envs = 5
     n_zs = (0, 1)
     z_code = f'{min(n_zs)}~{max(n_zs)}' if min(n_zs) < max(n_zs) else f'{min(n_zs)}'
-    # t = 'May11_22_13-05-55'
-    t = util.timecode()
-    line_range = [1, 2, 3, 4]
+    # t = util.timecode()
     n_programs = 100_000
     s_n_programs = '100k'
     n_workers = 100
@@ -437,8 +436,10 @@ if __name__ == '__main__':
         return f'{s_n_programs}-R-{n_envs}e{n_lines}l{z_code}z'
 
     n_lines = int(sys.argv[1])
-    mode = sys.argv[2]
     code = get_code(n_lines)
+    mode = sys.argv[2]
+    t = sys.argv[3]
+
     print(f"Generating policy data for code={code}, mode={mode}")
     gen_closures_and_deltas_mp(
         closures_loc_prefix=f'{dir}/{code}/{t}/{mode}/',
@@ -470,3 +471,4 @@ if __name__ == '__main__':
     #     line_code = f'{min(line_range)}~{max(line_range)}'
     #     util.weave_glob(f"{prefix}*l{z_code}z/{t}/{mode}_deltas.dat",
     #                     f"{prefix}{line_code}l{z_code}z/{t}/{mode}_deltas_weave.dat")
+    
