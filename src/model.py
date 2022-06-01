@@ -383,7 +383,7 @@ class Model(nn.Module):
         """Compute validation loss of the policy network on the (validation data) dataloader."""
         self.eval()
         epoch_loss = 0
-        if n_examples is None: n_examples = len(dataloader)
+        n_examples = len(dataloader) if n_examples is None else min(n_examples, len(dataloader))
         i = 0
         total_toks = 0
         for (p, p_bmps), (f, f_bmps), d in dataloader:
@@ -397,10 +397,9 @@ class Model(nn.Module):
             epoch_loss += loss.detach().item()
             
             # record lengths of programs observed in dataloader
-            f_len = T.ne(f, self.PADDING).sum()
-            total_toks += f_len
+            total_toks += T.ne(f, self.PADDING).sum()
         
-        avg_toks = total_toks / (n_examples * self.batch_size)
+        avg_toks = total_toks / (n_examples * dataloader.batch_size)
         avg_lines = (avg_toks - 4)/6  # remove START, END, {, }; each rect takes 6 tokens (R, color, 2 corners)
         print(f"    "
               f"Validation loss computed with {avg_toks} tokens per example, "
