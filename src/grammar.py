@@ -99,7 +99,7 @@ class Expr(Visited):
             return []
     def add_line(self, line):
         assert isinstance(self, Seq)
-        assert type(line) in [Point, Line, Rect]
+        assert type(line) in [Point, Line, Rect, Sprite]
         return Seq(*self.bmps, line)
     def simplify_indices(self):
         zs = self.zs()
