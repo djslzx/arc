@@ -423,35 +423,39 @@ if __name__ == '__main__':
     # demo_gen_policy_data()
     # test_reorder_envs()
     
-    # dir = '/home/djl328/arc/data/policy-pretraining'
-    dir = '../data/policy-pretraining'
+    dir = '/home/djl328/arc/data/policy-pretraining'
+    # dir = '../data/policy-pretraining'
+    # line_range = [1, 2, 3, 4]
     n_envs = 5
     n_zs = (0, 1)
     z_code = f'{min(n_zs)}~{max(n_zs)}' if min(n_zs) < max(n_zs) else f'{min(n_zs)}'
-    t = util.timecode()
-    line_range = [1, 2, 3]
-    n_programs = 10
-    s_n_programs = '10'
-    n_workers = 1
+    # t = util.timecode()
+    n_programs = 100_000
+    s_n_programs = '100k'
+    n_workers = 100
 
-    for n_lines in line_range:
-        code = f'{s_n_programs}-R-{n_envs}e{n_lines}l{z_code}z'
-        for mode in ['training', 'validation']:
-            print(f"Generating policy data for mode={mode}")
-            gen_closures_and_deltas_mp(
-                closures_loc_prefix=f'{dir}/{code}/{t}/{mode}/',
-                deltas_loc_prefix=f'{dir}/{code}/{t}/{mode}/',
-                n_envs=n_envs,
-                n_programs=n_programs,
-                n_lines_bounds=(n_lines, n_lines),
-                rand_arg_bounds=n_zs,
-                line_types=[Rect],
-                line_type_weights=[1],
-                n_workers=n_workers,
-                hetero_zs=False,
-                verbose=True,
-            )
-            print(f"Finished generating data for mode={mode}")
+    def get_code(n_lines):
+        return f'{s_n_programs}-R-{n_envs}e{n_lines}l{z_code}z'
+
+    n_lines = int(sys.argv[1])
+    code = get_code(n_lines)
+    mode = sys.argv[2]
+    t = sys.argv[3]
+
+    print(f"Generating policy data for code={code}, mode={mode}")
+    gen_closures_and_deltas_mp(
+        closures_loc_prefix=f'{dir}/{code}/{t}/{mode}/',
+        deltas_loc_prefix=f'{dir}/{code}/{t}/{mode}/',
+        n_envs=n_envs,
+        n_programs=n_programs,
+        n_lines_bounds=(n_lines, n_lines),
+        rand_arg_bounds=n_zs,
+        line_types=[Rect],
+        line_type_weights=[1],
+        n_workers=n_workers,
+        hetero_zs=False,
+        verbose=True,
+    )
 
     # viz_data(util.load_incremental('../data/policy-pretraining/10-R-5e1l0~1z/'
     #                                f'{t}/training/deltas_*.dat'))
@@ -462,11 +466,11 @@ if __name__ == '__main__':
     #         print(f"Joining for code={code}, mode={mode}")
     #         util.join_glob(f"{dir}/{code}/{t}/{mode}/deltas_*.dat",
     #                        f"{dir}/{code}/{t}/{mode}_deltas.dat")
-    #
+
     # for mode in ['training', 'validation']:
-    #     print(f"Joining across line numbers for mode={mode}...")
+    #     print(f"Weaving across line numbers for mode={mode}...")
     #     prefix = f'{dir}/{s_n_programs}-R-{n_envs}e'
     #     line_code = f'{min(line_range)}~{max(line_range)}'
-    #     util.join_glob(f"{prefix}*l{z_code}z/{t}/{mode}_deltas.dat",
-    #                    f"{prefix}{line_code}l{z_code}z/{t}/"
-    #                    f"{mode}_deltas.dat")
+    #     util.weave_glob(f"{prefix}*l{z_code}z/{t}/{mode}_deltas.dat",
+    #                     f"{prefix}{line_code}l{z_code}z/{t}/{mode}_deltas_weave.dat")
+    

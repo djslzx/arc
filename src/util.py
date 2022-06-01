@@ -252,6 +252,7 @@ def weave_glob(glob_str: str, out: str):
     Join all lines in globbed files by picking lines at random from each of the files and repeating.
     """
     filenames = glob(glob_str)
+    assert len(filenames) >= 1, f'Found no files for glob={glob_str}'
     make_parent_dir(out)
     print(f"Weaving {len(filenames)} files into {out}...")
     with open(out, 'wb') as f_out:

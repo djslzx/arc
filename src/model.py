@@ -703,12 +703,15 @@ def sample_model(model: Model, dataloader: DataLoader):
 def run(pretrain_policy: bool,
         train_value: bool,
         sample: bool,
-        data_prefix: str, model_prefix: str,
-        data_code: str, model_code: str,
+        data_prefix: str,
+        data_code: str,
+        model_prefix: str,
+        model_code: str,
         data_t: str,
         assess_freq: int, checkpoint_freq: int,
         tloss_thresh: float, vloss_thresh: float,
         model_n_steps: Optional[int] = None,
+        learning_rate: Optional[float] = None,
         check_vloss_gap: bool = True, vloss_gap: float = 1):
     
     model = Model(name=model_code,
@@ -732,6 +735,7 @@ def run(pretrain_policy: bool,
         print("Pretraining policy....")
         epochs = model_n_steps if model_n_steps is not None else 1000
         model.pretrain_policy(tloader=tloader, vloader=vloader, epochs=epochs,
+                              lr=10 ** -5 if learning_rate is None else learning_rate,
                               assess_freq=assess_freq, checkpoint_freq=checkpoint_freq,
                               tloss_thresh=tloss_thresh, vloss_thresh=vloss_thresh,
                               check_vloss_gap=check_vloss_gap, vloss_gap=vloss_gap,
@@ -739,7 +743,7 @@ def run(pretrain_policy: bool,
     else:
         print("Loading trained policy...")
         assert model_n_steps is not None
-        model.load_model(f'../models/model_{model_code}_{model_n_steps}.pt')
+        model.load_model(f'{model_prefix}/model_{model_code}_{model_n_steps}.pt')
     
     if train_value:
         print("Training value net...")
@@ -763,13 +767,14 @@ if __name__ == '__main__':
     #     sample=False,
     #     data_prefix='/home/djl328/arc/data/policy-pretraining',
     #     model_prefix='/home/djl328/arc/models',
-    #     data_code='100k-RLP-5e1l0~1z',
-    #     data_t='May03_22_01-46-06',
-    #     model_code='100k-RLP-5e1~3l0~1z',
-    #     assess_freq=1000, checkpoint_freq=10_000,
-    #     model_n_steps=10_000,
-    #     check_vloss_gap=False, # vloss_gap=2,
-    #     tloss_thresh=10 ** -3, vloss_thresh=10 ** -3,
+    #     data_code='100k-R-5e1~4l0~1z',
+    #     # data_t='May11_22_13-05-55',
+    #     model_code='100k-R-5e1~3l0~1z',
+    #     assess_freq=1000, checkpoint_freq=50_000,
+    #     model_n_steps=10_000_000,
+    #     check_vloss_gap=False,  # vloss_gap=2,
+    #     tloss_thresh=10 ** -3,
+    #     vloss_thresh=10 ** -3,
     # )
 
     # run locally
