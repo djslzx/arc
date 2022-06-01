@@ -673,9 +673,10 @@ class PolicyDataset(IterableDataset):
                         break
 
 def sample_model(model: Model, dataloader: DataLoader):
-    for (p, p_envs, p_bmps), (f, f_envs, f_bmps), d in dataloader:
+    for (p, p_bmps), (f, f_bmps), d in dataloader:
         batch_size = f.size(0)
-        rollouts = model.sample_program_rollouts(f_bmps)
+        n_lines = len(model.to_program(f[0]).lines())
+        rollouts = model.sample_program_rollouts(f_bmps, line_cap=n_lines)
         envs = g.seed_libs(model.N ** 2)
         print(f'envs={envs}')
         # batched_envs = [[{'z': t} for t in batch.split(g.LIB_SIZE)]
@@ -724,8 +725,8 @@ def run(pretrain_policy: bool,
                   batch_size=16).to(dev)
     
     print("Making dataloaders...")
-    tloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/{data_t}/training_deltas.dat')
-    vloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/{data_t}/validation_deltas.dat')
+    tloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/{data_t}/training/deltas_*.dat')
+    vloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/{data_t}/validation/deltas_*.dat')
     
     if pretrain_policy:
         print("Pretraining policy....")
@@ -773,20 +774,20 @@ if __name__ == '__main__':
 
     # run locally
     # model_100k-R-5e1~2l0~1z_May09_22_21-21-10_740000.pt
-    run(
-        pretrain_policy=True,
-        train_value=False,
-        sample=False,
-        data_prefix='../data/policy-pretraining',
-        model_prefix='../models',
-        data_code='10-R-5e2l0~1z',
-        data_t='May29_22_02-46-39',
-        # data_t='May11_22_12-09-30',
-        model_code='10-R-5e2l0~1z',
-        # model_t=util.timecode(),
-        model_n_steps=100,
-        assess_freq=10, checkpoint_freq=50,
-        tloss_thresh=0.0001, vloss_thresh=0.0001,
-        check_vloss_gap=False,
-        # vloss_gap=2,
-    )
+    for i in [1, 2, 3, 4, 5, 6]:
+        run(
+            pretrain_policy=False,
+            train_value=False,
+            sample=True,
+            data_prefix='../data/policy-pretraining',
+            model_prefix='../models',
+            data_code=f'10-R-5e{i}l0~1z',
+            data_t='May31_22_13-31-15',
+            model_code='100k-R-5e1~5l0~1z',
+            # model_t=util.timecode(),
+            model_n_steps=300_000,
+            assess_freq=10, checkpoint_freq=50,
+            tloss_thresh=0.0001, vloss_thresh=0.0001,
+            check_vloss_gap=False,
+            # vloss_gap=2,
+        )
