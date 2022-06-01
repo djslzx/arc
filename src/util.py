@@ -12,6 +12,14 @@ from typing import List
 
 dirname = os.path.dirname(__file__)
 
+def pad_tensor(t: T.Tensor, h: int, w: int, padding_token: int = 0) -> T.Tensor:
+    """Pad t to height h and width w"""
+    assert (dims := len(t.shape)) == 2, \
+        f'Expected a 2-dimensional tensor, but got a {dims}-dimensional tensor'
+    assert h >= t.size(0) and w >= t.size(1), \
+        f'Padded dimensions are smaller than tensor size: h={h}, w={w}, t.shape={t.shape}'
+    return F.pad(t, (0, w - t.size(1), 0, h - t.size(0)), value=padding_token)
+
 def fill_height(t: T.Tensor) -> int:
     assert len(t.shape) >= 2
     return (t.sum(dim=1) > 0).sum().item()
@@ -348,7 +356,29 @@ def test_fill_measure():
             f"  Expected height={height} and width={width}, but got {h, w}"
     print("[+] passed test_fill_measure")
 
+def test_pad_tensor():
+    cases = [
+        (T.Tensor([[1, 1],
+                   [2, 1]]),
+         3, 4, 0,
+         T.Tensor([[1, 1, 0, 0],
+                   [2, 1, 0, 0],
+                   [0, 0, 0, 0]])),
+        (T.Tensor([[1, 1, 2],
+                   [2, 1, 3]]),
+         5, 3, 9,
+         T.Tensor([[1, 1, 2],
+                   [2, 1, 3],
+                   [9, 9, 9],
+                   [9, 9, 9],
+                   [9, 9, 9]])),
+    ]
+    for t, h, w, tok, ans in cases:
+        out = pad_tensor(t, h, w, tok)
+        assert T.equal(out, ans), f"Expected {ans}, but got {out}"
+    print("[+] passed test_pad_tensor")
 
 if __name__ == '__main__':
     test_add_channels()
     test_fill_measure()
+    test_pad_tensor()
