@@ -16,6 +16,7 @@ import torch.utils.tensorboard as tb
 from typing import Optional, Iterable, List, Dict, Callable, Tuple
 from collections import namedtuple
 
+import arc_data
 import grammar as g
 import util
 import viz
@@ -91,8 +92,7 @@ class Model(nn.Module):
                  n_tf_decoder_layers=6,
                  n_value_heads=3,
                  max_program_length=53,
-                 max_line_length=17,
-                 batch_size=32):
+                 max_line_length=17):
         super().__init__()
         self.name = name
 
@@ -110,7 +110,6 @@ class Model(nn.Module):
         self.n_tf_encoder_layers = n_tf_encoder_layers
         self.n_tf_decoder_layers = n_tf_decoder_layers
         self.n_value_heads = n_value_heads
-        self.batch_size = batch_size
         self.max_line_length = max_line_length
         self.max_program_length = max_program_length
         
@@ -401,12 +400,11 @@ class Model(nn.Module):
         
         avg_toks = total_toks / (n_examples * dataloader.batch_size)
         avg_lines = (avg_toks - 4)/6  # remove START, END, {, }; each rect takes 6 tokens (R, color, 2 corners)
-        print(f"    "
-              f"Validation loss computed with {avg_toks} tokens per example, "
+        print(f"Validation loss computed with {avg_toks:.2f} tokens per example, "
               f"or about {avg_lines:.2f} lines")
         return epoch_loss / n_examples
 
-    def estimate_value(self, delta, f_bmps, p_bmps, p, f):
+    def estimate_value(self, delta, f_bmps, p_bmps, p, f, batch_size):
         """
         (1) I[f' is a prefix of f]
         (2) min{g: f'g ~ f} |g|
@@ -431,7 +429,7 @@ class Model(nn.Module):
             # [self.approx_likelihood(x, y) for x, y in zip(b, f_hat)],
             # [self.approx_likelihood(b, new_fs)],
         ]  # [n_heads, b]
-        return T.tensor(v + [[0] * self.batch_size] * (self.n_value_heads - len(v))).transpose(0, 1).to(dev)
+        return T.tensor(v + [[0] * batch_size] * (self.n_value_heads - len(v))).transpose(0, 1).to(dev)
     
     def is_prefix(self, f_hat, f):
         return float(T.equal(f_hat, f[:f_hat.shape[0]]))
@@ -607,7 +605,7 @@ class Model(nn.Module):
                         for r, delta in zip(rollouts, deltas)]
         return [r.indices for r in rollouts]
     
-    def make_policy_dataloader(self, data_src: str):
+    def make_policy_dataloader(self, data_src: str, batch_size: int):
         """
         Make a dataloader for policy network pre-training. (batching, tokens -> indices, add channel dim, etc)
         """
@@ -616,7 +614,7 @@ class Model(nn.Module):
                                 padding=self.PADDING,
                                 program_length=self.max_program_length,
                                 line_length=self.max_line_length)
-        return DataLoader(dataset, batch_size=self.batch_size)
+        return DataLoader(dataset, batch_size=batch_size)
 
 
 class PolicyDataset(IterableDataset):
@@ -671,7 +669,7 @@ class PolicyDataset(IterableDataset):
                     except EOFError:
                         break
 
-def sample_model(model: Model, dataloader: DataLoader):
+def sample_model_on_policy_data(model: Model, dataloader: DataLoader):
     for (p, p_bmps), (f, f_bmps), d in dataloader:
         batch_size = f.size(0)
         n_lines = len(model.to_program(f[0]).lines())
@@ -697,101 +695,87 @@ def sample_model(model: Model, dataloader: DataLoader):
             text = f'expected={expected}\n'\
                    f'actual={output}'
             viz.viz_grid(bmps, text)
-            
-            
-def run(pretrain_policy: bool,
-        train_value: bool,
-        sample: bool,
-        data_prefix: str,
-        data_code: str,
-        model_prefix: str,
-        model_code: str,
-        data_t: str,
-        assess_freq: int, checkpoint_freq: int,
-        tloss_thresh: float, vloss_thresh: float,
-        model_n_steps: Optional[int] = None,
-        learning_rate: Optional[float] = None,
-        check_vloss_gap: bool = True, vloss_gap: float = 1):
-    
-    model = Model(name=model_code,
-                  N=5, H=g.B_H, W=g.B_W,
-                  Z_HI=g.Z_HI, Z_LO=g.Z_LO,
-                  lexicon=g.SIMPLE_LEXICON,
-                  d_model=512,
-                  n_conv_channels=12,
-                  n_tf_encoder_layers=6,
-                  n_tf_decoder_layers=6,
-                  n_value_heads=5,
-                  max_program_length=53,
-                  max_line_length=17,
-                  batch_size=16).to(dev)
-    
-    print("Making dataloaders...")
-    tloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/{data_t}/training/deltas_*.dat')
-    vloader = model.make_policy_dataloader(f'{data_prefix}/{data_code}/{data_t}/validation/deltas_*.dat')
-    
-    if pretrain_policy:
-        print("Pretraining policy....")
-        epochs = model_n_steps if model_n_steps is not None else 1000
-        model.pretrain_policy(tloader=tloader, vloader=vloader, epochs=epochs,
-                              lr=10 ** -5 if learning_rate is None else learning_rate,
-                              assess_freq=assess_freq, checkpoint_freq=checkpoint_freq,
-                              tloss_thresh=tloss_thresh, vloss_thresh=vloss_thresh,
-                              check_vloss_gap=check_vloss_gap, vloss_gap=vloss_gap,
-                              save_dir=model_prefix)
-    else:
-        print("Loading trained policy...")
-        assert model_n_steps is not None
-        model.load_model(f'{model_prefix}/model_{model_code}_{model_n_steps}.pt')
-    
-    if train_value:
-        print("Training value net...")
-        epochs = 1_000
-        model.train_value(dataloader=vloader, epochs=epochs,
-                          assess_freq=assess_freq, checkpoint_freq=checkpoint_freq)
-    
-    loss = model.pretrain_validate(tloader, n_examples=100)
-    print(f"Model loaded. Training loss={loss}")
-    
-    if sample:
-        print("Sampling rollouts...")
-        sample_model(model, tloader)
 
+def sample_model_on_bitmaps(model: Model, bitmaps: Iterable[T.Tensor]):
+    for bitmap in bitmaps:
+        # reshape bitmaps -> [b=1, N, H, W, C]
+        bitmap_stack = T.stack([util.pad_tensor(bitmap, h=model.H, w=model.W, padding_token=0)
+                                for _ in range(model.N)]).unsqueeze(0).to(dev)
+        rollout = model.sample_program_rollouts(bitmap_stack, line_cap=8)[0]
+        envs = g.seed_libs(3 ** 2 - 1)
+        out_program = model.to_program(rollout)
+        out_bitmaps = model.render(rollout, envs=envs, check_env_size=False).cpu()
+        bmps = T.cat((bitmap.unsqueeze(0), out_bitmaps)).reshape(3, 3, model.H, model.W)
+        viz.viz_grid(bmps, text=out_program)
+        
+def make_model(model_code: str) -> Model:
+    return Model(
+        name=model_code,
+        N=5, H=g.B_H, W=g.B_W,
+        Z_HI=g.Z_HI, Z_LO=g.Z_LO,
+        lexicon=g.SIMPLE_LEXICON,
+        d_model=512,
+        n_conv_channels=12,
+        n_tf_encoder_layers=6,
+        n_tf_decoder_layers=6,
+        n_value_heads=5,
+        max_program_length=53,
+        max_line_length=17
+    ).to(dev)
+
+def recover_model(code: str, dir: str, n_steps: int,
+                  test_with: Optional[Tuple[str, int]]) -> Model:
+    """
+    Loads in a pretrained model.
+    :param code: Identifies the model.
+    :param dir: The directory where the model is stored.
+    :param n_steps: The number of steps the model was trained
+    :param test_with: Optional: If provided, will be used to test the recovered model on a few examples (100).
+           This is a tuple (src, batch_size) that specifies the filename and batch size of the dataloader to make.
+    :return: The pretrained model.
+    """
+    model = make_model(code)
+    model.load_model(f'{dir}/model_{code}_{n_steps}.pt')
+    if test_with:
+        data_src, batch_size = test_with
+        dataloader = model.make_policy_dataloader(data_src, batch_size)
+        loss = model.pretrain_validate(dataloader, n_examples=100)
+        print(f"Model loaded. Loss={loss}")
+    return model
+    
 
 if __name__ == '__main__':
-    # # run on g2
-    # run(
-    #     pretrain_policy=True,
-    #     train_value=False,
-    #     sample=False,
-    #     data_prefix='/home/djl328/arc/data/policy-pretraining',
-    #     model_prefix='/home/djl328/arc/models',
-    #     data_code='100k-R-5e1~4l0~1z',
-    #     # data_t='May11_22_13-05-55',
-    #     model_code='100k-R-5e1~3l0~1z',
-    #     assess_freq=1000, checkpoint_freq=50_000,
-    #     model_n_steps=10_000_000,
-    #     check_vloss_gap=False,  # vloss_gap=2,
-    #     tloss_thresh=10 ** -3,
-    #     vloss_thresh=10 ** -3,
-    # )
+    model = recover_model(
+        code='100k-R-5e1~5l0~1z',
+        dir='../models',
+        n_steps=300_000,
+        test_with=('../data/policy-pretraining/10-R-5e3l0~1z/May30_22_23-53-37/validation/deltas_*.dat', 16)
+    )
+    bitmaps = arc_data.selected_task_bitmaps()
+    sample_model_on_bitmaps(model, bitmaps)
 
-    # run locally
-    # model_100k-R-5e1~2l0~1z_May09_22_21-21-10_740000.pt
-    for i in [1, 2, 3, 4, 5, 6]:
-        run(
-            pretrain_policy=False,
-            train_value=False,
-            sample=True,
-            data_prefix='../data/policy-pretraining',
-            model_prefix='../models',
-            data_code=f'10-R-5e{i}l0~1z',
-            data_t='May31_22_13-31-15',
-            model_code='100k-R-5e1~5l0~1z',
-            # model_t=util.timecode(),
-            model_n_steps=300_000,
-            assess_freq=10, checkpoint_freq=50,
-            tloss_thresh=0.0001, vloss_thresh=0.0001,
-            check_vloss_gap=False,
-            # vloss_gap=2,
-        )
+    # # pretraining example
+    # model = make_model('100k-R-5e1~20l0~2z')
+    # model.pretrain_policy(
+    #     save_dir='../models',
+    #     tloader=model.make_policy_dataloader(f'../data/policy-pretraining/100k.../May30.../training/deltas_*.dat',
+    #                                          batch_size=32),
+    #     vloader=model.make_policy_dataloader(f'../data/policy-pretraining/100k.../May30.../validation/deltas_*.dat',
+    #                                          batch_size=32),
+    #     epochs=100_000,
+    #     lr=10 ** -5,
+    #     assess_freq=10_000,
+    #     checkpoint_freq=100_000,
+    #     tloss_thresh=10 ** -4,
+    #     vloss_thresh=10 ** -3,
+    #     check_vloss_gap=False,
+    #     # vloss_gap=2
+    # )
+    # # training value function example
+    # model.train_value(
+    #     dataloader=model.make_policy_dataloader(f'..', batch_size=32),
+    #     epochs=100_000,
+    #     lr=10 ** -5,
+    #     assess_freq=10_000,
+    #     checkpoint_freq=100_000
+    # )
