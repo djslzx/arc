@@ -1,7 +1,8 @@
 import torch as T
 import random as R 
 import itertools as it
-from typing import Callable, List, Dict, Tuple
+from typing import Callable, List, Dict, Tuple, Optional
+from collections import namedtuple
 
 import util
 import viz
@@ -30,8 +31,11 @@ def shift(pts, x0, y0):
         ys = [y + (y0 - min_y) for y in ys]
     return list(zip(xs, ys))
 
+
+State = namedtuple('State', 'x y prev_dx prev_dy pts')
+
 def orthogonal_ant(w, h):
-    def step(prev_dx, prev_dy):
+    def step(s: State):
         dx, dy = 0, 0
         if R.randint(0, 1):
             dx = R.choice([-1, 1])
@@ -41,20 +45,31 @@ def orthogonal_ant(w, h):
     return random_walk(w, h, step)
 
 def diagonal_ant(w, h):
-    def step(prev_dx, prev_dy):
+    def step(s: State):
         return R.choice([
             (dx, dy) for (dx, dy) in it.product([-1, 0, 1], [-1, 0, 1])
-            if not (dx == 0 and dy == 0) and not (prev_dx == -dx and prev_dy == -dy)
+            if not (dx == 0 and dy == 0) and not (s.prev_dx == -dx and s.prev_dy == -dy)
         ])
     return random_walk(w, h, step)
 
-def random_walk(w, h, step: Callable[[int, int], Tuple[int, int]]):
+def non_repeating_ant(w, h):
+    def step(s: State):
+        options = [
+            (dx, dy) for (dx, dy) in it.product([-1, 0, 1], [-1, 0, 1])
+            if s.x + dx < w and s.y + dy < h and not (s.x + dx, s.y + dy) in s.pts
+        ]
+        return R.choice(options) if options else None
+    return random_walk(w, h, step)
+
+def random_walk(w, h, step: Callable[[State], Optional[Tuple[int, int]]]):
     x, y = 0, 0
     pts = []
     prev_dx, prev_dy = 0, 0
     while in_bounds(pts + [(x, y)], w, h):
         pts.append((x, y))
-        dx, dy = step(prev_dx, prev_dy)
+        s = step(State(x, y, prev_dx, prev_dy, pts))
+        if s is None: break
+        dx, dy = s
         prev_dx, prev_dy = dx, dy
         x += dx
         y += dy
@@ -63,7 +78,8 @@ def random_walk(w, h, step: Callable[[int, int], Tuple[int, int]]):
 def make_sprite(w, h, W, H):
     # ensure that generated pts do not define a point, line, or rect
     assert w > 1 and h > 1, f"Sprites of width/height 1 are either points or lines"
-    while classify(pts := orthogonal_ant(w, h)) != 'Sprite': pass
+    ant = non_repeating_ant
+    while classify(pts := ant(w, h)) != 'Sprite': pass
     return util.make_bitmap(lambda p: p in pts, W, H)
 
 def connected(pts):
@@ -181,7 +197,7 @@ if __name__ == '__main__':
     w, h = 4, 4
     test_connected()
     test_classify(W, H)
-    for n in range(2, 32):
-        sprites = T.stack([T.stack([make_sprite(n, n, 32, 32) for i in range(3)])
+    for n in range(2, 8):
+        sprites = T.stack([T.stack([make_sprite(n, n, 32, 32) for i in range(5)])
                            for j in range(3)])
         viz.viz_grid(sprites)

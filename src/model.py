@@ -459,7 +459,7 @@ class Model(nn.Module):
         for bitmap in b:
             s = 1  # to avoid taking log of 0
             for sample in range(n_samples):
-                f_hat_render = self.render(f_hat, envs=g.seed_libs(self.N))
+                f_hat_render = self.render(f_hat, envs=g.seed_envs(self.N))
                 s += int(T.equal(f_hat_render, bitmap))
             # log sum_z I[f'(z) = b] ~= log (sum_{i in 1..k, z_i random} I[f'(z_i) = b] * |Z|/k)
             # = log (sum ..) + log |Z| - log k
@@ -531,7 +531,7 @@ class Model(nn.Module):
                 return None
 
         if envs is None:
-            envs = g.seed_libs(self.N * k)
+            envs = g.seed_envs(self.N * k)
         elif check_env_size:
             assert len(envs) >= self.N, \
                 f'When evaluating a program on multiple environments, ' \
@@ -674,7 +674,7 @@ def sample_model_on_policy_data(model: Model, dataloader: DataLoader):
         batch_size = f.size(0)
         n_lines = len(model.to_program(f[0]).lines())
         rollouts = model.sample_program_rollouts(f_bmps, line_cap=n_lines)
-        envs = g.seed_libs(model.N ** 2)
+        envs = g.seed_envs(model.N ** 2)
         print(f'envs={envs}')
         # batched_envs = [[{'z': t} for t in batch.split(g.LIB_SIZE)]
         #                 for batch in f_envs]
@@ -702,7 +702,7 @@ def sample_model_on_bitmaps(model: Model, bitmaps: Iterable[T.Tensor]):
         bitmap_stack = T.stack([util.pad_tensor(bitmap, h=model.H, w=model.W, padding_token=0)
                                 for _ in range(model.N)]).unsqueeze(0).to(dev)
         rollout = model.sample_program_rollouts(bitmap_stack, line_cap=8)[0]
-        envs = g.seed_libs(3 ** 2 - 1)
+        envs = g.seed_envs(3 ** 2 - 1)
         out_program = model.to_program(rollout)
         out_bitmaps = model.render(rollout, envs=envs, check_env_size=False).cpu()
         bmps = T.cat((bitmap.unsqueeze(0), out_bitmaps)).reshape(3, 3, model.H, model.W)

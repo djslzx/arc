@@ -140,9 +140,9 @@ def seed_sprites(n_sprites=LIB_SIZE, height=B_H, width=B_W):
                                     W=width, H=height)
                     for _ in range(n_sprites)])
 
-def seed_libs(n_libs):
+def seed_envs(n_envs):
     return [{'z': seed_zs(), 'sprites': seed_sprites()}
-            for _ in range(n_libs)]
+            for _ in range(n_envs)]
 
 # class IllFormedError(Exception): pass
 # class IllFormed(Expr):

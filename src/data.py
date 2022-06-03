@@ -71,7 +71,7 @@ def gen_closures(n_envs: int, n_programs: int, n_lines: int,
     Generate `(f, z)` pairs with associated training outputs (value, policy).
     """
     for i in range(n_programs):
-        envs = seed_libs(n_envs)
+        envs = seed_envs(n_envs)
         p = create_program(envs=envs, arg_exprs=arg_exprs, n_lines=n_lines,
                            rand_arg_bounds=rand_arg_bounds,
                            line_types=line_types, line_type_weights=line_type_weights)
@@ -203,7 +203,7 @@ def extract_zs(envs):
     return [env['z'] for env in envs]
 
 def demo_create_program():
-    envs = seed_libs(5)
+    envs = seed_envs(5)
     p = create_program(envs=envs,
                        arg_exprs=[Z(i) for i in range(LIB_SIZE)] + [Num(i) for i in range(0, 10)],
                        n_lines=3,
