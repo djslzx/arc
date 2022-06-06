@@ -72,9 +72,10 @@ def gen_closures(n_envs: int, n_programs: int, n_lines: int,
     """
     for i in range(n_programs):
         envs = seed_envs(n_envs)
-        p = make_program(envs=envs, arg_exprs=arg_exprs, n_lines=n_lines, n_zs=n_zs,
-                         line_types=line_types, line_type_weights=line_type_weights,
-                         debug=debug)
+        p = make_flat_scene(n_objs=n_lines, envs=envs, height=B_H, width=B_W, include_zs=False, debug=False)
+        # p = make_program(envs=envs, arg_exprs=arg_exprs, n_lines=n_lines, n_zs=n_zs,
+        #                  line_types=line_types, line_type_weights=line_type_weights,
+        #                  debug=debug)
         if debug: print(f'[{i}/{n_programs}]: {p}, {extract_zs(envs)}')
         yield p, envs
 
@@ -138,7 +139,7 @@ def max_dimensions(pos: Tuple[int, int], positions: List[Tuple[int, int]], heigh
             nearest_y = y
     return nearest_x - px, nearest_y - py
 
-def plot_max_dimensions(positions, height, width):
+def plot_max_dimensions(positions, envs, height, width):
     lines = [make_rect(x, y, 1, 1, color=1) for x, y in positions]
     for x, y in positions:
         w, h = max_dimensions((x, y), positions, height, width)
@@ -147,10 +148,10 @@ def plot_max_dimensions(positions, height, width):
     viz.viz_mult([Seq(*lines).eval(env) for env in envs],
                  text="Points with bounds")
 
-def make_flat_scene(n_objs, envs, height, width, debug):
+def make_flat_scene(n_objs, envs, height, width, include_zs=False, debug=True):
     """Compose a program that generates rectangle/sprite scenes with minimal occlusion"""
     # seed a bunch of random positions and only keep the ones that have some distance between each other
-    pos_dist = 2
+    pos_dist = 3
     positions = []
     while len(positions) < n_objs:
         x = random.randint(0, height-1)
@@ -165,33 +166,32 @@ def make_flat_scene(n_objs, envs, height, width, debug):
         if include:
             positions.append((x, y))
     
-    if debug: plot_max_dimensions(positions, height, width)
-    
     # choose random sizes that err towards being small
     lines = []
     for x, y in positions:
         if random.randint(0, 9) < 3:
-            sprite = choose_random_sprite(envs, height-1, width-1)
-            sprite.color = Num(random.randint(1, 9))
-            lines.append(sprite)
+            line = choose_random_sprite(envs, height-1, width-1)
         else:
-            lines.append(make_rect(
-                x, y,
-                # x if random.randint(0, 4) == 0 else random_z(),
-                # y if random.randint(0, 4) == 0 else random_z(),
-                util.clamp(roll_size(3, 2), 1, width - x),
-                util.clamp(roll_size(3, 2), 1, height - y),
-                color=random.randint(1, 9)
-            ))
+            n_tries = 0
+            while True:
+                n_tries += 1
+                if debug and n_tries % 100 == 0: print(f'[SRect]: {n_tries} tries')
+                line = SizeRect(
+                    Num(x) if not include_zs or random.randint(0, 4) > 0 else random_z(),
+                    Num(y) if not include_zs or random.randint(0, 4) > 0 else random_z(),
+                    Num(util.clamp(roll_size(3, 2), 1, width - x)),
+                    Num(util.clamp(roll_size(3, 2), 1, height - y))
+                )
+                if is_valid(line, envs):
+                    break
+        
+        # choose a relatively unused color to help variety
+        line.color = choose_color(lines)
+        lines.append(line)
         lines = canonical_ordering(lines)
         # lines = rm_dead_code(lines, envs, strict=True)
         
         if debug: print(lines)
-    
-    if debug:
-        scene = Seq(*lines)
-        viz.viz_mult([scene.eval(env) for env in envs],
-                     text=f"Lines [{len(lines)}]: {lines}")
 
     # favor putting random args as positions instead of dimensions
     return Seq(*lines)
@@ -218,6 +218,12 @@ def make_shape(shape_type: Type[Expr], envs: List[Dict],
         if is_valid(shape, envs):
             return shape
 
+def choose_color(lines: List[Expr]):
+    # counts[i] = (the inverse of) the number of times Num(i-1) is used as a color in lines
+    counts = [1 / (1 + sum(line.color == i for line in lines))
+              for i in range(1, 10)]
+    return Num(random.choices(population=range(1, 10), weights=counts, k=1)[0])
+
 def make_program(envs: List[dict], arg_exprs: List[Expr],
                  n_lines: int, n_zs: Tuple[int, int],
                  line_types: List[type], line_type_weights: List[float] = None,
@@ -243,11 +249,7 @@ def make_program(envs: List[dict], arg_exprs: List[Expr],
             )
 
         # choose a random color; favor colors not often used
-        # counts[i] = the number of times Num(i-1) is used as a color in lines, negated
-        counts = [1/(1 + sum(line.color == i for line in lines))
-                  for i in range(1, 10)]
-        color = Num(random.choices(population=range(1, 10), weights=counts, k=1)[0])
-        line.color = color
+        line.color = choose_color(lines)
 
         if debug: print(lines)
         lines.append(line)
@@ -283,9 +285,11 @@ def canonical_ordering(lines: List[Expr]):
         elif isinstance(e, Line):
             return 1, e.x1, e.y1, e.x2, e.y2
         elif isinstance(e, CornerRect):
-            return 2, e.x_min, e.y_min, e.x_max, e.y_max
+            return 2, e.x_min, e.y_min, e.x_max, e.y_max, e.color
+        elif isinstance(e, SizeRect):
+            return 3, e.x, e.y, e.w, e.h, e.color
         if isinstance(e, Sprite):
-            return 3, e.i, e.x, e.y
+            return 4, e.i, e.x, e.y
     
     return sorted(lines, key=destructure)
 
@@ -506,18 +510,18 @@ def test_reorder_envs():
         assert equal(expected, out), f'Expected={expected}, but got {out}'
     print(" [+] passed test_reorder_envs")
 
+def demo_flat_scenes():
+    envs = seed_envs(5)
+    p = make_flat_scene(n_objs=20, width=B_W, height=B_H, envs=envs,
+                        include_zs=False, debug=True)
+    renders = [p.eval(env) for env in envs]
+    viz.viz_mult(renders, text=p)
 
 if __name__ == '__main__':
     # demo_gen_program()
     # demo_gen_closures()
     # demo_gen_policy_data()
     # test_reorder_envs()
-    
-    envs = seed_envs(5)
-    p = make_flat_scene(n_objs=20, width=B_W, height=B_H, envs=seed_envs(5), debug=False)
-    renders = [p.eval(env) for env in envs]
-    viz.viz_mult(renders, text=p)
-    exit(0)
     
     if len(sys.argv) - 1 != 6:
         print("Usage: data.py dir mode min_zs max_zs n_lines t")

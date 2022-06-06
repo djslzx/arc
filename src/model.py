@@ -745,40 +745,44 @@ def recover_model(code: str, dir: str, n_steps: int,
     
 
 if __name__ == '__main__':
-    model = recover_model(
-        code='100k-R-5e1~5l0~1z',
-        dir='../models',
-        n_steps=300_000,
-        test_with=('../data/policy-pretraining/10-R-5e3l0~1z/May30_22_23-53-37/validation/deltas_*.dat', 16)
-    )
-    sample_model_on_policy_data(
-        model,
-        model.make_policy_dataloader(
-            '../data/policy-pretraining/10-R-5e[4-6]l0~1z/May30_22_23-53-37/validation/deltas_*.dat',
-            batch_size=16
-        ))
+    # model = recover_model(
+    #     code='100k-R-5e1~5l0~1z',
+    #     dir='../models',
+    #     n_steps=300_000,
+    #     test_with=('../data/policy-pretraining/10-R-5e3l0~1z/May30_22_23-53-37/validation/deltas_*.dat', 16)
+    # )
+    # sample_model_on_policy_data(
+    #     model,
+    #     model.make_policy_dataloader(
+    #         '../data/policy-pretraining/10-R-5e[4-6]l0~1z/May30_22_23-53-37/validation/deltas_*.dat',
+    #         batch_size=16
+    #     ))
 
     # # test on ARC data
     # bitmaps = arc_data.selected_task_bitmaps()
     # sample_model_on_bitmaps(model, bitmaps)
 
-    # # pretraining model
-    # model = make_model('100k-R-5e1~20l0~2z')
-    # model.pretrain_policy(
-    #     save_dir='../models',
-    #     tloader=model.make_policy_dataloader(f'../data/policy-pretraining/100k.../May30.../training/deltas_*.dat',
-    #                                          batch_size=32),
-    #     vloader=model.make_policy_dataloader(f'../data/policy-pretraining/100k.../May30.../validation/deltas_*.dat',
-    #                                          batch_size=32),
-    #     epochs=100_000,
-    #     lr=10 ** -5,
-    #     assess_freq=10_000,
-    #     checkpoint_freq=100_000,
-    #     tloss_thresh=10 ** -4,
-    #     vloss_thresh=10 ** -3,
-    #     check_vloss_gap=False,
-    #     # vloss_gap=2
-    # )
+    # pretraining model
+    model = make_model('10-R-5e20l0z')
+    model.pretrain_policy(
+        save_dir='../models',
+        tloader=model.make_policy_dataloader(
+            f'../data/policy-pretraining/10-R-5e20l1~3z/today/train/deltas_*.dat',
+            batch_size=16
+        ),
+        vloader=model.make_policy_dataloader(
+            f'../data/policy-pretraining/10-R-5e20l1~3z/today/train/deltas_*.dat',
+            batch_size=16
+        ),
+        epochs=100_000,
+        lr=10 ** -5,
+        assess_freq=10_000,
+        checkpoint_freq=100_000,
+        tloss_thresh=10 ** -4,
+        vloss_thresh=10 ** -3,
+        check_vloss_gap=False,
+        # vloss_gap=2
+    )
 
     # # training value function
     # model.train_value(
