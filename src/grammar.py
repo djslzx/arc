@@ -515,7 +515,7 @@ class Eval(Visitor):
         x, y, w, h, c = (x.accept(self), y.accept(self), w.accept(self), h.accept(self), color.accept(self))
         assert all(isinstance(v, int) for v in [x, y, w, h])
         assert 0 <= x and x + w <= self.width and 0 <= y and y + h <= self.height
-        return self.make_bitmap(lambda p: (x <= p[0] < x + w and y <= p[1] < y + h))
+        return self.make_bitmap(lambda p: (x <= p[0] < x + w and y <= p[1] < y + h) * c)
 
     def visit_Sprite(self, i, x, y, color):
         x, y, c = x.accept(self), y.accept(self), color.accept(self)
