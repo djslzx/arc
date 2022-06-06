@@ -11,7 +11,7 @@ import ant
 # bitmap size constants
 B_W = 32
 B_H = 32
-SPRITE_MAX_SIZE = 8
+SPRITE_MAX_SIZE = 6
 
 LIB_SIZE = 8                    # number of z's, sprites
 Z_LO = 0                        # min poss value in z_n
@@ -135,9 +135,16 @@ def seed_zs(lo=Z_LO, hi=Z_HI, n_zs=LIB_SIZE):
     return (T.rand(n_zs) * (hi - lo) - lo).long()
 
 def seed_sprites(n_sprites=LIB_SIZE, height=B_H, width=B_W):
-    return T.stack([ant.make_sprite(w=random.randrange(2, min(width, SPRITE_MAX_SIZE)),
-                                    h=random.randrange(2, min(height, SPRITE_MAX_SIZE)),
-                                    W=width, H=height)
+    width_popn = list(range(2, min(width, SPRITE_MAX_SIZE)))
+    height_popn = list(range(2, min(height, SPRITE_MAX_SIZE)))
+    return T.stack([ant.make_sprite(w=random.choices(population=width_popn,
+                                                     weights=[1/(1+w) for w in width_popn],
+                                                     k=1)[0],
+                                    h=random.choices(population=height_popn,
+                                                     weights=[1/(1+h) for h in height_popn],
+                                                     k=1)[0],
+                                    W=width,
+                                    H=height)
                     for _ in range(n_sprites)])
 
 def seed_envs(n_envs):

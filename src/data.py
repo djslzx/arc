@@ -117,6 +117,83 @@ def choose_random_sprite(envs: List[Dict], render_height: int, render_width: int
         width_bound -= 1
     raise UnimplementedError("Shouldn't get here")
 
+def make_rect(x, y, width, height, color=1):
+    assert width >= 1 and height >= 1
+    # assert x >= 0 and y >= 0
+    return Rect(Num(x), Num(y), Num(x + width - 1), Num(y + height - 1), color=Num(color))
+
+def roll_size(mu=3, sigma=2):
+    return max(0, int(random.normalvariate(mu, sigma)))  # slower than random.gauss, but thread-safe
+
+def random_z():
+    return random.choice([Z(i) for i in range(LIB_SIZE)])
+
+def max_dimensions(pos: Tuple[int, int], positions: List[Tuple[int, int]], height: int, width: int):
+    px, py = pos
+    nearest_x, nearest_y = width, height
+    for x, y in positions:
+        if px < x <= nearest_x and py < y <= nearest_y:
+            nearest_x = x
+            nearest_y = y
+    return nearest_x - px, nearest_y - py
+
+def make_flat_scene(n_objs, envs, height, width, debug):
+    """Compose a program that generates rectangle/sprite scenes with minimal occlusion"""
+    # seed a bunch of random positions and only keep the ones that have some distance between each other
+    pos_dist = 2
+    positions = []
+    while len(positions) < n_objs:
+        x = random.randint(0, height-1)
+        y = random.randint(0, height-1)
+        if debug: print(positions, x, y)
+
+        include = True
+        for ax, ay in positions:
+            if abs(x - ax) <= pos_dist and abs(y - ay) <= pos_dist:
+                include = False
+                break
+        if include:
+            positions.append((x, y))
+    
+    # plot closest successors
+    if debug:
+        lines = [make_rect(x, y, 1, 1, color=1) for x, y in positions]
+        for x, y in positions:
+            w, h = max_dimensions((x, y), positions, height, width)
+            box = make_rect(x, y, w, h, color=2)
+            lines.append(box)
+        renders = [Seq(*lines).eval(env) for env in envs]
+        viz.viz_mult(renders, text="Points with bounds")
+    
+    # choose random sizes that err towards being small
+    lines = []
+    for x, y in positions:
+        if random.randint(0, 9) < 3:
+            sprite = choose_random_sprite(envs, height-1, width-1)
+            sprite.color = Num(random.randint(1, 9))
+            lines.append(sprite)
+        else:
+            w, h = max_dimensions((x, y), positions, height, width)
+            lines.append(make_rect(
+                x, y,
+                util.clamp(roll_size(3, 3), 1, w), # width - x),
+                util.clamp(roll_size(3, 3), 1, h), # height - y),
+                color=random.randint(1, 9)
+            ))
+        lines = canonical_ordering(lines)
+        # lines = rm_dead_code(lines, envs, strict=True)
+        
+        if debug: print(lines)
+    
+    if debug:
+        points = Seq(*[make_rect(x, y, 1, 1) for x, y in positions])
+        scene = Seq(*lines)
+        viz.viz_mult([scene.eval(env) for env in envs],
+                     text=f"Lines [{len(lines)}]: {lines}")
+
+    # favor putting random args as positions instead of dimensions
+    return Seq(*lines)
+
 def make_shape(shape_type: Type[Expr], envs: List[Dict],
                min_zs: int, max_zs: int,
                rand_exprs: List[Expr], const_exprs: List[Expr],
@@ -170,16 +247,18 @@ def make_program(envs: List[dict], arg_exprs: List[Expr],
         color = Num(random.choices(population=range(1, 10), weights=counts, k=1)[0])
         line.color = color
 
+        if debug: print(lines)
         lines.append(line)
         lines = canonical_ordering(lines)
-        lines = rm_dead_code(lines, envs)
+        lines = rm_dead_code(lines, envs, strict=True)
 
-    program = Seq(*lines)
-    viz.viz_mult(T.stack([program.eval(env) for env in envs]),
-                 text=program)
-    return program
+        if debug:
+            program = Seq(*lines)
+            viz.viz_mult(T.stack([program.eval(env) for env in envs]), text=program)
+    
+    return Seq(*lines)
 
-def rm_dead_code(lines: List[Expr], envs):
+def rm_dead_code(lines: List[Expr], envs, strict=False):
     """
     Remove any lines that don't affect the render of Seq(lines) in any of the provided environments.
     
@@ -190,7 +269,8 @@ def rm_dead_code(lines: List[Expr], envs):
     for i, line in enumerate(lines):
         excl_lines = out + lines[i + 1:]
         excl_bmps = render(Seq(*excl_lines), envs)
-        if not T.equal(excl_bmps, orig_bmps):
+        if (not strict and not T.equal(excl_bmps, orig_bmps)) or \
+           (strict and not any(T.equal(x, y) for x, y in zip(excl_bmps, orig_bmps))):
             out.append(line)
     return out
 
@@ -430,6 +510,10 @@ if __name__ == '__main__':
     # demo_gen_closures()
     # demo_gen_policy_data()
     # test_reorder_envs()
+    
+    make_flat_scene(n_objs=25, width=B_W, height=B_H, envs=seed_envs(5),
+                    debug=False)
+    exit(0)
     
     if len(sys.argv) - 1 != 6:
         print("Usage: data.py dir mode min_zs max_zs n_lines t")
