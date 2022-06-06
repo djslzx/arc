@@ -117,7 +117,7 @@ def integer_partitions(target_value, number_of_arguments):
 
 def test_bottom_up():
     grammar = Grammar(
-        ops=[Join, Rect, Line, Point, Plus, Minus, Times, If, And, Not],
+        ops=[Join, CornerRect, Line, Point, Plus, Minus, Times, If, And, Not],
         consts=[Num(i) for i in range(LIB_SIZE)] + [Z(i) for i in range(LIB_SIZE)],
     )
 
@@ -130,23 +130,23 @@ def test_bottom_up():
             ({"z": [0, 0, 0, 0, 0, 3]}, Num(3).eval({})),
         ],
         [({"z": [0, 0, 0, 0, 0, 1]}, Num(1).eval({}))],
-        [({"z": [0, 1, 2, 3, 4, 5]}, 
-          Rect(Num(1), Num(1), 
-               Num(3), Num(4)).eval({}))],
-        [({"z": [3, 3, 4, 4, 0, 0]}, 
-          Rect(Num(3), Num(3), 
-               Num(4), Num(4)).eval({}))],
+        [({"z": [0, 1, 2, 3, 4, 5]},
+          CornerRect(Num(1), Num(1),
+                     Num(3), Num(4)).eval({}))],
+        [({"z": [3, 3, 4, 4, 0, 0]},
+          CornerRect(Num(3), Num(3),
+                     Num(4), Num(4)).eval({}))],
         # U((R Z1 Z1 Z2 Z2) (R Z2 Z2 Z3 Z3))
         [({"z": [0, 1, 2, 3, 4, 4]},
-          Join(Rect(Num(1), Num(1),
-                     Num(2), Num(2)),
-                Rect(Num(2), Num(2), 
-                     Num(3), Num(3))).eval({})),
+          Join(CornerRect(Num(1), Num(1),
+                          Num(2), Num(2)),
+               CornerRect(Num(2), Num(2),
+                          Num(3), Num(3))).eval({})),
          ({"z": [1, 2, 3, 4, 4, 4]},
-          Join(Rect(Num(2), Num(2),
-                     Num(3), Num(3)),
-                Rect(Num(3), Num(3), 
-                     Num(4), Num(4))).eval({}))
+          Join(CornerRect(Num(2), Num(2),
+                          Num(3), Num(3)),
+               CornerRect(Num(3), Num(3),
+                          Num(4), Num(4))).eval({}))
          ],
         # [({"z": [0, 0, 1, 2, 3, 4]}, 
         #   Union(Rect(Num(1), Num(1), 
@@ -171,7 +171,7 @@ def test_bottom_up():
 
 def test_bottom_up_tensor():
     grammar = Grammar(
-        ops=[Join, Rect, Plus, Minus, Times, Apply, HFlip, VFlip, Translate],
+        ops=[Join, CornerRect, Plus, Minus, Times, Apply, HFlip, VFlip, Translate],
         consts= [Z(i) for i in range(LIB_SIZE)] # [Num(i) for i in range(5)]
     )
 
@@ -182,9 +182,9 @@ def test_bottom_up_tensor():
             ({"z": T.tensor([0, 0, 0, 0, 0, 3])}, 3),
         ],
         [
-            ({"z": T.tensor([0, 1, 2, 3, 4, 5])}, 
-             Rect(Num(1), Num(1), 
-                  Num(3), Num(4)).eval({}))
+            ({"z": T.tensor([0, 1, 2, 3, 4, 5])},
+             CornerRect(Num(1), Num(1),
+                        Num(3), Num(4)).eval({}))
         ],
     ]
 

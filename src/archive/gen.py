@@ -92,7 +92,7 @@ def canonical_ordering(scene):
             return 0, e.x, e.y
         elif isinstance(e, Line):
             return 1, e.x1, e.y1, e.x2, e.y2
-        elif isinstance(e, Rect):
+        elif isinstance(e, CornerRect):
             return 2, e.x_min, e.y_min, e.x_max, e.y_max
 
     return sorted(scene, key=destructure)
@@ -304,10 +304,10 @@ def test_canonical_ordering():
          ]),
         ([
              Line(Num(2), Num(0), Num(3), Num(1)),
-             Rect(Num(1), Num(0), Num(1), Num(1)),
+             CornerRect(Num(1), Num(0), Num(1), Num(1)),
              Point(Num(2), Num(1)),
-             Rect(Num(0), Num(1), Num(2), Num(2)),
-             Rect(Num(0), Num(1), Num(3), Num(2)),
+             CornerRect(Num(0), Num(1), Num(2), Num(2)),
+             CornerRect(Num(0), Num(1), Num(3), Num(2)),
              Point(Num(0), Num(2)),
              Line(Num(0), Num(0), Num(3), Num(3)),
          ],
@@ -316,9 +316,9 @@ def test_canonical_ordering():
              Point(Num(2), Num(1)),
              Line(Num(0), Num(0), Num(3), Num(3)),
              Line(Num(2), Num(0), Num(3), Num(1)),
-             Rect(Num(0), Num(1), Num(2), Num(2)),
-             Rect(Num(0), Num(1), Num(3), Num(2)),
-             Rect(Num(1), Num(0), Num(1), Num(1)),
+             CornerRect(Num(0), Num(1), Num(2), Num(2)),
+             CornerRect(Num(0), Num(1), Num(3), Num(2)),
+             CornerRect(Num(1), Num(0), Num(1), Num(1)),
          ]),
     ]
     for entities, ans in test_cases:
@@ -365,31 +365,31 @@ def test_rm_dead_code():
          [Sprite(0), Sprite(1), Sprite(2)],
          [Sprite(0), Sprite(1)]),
         ([],
-         [Rect(Num(0), Num(0), Num(2), Num(2)),
-          Rect(Num(0), Num(0), Num(2), Num(2))],
-         [Rect(Num(0), Num(0), Num(2), Num(2))]),
+         [CornerRect(Num(0), Num(0), Num(2), Num(2)),
+          CornerRect(Num(0), Num(0), Num(2), Num(2))],
+         [CornerRect(Num(0), Num(0), Num(2), Num(2))]),
         ([],
-         [Rect(Num(0), Num(0), Num(2), Num(2)),
+         [CornerRect(Num(0), Num(0), Num(2), Num(2)),
           Line(Num(0), Num(0), Num(1), Num(1))],
-         [Rect(Num(0), Num(0), Num(2), Num(2))]),
+         [CornerRect(Num(0), Num(0), Num(2), Num(2))]),
         ([],
          [Line(Num(0), Num(0), Num(1), Num(1), color=Num(1)),
-          Rect(Num(0), Num(0), Num(2), Num(2), color=Num(1))],
-         [Rect(Num(0), Num(0), Num(2), Num(2), color=Num(1))]),
+          CornerRect(Num(0), Num(0), Num(2), Num(2), color=Num(1))],
+         [CornerRect(Num(0), Num(0), Num(2), Num(2), color=Num(1))]),
         ([],
          [Line(Num(0), Num(0), Num(1), Num(1), color=Num(1)),
-          Rect(Num(0), Num(0), Num(2), Num(2), color=Num(2))],
+          CornerRect(Num(0), Num(0), Num(2), Num(2), color=Num(2))],
          [Line(Num(0), Num(0), Num(1), Num(1), color=Num(1)),
-          Rect(Num(0), Num(0), Num(2), Num(2), color=Num(2))]),
+          CornerRect(Num(0), Num(0), Num(2), Num(2), color=Num(2))]),
         ([],
-         [Rect(Z(0), Z(0), Num(2), Num(2)), Point(Z(0), Plus(Z(0), Num(1)))],
-         [Rect(Z(0), Z(0), Num(2), Num(2))]),
+         [CornerRect(Z(0), Z(0), Num(2), Num(2)), Point(Z(0), Plus(Z(0), Num(1)))],
+         [CornerRect(Z(0), Z(0), Num(2), Num(2))]),
         ([],
-         [Rect(Z(0), Z(1), Num(2), Num(2)), Point(Z(0), Z(1))],
-         [Rect(Z(0), Z(1), Num(2), Num(2))]),
+         [CornerRect(Z(0), Z(1), Num(2), Num(2)), Point(Z(0), Z(1))],
+         [CornerRect(Z(0), Z(1), Num(2), Num(2))]),
         ([],
-         [Rect(Z(0), Z(0), Num(2), Num(2)), Point(Z(0), Plus(Z(1), Num(1)))],
-         [Rect(Z(0), Z(0), Num(2), Num(2)), Point(Z(0), Plus(Z(1), Num(1)))]),
+         [CornerRect(Z(0), Z(0), Num(2), Num(2)), Point(Z(0), Plus(Z(1), Num(1)))],
+         [CornerRect(Z(0), Z(0), Num(2), Num(2)), Point(Z(0), Plus(Z(1), Num(1)))]),
     ]
     for lib, entities, ans in test_cases:
         lib = [util.img_to_tensor(b, w=B_W, h=B_H) for b in lib]
@@ -425,7 +425,7 @@ def make_name_code(n_exs, scene_sizes, shape_types, n_zs, n_envs):
     def shape_code(shape_types):
         return f"{'p' if Point in shape_types else ''}" \
                f"{'l' if Line in shape_types else ''}" \
-               f"{'r' if Rect in shape_types else ''}"
+               f"{'r' if CornerRect in shape_types else ''}"
     
     def n_code(sizes):
         a, b = min(sizes), max(sizes)

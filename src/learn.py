@@ -193,8 +193,8 @@ def test_opt_zns():
     # out = opt_zns(f, zs, exs, iters=100)
     # print(f"out={out}")
 
-    f = Rect(Num(0), Num(0), 
-             Zn(Num(0)), Zn(Num(0)))
+    f = CornerRect(Num(0), Num(0),
+                   Zn(Num(0)), Zn(Num(0)))
     zs = [[4, 0, 0, 4, 0, 4], 
           [4, 0, 4, 4, 1, 0], 
           [1, 0, 4, 1, 3, 2], 
@@ -222,7 +222,7 @@ def test_opt_zns():
 
 def test_learn():
     g = Grammar(
-        ops=[Rect, Program, Plus, ], # Minus, Times, ] # If, Not, And, ]
+        ops=[CornerRect, Program, Plus, ], # Minus, Times, ] # If, Not, And, ]
         consts=[Num(0), Num(1), Num(2)])
 
     test_cases = [
