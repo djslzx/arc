@@ -64,18 +64,18 @@ def to_delta_examples(f: Expr, envs_choices: List[List[Dict]]):
 
 def gen_closures(n_envs: int, n_programs: int, n_lines: int,
                  arg_exprs: List[Expr],
-                 rand_arg_bounds: Tuple[int, int],
+                 n_zs: Tuple[int, int],
                  line_types: List[type], line_type_weights: List[float],
-                 verbose=False):
+                 debug=False):
     """
     Generate `(f, z)` pairs with associated training outputs (value, policy).
     """
     for i in range(n_programs):
         envs = seed_envs(n_envs)
-        p = create_program(envs=envs, arg_exprs=arg_exprs, n_lines=n_lines,
-                           rand_arg_bounds=rand_arg_bounds,
-                           line_types=line_types, line_type_weights=line_type_weights)
-        if verbose: print(f'[{i}/{n_programs}]: {p}, {extract_zs(envs)}')
+        p = make_program(envs=envs, arg_exprs=arg_exprs, n_lines=n_lines, n_zs=n_zs,
+                         line_types=line_types, line_type_weights=line_type_weights,
+                         debug=debug)
+        if debug: print(f'[{i}/{n_programs}]: {p}, {extract_zs(envs)}')
         yield p, envs
 
 def compute_value(expr, bitmaps):
@@ -117,59 +117,67 @@ def choose_random_sprite(envs: List[Dict], render_height: int, render_width: int
         width_bound -= 1
     raise UnimplementedError("Shouldn't get here")
 
-def create_program(envs: List[dict], arg_exprs: List[Expr],
-                   n_lines: int, rand_arg_bounds: Tuple[int, int],
-                   line_types: List[type], line_type_weights: List[float] = None,
-                   render_height=B_H, render_width=B_W,
-                   verbose=False):
+def make_shape(shape_type: Type[Expr], envs: List[Dict],
+               min_zs: int, max_zs: int,
+               rand_exprs: List[Expr], const_exprs: List[Expr],
+               debug=False):
+    assert min_zs <= max_zs, f"min_zs ({min_zs}) > max_zs ({max_zs})"
+
+    n_args = len(shape_type.in_types) - 1
+    n_tries = 0
+    while True:
+        n_tries += 1
+        if debug and n_tries % 1000 == 0:
+            print(f'[{shape_type.__name__}]: {n_tries} tries')
+        
+        n_rand_args = random.randint(util.clamp(min_zs, 0, n_args),
+                                     util.clamp(max_zs, 0, n_args))
+        args = util.shuffled(random.choices(population=rand_exprs, k=n_rand_args) +
+                             random.choices(population=const_exprs, k=n_args - n_rand_args))
+        shape = shape_type(*args)
+        
+        if is_valid(shape, envs):
+            return shape
+
+def make_program(envs: List[dict], arg_exprs: List[Expr],
+                 n_lines: int, n_zs: Tuple[int, int],
+                 line_types: List[type], line_type_weights: List[float] = None,
+                 render_height=B_H, render_width=B_W,
+                 debug=False):
     """
     Creates a new program matching the spec. Uses expressions containing randomness for arguments
     of each line object, but doesn't allow random colors.
     """
-    def choose_n_rand_args(cap):
-        lo, hi = rand_arg_bounds
-        lo = util.clamp(lo, 0, cap)
-        hi = util.clamp(hi, 0, cap)
-        return random.randint(lo, hi)  # TODO: allow non-uniform sampling using random.choices
-    
-    assert rand_arg_bounds[0] <= rand_arg_bounds[1], 'Invalid rand argument bounds'
     rand_exprs, const_exprs = util.split(arg_exprs, lambda expr: expr.zs())
     lines = []
     while len(lines) < n_lines:
-        n_tries = 0
         is_sprite = random.choices(population=[True, False], weights=[1, len(line_types) * 2], k=1)[0]
         if is_sprite:
-            line_type = Sprite
             line = choose_random_sprite(envs, render_height - 1, render_width - 1)
-            color = Num(random.choice([x for x in range(1, 10) if x not in [line.color for line in lines]]))
-            line.color = color
         else:
-            line_type = random.choices(population=line_types, weights=line_type_weights)[0]
-            n_args = len(line_type.in_types) - 1
-        
-            # TODO: refactor this
-            # try choosing valid args for the line type
-            # note: assumes that all in_types are integers (not true in general, but true of shapes)
-            line = None
-            while line is None:
-                n_tries += 1
-                if verbose and n_tries % 1000 == 0: print(f'[{len(lines)}, {line_type.__name__}]: {n_tries} tries')
-                n_rand_args = choose_n_rand_args(n_args)
-                n_const_args = n_args - n_rand_args
-                rand_args = random.choices(population=rand_exprs, k=n_rand_args)
-                const_args = random.choices(population=const_exprs, k=n_const_args)
-                args = util.shuffled(const_args + rand_args)
-                # choose a random color not currently used
-                color = Num(random.choice([x for x in range(1, 10) if x not in [line.color for line in lines]]))
-                cand = line_type(*args, color=color)
-                if is_valid(cand, envs):
-                    line = cand
+            shape_type = random.choices(population=line_types, weights=line_type_weights)[0]
+            line = make_shape(
+                shape_type=shape_type, envs=envs,
+                min_zs=n_zs[0], max_zs=n_zs[1],
+                rand_exprs=rand_exprs, const_exprs=const_exprs,
+                debug=debug
+            )
+
+        # choose a random color; favor colors not often used
+        # counts[i] = the number of times Num(i-1) is used as a color in lines, negated
+        counts = [1/(1 + sum(line.color == i for line in lines))
+                  for i in range(1, 10)]
+        color = Num(random.choices(population=range(1, 10), weights=counts, k=1)[0])
+        line.color = color
+
         lines.append(line)
         lines = canonical_ordering(lines)
         lines = rm_dead_code(lines, envs)
-        if verbose: print(f'[{len(lines)}, {line_type.__name__}]: {n_tries} tries')
 
-    return Seq(*lines)
+    program = Seq(*lines)
+    viz.viz_mult(T.stack([program.eval(env) for env in envs]),
+                 text=program)
+    return program
 
 def rm_dead_code(lines: List[Expr], envs):
     """
@@ -204,13 +212,13 @@ def extract_zs(envs):
 
 def demo_create_program():
     envs = seed_envs(5)
-    p = create_program(envs=envs,
-                       arg_exprs=[Z(i) for i in range(LIB_SIZE)] + [Num(i) for i in range(0, 10)],
-                       n_lines=3,
-                       line_types=[Rect, Line, Point],
-                       line_type_weights=[4, 3, 1],
-                       rand_arg_bounds=(0, 2),
-                       verbose=True)
+    p = make_program(envs=envs,
+                     arg_exprs=[Z(i) for i in range(LIB_SIZE)] + [Num(i) for i in range(0, 10)],
+                     n_lines=3,
+                     line_types=[Rect, Line, Point],
+                     line_type_weights=[4, 3, 1],
+                     n_zs=(0, 2),
+                     debug=True)
     print(p, extract_zs(envs))
     ps = T.stack([p.eval(env) for env in envs])
     viz.viz_mult(ps, text=p.simplify_indices())
@@ -235,10 +243,10 @@ def demo_gen_closures():
 def gen_closures_and_deltas(worker_id: int, closures_loc: str, deltas_loc: str,
                             n_envs: int, n_programs: int, n_lines: int,
                             arg_exprs: List[Expr],
-                            rand_arg_bounds: Tuple[int, int],
+                            n_zs: Tuple[int, int],
                             line_types: List[type], line_type_weights: List[float],
                             hetero_zs=False,
-                            verbose=False):
+                            debug=False):
     util.make_parent_dir(closures_loc)
     util.make_parent_dir(deltas_loc)
     with open(closures_loc, 'wb') as closures_file, open(deltas_loc, 'wb') as deltas_file:
@@ -247,9 +255,10 @@ def gen_closures_and_deltas(worker_id: int, closures_loc: str, deltas_loc: str,
             n_programs=n_programs,
             n_lines=n_lines,
             arg_exprs=arg_exprs,
-            rand_arg_bounds=rand_arg_bounds,
+            n_zs=n_zs,
             line_types=line_types,
-            line_type_weights=line_type_weights
+            line_type_weights=line_type_weights,
+            debug=debug
         )
         for i, (f, envs) in enumerate(gen):
             pickle.dump((f, envs), closures_file)
@@ -263,7 +272,7 @@ def gen_closures_and_deltas(worker_id: int, closures_loc: str, deltas_loc: str,
                     ((p_toks, p_bmps), (f_toks, f_bmps), d_toks),  # ignore envs
                     deltas_file
                 )
-                if not printed and verbose:
+                if not printed and debug:
                     print(f'[{worker_id}][{i}/{n_programs}]: {f_toks}')
                     # p = deserialize(f_toks)
                     # if p.zs() and n_lines >= 2:
@@ -272,11 +281,10 @@ def gen_closures_and_deltas(worker_id: int, closures_loc: str, deltas_loc: str,
                 print(f'[{worker_id}][{i}/{n_programs}]:', p_toks, d_toks, f_toks, sep='\n', end='\n\n')
 
 def gen_closures_and_deltas_mp(closures_loc_prefix: str, deltas_loc_prefix: str,
-                               n_envs: int, n_programs: int, n_lines_bounds: Tuple[int, int],
-                               rand_arg_bounds: Tuple[int, int],
+                               n_envs: int, n_programs: int, n_lines_bounds: Tuple[int, int], n_zs: Tuple[int, int],
                                line_types: List[type], line_type_weights: Optional[List[float]] = None,
                                hetero_zs=False,
-                               verbose=False,
+                               debug=False,
                                n_workers: int = 1):
     """
     Generate a stream of closures and directly convert them to deltas. Write both to files.
@@ -298,9 +306,9 @@ def gen_closures_and_deltas_mp(closures_loc_prefix: str, deltas_loc_prefix: str,
                        f'{closures_loc_prefix}closures_{i}.dat',
                        f'{deltas_loc_prefix}deltas_{i}.dat',
                        n_envs, n_programs_per_worker, n_lines,
-                       arg_exprs, rand_arg_bounds, line_types, line_type_weights,
+                       arg_exprs, n_zs, line_types, line_type_weights,
                        hetero_zs,
-                       verbose)
+                       debug)
                       for n_lines in range(n_lines_lo, n_lines_hi + 1)
                       for i in range(n_workers)])
     # separate closure and delta gen? might allow better allocation of workers
@@ -423,38 +431,34 @@ if __name__ == '__main__':
     # demo_gen_policy_data()
     # test_reorder_envs()
     
-    dir = '/home/djl328/arc/data/policy-pretraining'
-    # dir = '../data/policy-pretraining'
-    # line_range = [1, 2, 3, 4]
+    if len(sys.argv) - 1 != 6:
+        print("Usage: data.py dir mode min_zs max_zs n_lines t")
+        exit(1)
+    
+    dir, mode, min_zs, max_zs, n_lines, t = sys.argv[1:]
+    min_zs = int(min_zs)
+    max_zs = int(max_zs)
+    n_lines = int(n_lines)
     n_envs = 5
-    n_zs = (0, 1)
-    z_code = f'{min(n_zs)}~{max(n_zs)}' if min(n_zs) < max(n_zs) else f'{min(n_zs)}'
-    # t = util.timecode()
-    n_programs = 100_000
-    s_n_programs = '100k'
-    n_workers = 100
+    n_programs = 10
+    s_n_programs = '10'
+    n_workers = 1
+    z_code = f'{min_zs}~{max_zs}' if min_zs < max_zs else f'{min_zs}'
+    code = f'{s_n_programs}-R-{n_envs}e{n_lines}l{z_code}z'
 
-    def get_code(n_lines):
-        return f'{s_n_programs}-R-{n_envs}e{n_lines}l{z_code}z'
-
-    n_lines = int(sys.argv[1])
-    code = get_code(n_lines)
-    mode = sys.argv[2]
-    t = sys.argv[3]
-
-    print(f"Generating policy data for code={code}, mode={mode}")
+    print(f"Generating policy data for code={code}, mode={mode}, at time {t} with dir={dir}")
     gen_closures_and_deltas_mp(
         closures_loc_prefix=f'{dir}/{code}/{t}/{mode}/',
         deltas_loc_prefix=f'{dir}/{code}/{t}/{mode}/',
         n_envs=n_envs,
         n_programs=n_programs,
         n_lines_bounds=(n_lines, n_lines),
-        rand_arg_bounds=n_zs,
+        n_zs=(min_zs, max_zs),
         line_types=[Rect],
         line_type_weights=[1],
         n_workers=n_workers,
         hetero_zs=False,
-        verbose=True,
+        debug=True,
     )
 
     # viz_data(util.load_incremental('../data/policy-pretraining/10-R-5e1l0~1z/'

@@ -751,10 +751,18 @@ if __name__ == '__main__':
         n_steps=300_000,
         test_with=('../data/policy-pretraining/10-R-5e3l0~1z/May30_22_23-53-37/validation/deltas_*.dat', 16)
     )
-    bitmaps = arc_data.selected_task_bitmaps()
-    sample_model_on_bitmaps(model, bitmaps)
+    sample_model_on_policy_data(
+        model,
+        model.make_policy_dataloader(
+            '../data/policy-pretraining/10-R-5e[4-6]l0~1z/May30_22_23-53-37/validation/deltas_*.dat',
+            batch_size=16
+        ))
 
-    # # pretraining example
+    # # test on ARC data
+    # bitmaps = arc_data.selected_task_bitmaps()
+    # sample_model_on_bitmaps(model, bitmaps)
+
+    # # pretraining model
     # model = make_model('100k-R-5e1~20l0~2z')
     # model.pretrain_policy(
     #     save_dir='../models',
@@ -771,7 +779,8 @@ if __name__ == '__main__':
     #     check_vloss_gap=False,
     #     # vloss_gap=2
     # )
-    # # training value function example
+
+    # # training value function
     # model.train_value(
     #     dataloader=model.make_policy_dataloader(f'..', batch_size=32),
     #     epochs=100_000,
