@@ -4,7 +4,7 @@ Generate a plot of the widths and heights of ARC problems.
 
 import json
 from glob import glob
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Set
 import itertools as it
 import matplotlib.pyplot as plt
 import numpy as np
@@ -62,21 +62,37 @@ def arc_tasks_as_tensors(tasks: List[Task]) -> List[T.Tensor]:
             for task in tasks 
             for t in arc_task_as_tensors(task)]
 
-def dim(arc_task: Dict, pair_keys: List[str]) -> List[Dict[str, int]]:
+def map_task(arc_task: Task, f, domain: List[str]) -> List:
+    return [f(mat)
+            for pair in arc_task['train'] + arc_task['test']
+            for mat in [pair[k] for k in domain]]
+
+def colors(arc_tasks: List[Task], domain: List[str]) -> Set[int]:
+    """
+    Record the colors used in the list of ARC tasks.
+    """
+    def flatten(mat): return [cell for row in mat for cell in row]
+    seen = set()
+    for arc_task in arc_tasks:
+        for mat in map_task(arc_task, flatten, domain):
+            seen |= set(mat)
+    return seen
+
+def dim(arc_task: Task, domain: List[str]) -> List[Dict[str, int]]:
     """
     Measure the dimensions (height, width) of the bitmap instances in the task.
     """
-    return [
-        {
+    return map_task(
+        arc_task,
+        lambda mat: {
             'height': len(mat),
             'width': len(mat[0])
-        }
-        for pair in arc_task['train'] + arc_task['test']
-        for mat in [pair[k] for k in pair_keys]
-    ]
+        },
+        domain
+    )
 
-def dims(arc_tasks: List[Task], pair_keys: List[str]) -> List[Dict[str, int]]:
-    return list(it.chain.from_iterable(dim(task, pair_keys) for task in arc_tasks))
+def dims(arc_tasks: List[Task], domain: List[str]) -> List[Dict[str, int]]:
+    return list(it.chain.from_iterable(dim(task, domain) for task in arc_tasks))
 
 def plot_dims(dims: List[Dict[str, int]]):
     heights = [x['height'] for x in dims]
@@ -105,7 +121,7 @@ def plot_arc_dimensions():
                  for task_name in SELECTED_TASK_NAMES
                  for name in glob(f'{ARC_DIR}/{task_name}.json')]
     tasks = [task for name, task in read_arc_files(filenames)]
-    dimensions = dims(tasks, ['input', 'output'])
+    dimensions = dims(tasks, domain=['input', 'output'])
     print(plot_dims(dimensions))
     n_dims = len(dimensions)
     for n in range(18, 32):
@@ -124,7 +140,13 @@ def selected_task_bitmaps() -> List[T.Tensor]:
         out_bitmaps.extend(padded_bitmaps)
     return out_bitmaps
 
+def survey_colors():
+    filenames = [name for task_name in TASK_NAMES
+                 for name in glob(f'{ARC_DIR}/{task_name}.json')]
+    tasks = [task for name, task in read_arc_files(filenames)]
+    return colors(tasks, ['input', 'output'])
 
 if __name__ == '__main__':
     # plot_arc_dimensions()
-    print(selected_task_bitmaps())
+    # print(selected_task_bitmaps())
+    print(survey_colors())
