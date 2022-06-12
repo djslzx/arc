@@ -144,9 +144,9 @@ def survey_colors():
     filenames = [name for task_name in TASK_NAMES
                  for name in glob(f'{ARC_DIR}/{task_name}.json')]
     tasks = [task for name, task in read_arc_files(filenames)]
-    return colors(tasks, ['input', 'output'])
+    print(colors(tasks, ['input', 'output']))
 
 if __name__ == '__main__':
-    # plot_arc_dimensions()
     # print(selected_task_bitmaps())
-    print(survey_colors())
+    # survey_colors()
+    plot_arc_dimensions()

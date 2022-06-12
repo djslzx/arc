@@ -7,7 +7,7 @@ import random
 from typing import Optional, List, Tuple, Iterable, Generator, Dict
 import multiprocessing as mp
 import torch.utils.tensorboard as tb
-import matplotlib.pyplot as plt
+import math
 import sys
 
 from grammar import *
@@ -139,32 +139,69 @@ def max_dimensions(pos: Tuple[int, int], positions: List[Tuple[int, int]], heigh
             nearest_y = y
     return nearest_x - px, nearest_y - py
 
-def plot_max_dimensions(positions, envs, height, width):
+def plot_max_dimensions(positions, height, width):
     lines = [make_rect(x, y, 1, 1, color=1) for x, y in positions]
     for x, y in positions:
         w, h = max_dimensions((x, y), positions, height, width)
         box = make_rect(x, y, w, h, color=3)
         lines.append(box)
-    viz.viz_mult([Seq(*lines).eval(env) for env in envs],
-                 text="Points with bounds")
+    viz.viz(Seq(*lines).eval(), title="Points with bounds")
+
+def plot_points(points):
+    viz.viz(Seq(*[make_rect(x, y, 1, 1, color=1) for x, y in points]).eval(),
+            title="Points")
+
+def dist(ax, ay, bx, by):
+    return math.sqrt((ax - bx) ** 2 + (ay - by) ** 2)
+
+def dist_from_points(x, y, points: List[Tuple[int, int]]):
+    return min(dist(x, y, px, py) for px, py in points)
+
+def max_dist_point(points: List[Tuple[int, int]], height: int, width: int) -> Tuple[int, int]:
+    """Returns the point on the grid furthest away from all other points"""
+    return max(it.product(range(width), range(height)),
+               key=lambda p: dist_from_points(p[0], p[1], points))
+
+def uniform_random_points(n_points, gap, height, width, debug):
+    """
+    Pick some random points by choosing locations uniformly at random,
+    but re-rolling a pick if it's too close to our prior picks.
+    """
+    points = []
+    while len(points) < n_points:
+        x = random.randint(0, width - 1)
+        y = random.randint(0, height - 1)
+        if debug: print(points, x, y)
+        if dist_from_points(x, y, points) >= gap:
+            points.append((x, y))
+    return points
+
+def perturbed_grid_positions(n_points, height, width, debug):
+    """
+    Pick random points by placing points spaced out uniformly on the grid,
+    then randomly perturb points
+    """
+    points = []
+    pass
+    
+def max_space_positions(n_points, height, width, perturb, debug):
+    points = [(random.randint(0, width-1),
+               random.randint(0, height-1))]
+    while len(points) < n_points:
+        x, y = max_dist_point(points, height, width)
+        if perturb:
+            x = util.clamp(int(x + random.normalvariate(0, 1)), 0, width - 1)
+            y = util.clamp(int(y + random.normalvariate(0, 1)), 0, height - 1)
+        if debug: print(points, x, y)
+        if dist_from_points(x, y, points) > 1:
+            points.append((x, y))
+    return points
 
 def make_flat_scene(n_objs, envs, height, width, include_zs=False, debug=True):
     """Compose a program that generates rectangle/sprite scenes with minimal occlusion"""
     # seed a bunch of random positions and only keep the ones that have some distance between each other
-    pos_dist = 3
-    positions = []
-    while len(positions) < n_objs:
-        x = random.randint(0, height-1)
-        y = random.randint(0, height-1)
-        if debug: print(positions, x, y)
-
-        include = True
-        for ax, ay in positions:
-            if abs(x - ax) <= pos_dist and abs(y - ay) <= pos_dist:
-                include = False
-                break
-        if include:
-            positions.append((x, y))
+    # positions = uniform_random_points(n_objs, 1, height, width, debug)
+    positions = max_space_positions(n_objs, height, width, perturb=False, debug=debug)
     
     # choose random sizes that err towards being small
     lines = []
@@ -179,8 +216,8 @@ def make_flat_scene(n_objs, envs, height, width, include_zs=False, debug=True):
                 line = SizeRect(
                     Num(x) if not include_zs or random.randint(0, 4) > 0 else random_z(),
                     Num(y) if not include_zs or random.randint(0, 4) > 0 else random_z(),
-                    Num(util.clamp(roll_size(3, 2), 1, width - x)),
-                    Num(util.clamp(roll_size(3, 2), 1, height - y))
+                    Num(util.clamp(roll_size(2, 2), 1, width - x)),
+                    Num(util.clamp(roll_size(2, 2), 1, height - y))
                 )
                 if is_valid(line, envs):
                     break
@@ -511,18 +548,27 @@ def test_reorder_envs():
     print(" [+] passed test_reorder_envs")
 
 def demo_flat_scenes():
-    envs = seed_envs(5)
-    p = make_flat_scene(n_objs=20, width=B_W, height=B_H, envs=envs,
-                        include_zs=False, debug=True)
-    renders = [p.eval(env) for env in envs]
-    viz.viz_mult(renders, text=p)
+    for i in range(10):
+        envs = seed_envs(3)
+        p = make_flat_scene(n_objs=10, width=B_W, height=B_H, envs=envs, include_zs=False, debug=True)
+        renders = [p.eval(env) for env in envs]
+        viz.viz_mult(renders, text=p)
+
+def demo_positions():
+    for i in range(10):
+        points = max_space_positions(30, B_H, B_W, perturb=False, debug=True)
+        plot_points(points)
+
 
 if __name__ == '__main__':
     # demo_gen_program()
     # demo_gen_closures()
     # demo_gen_policy_data()
     # test_reorder_envs()
-    
+
+    demo_flat_scenes()
+    exit(0)
+
     if len(sys.argv) - 1 != 6:
         print("Usage: data.py dir mode min_zs max_zs n_lines t")
         exit(1)

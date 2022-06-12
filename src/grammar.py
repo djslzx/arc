@@ -9,8 +9,8 @@ import util
 import ant
 
 # bitmap size constants
-B_W = 32
-B_H = 32
+B_W = 16
+B_H = 16
 SPRITE_MAX_SIZE = 6
 
 LIB_SIZE = 8                    # number of z's, sprites

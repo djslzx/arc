@@ -303,6 +303,7 @@ class Model(nn.Module):
         (a) the validation or training loss reaches the correctness threshold, or
         (b) the validation loss creeps upwards of `exit_dist_from_min` away from its lowest point.
         """
+        T.save('test', self.model_path(save_dir, 0))  # Test save_dir early to make sure it'll work
         assess_freq = min(assess_freq, len(tloader))  # bound assess_freq by dataloader size
 
         self.to(dev)
