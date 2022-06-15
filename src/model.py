@@ -700,7 +700,7 @@ def sample_model_on_policy_data(model: Model, dataloader: DataLoader):
 def sample_model_on_bitmaps(model: Model, bitmaps: Iterable[T.Tensor]):
     for bitmap in bitmaps:
         # reshape bitmaps -> [b=1, N, H, W, C]
-        bitmap_stack = T.stack([util.pad_tensor(bitmap, h=model.H, w=model.W, padding_token=0)
+        bitmap_stack = T.stack([util.pad_mat(bitmap, h=model.H, w=model.W, padding_token=0)
                                 for _ in range(model.N)]).unsqueeze(0).to(dev)
         rollout = model.sample_program_rollouts(bitmap_stack, line_cap=8)[0]
         envs = g.seed_envs(3 ** 2 - 1)

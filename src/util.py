@@ -4,7 +4,7 @@ import pickle
 import pdb
 import os
 from glob import glob
-from math import floor, ceil
+from math import floor, ceil, log10
 from pathlib import Path
 import random
 from datetime import datetime
@@ -12,7 +12,20 @@ from typing import List
 
 dirname = os.path.dirname(__file__)
 
-def pad_tensor(t: T.Tensor, h: int, w: int, padding_token: int = 0) -> T.Tensor:
+def num_to_str(n: int):
+    n_digits = log10(n)
+    if n_digits < 3:
+        return f'{n}'
+    elif n_digits < 6:
+        return f'{n // 10 ** 3}k'
+    elif n_digits < 9:
+        return f'{n // (10 ** 6)}m'
+    elif n_digits < 12:
+        return f'{n // (10 ** 9)}b'
+    else:
+        return f'{n // (10 ** 12)}t'
+
+def pad_mat(t: T.Tensor, h: int, w: int, padding_token: int = 0) -> T.Tensor:
     """Pad t to height h and width w"""
     assert (dims := len(t.shape)) == 2, \
         f'Expected a 2-dimensional tensor, but got a {dims}-dimensional tensor'
@@ -374,7 +387,7 @@ def test_pad_tensor():
                    [9, 9, 9]])),
     ]
     for t, h, w, tok, ans in cases:
-        out = pad_tensor(t, h, w, tok)
+        out = pad_mat(t, h, w, tok)
         assert T.equal(out, ans), f"Expected {ans}, but got {out}"
     print("[+] passed test_pad_tensor")
 

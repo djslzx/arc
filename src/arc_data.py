@@ -135,7 +135,7 @@ def selected_task_bitmaps() -> List[T.Tensor]:
     out_bitmaps = []
     for name, task in read_arc_files(filenames):
         bitmaps = arc_task_as_tensors(task)
-        padded_bitmaps = [util.pad_tensor(bitmap, h=grammar.B_H, w=grammar.B_W, padding_token=0)
+        padded_bitmaps = [util.pad_mat(bitmap, h=grammar.B_H, w=grammar.B_W, padding_token=0)
                           for bitmap in bitmaps]
         out_bitmaps.extend(padded_bitmaps)
     return out_bitmaps
