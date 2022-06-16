@@ -75,12 +75,20 @@ def random_walk(w, h, step: Callable[[State], Optional[Tuple[int, int]]]):
         y += dy
     return shift(pts, 0, 0)
 
+def random_colors(w, h):
+    return (T.rand(w, h) * 10).long()
+
 def make_sprite(w, h, W, H):
     # ensure that generated pts do not define a point, line, or rect
     assert w > 1 and h > 1, f"Sprites of width/height 1 are either points or lines"
     ant = non_repeating_ant
     while classify(pts := ant(w, h)) != 'Sprite': pass
     return util.make_bitmap(lambda p: p in pts, W, H)
+
+def make_multicolored_sprite(w, h, W, H):
+    sprite = make_sprite(w, h, W, H)
+    colors = random_colors(w, h)
+    return sprite * util.pad_mat(colors, W, H)
 
 def connected(pts):
     """
@@ -197,7 +205,9 @@ if __name__ == '__main__':
     w, h = 4, 4
     test_connected()
     test_classify(W, H)
+    mat_w, mat_h = 3, 3
     for n in range(2, 8):
-        sprites = T.stack([T.stack([make_sprite(n, n, 32, 32) for i in range(5)])
-                           for j in range(3)])
+        sprites = T.stack([T.stack([make_multicolored_sprite(n, n, 16, 16)
+                                    for _ in range(mat_h)])
+                           for _ in range(mat_w)])
         viz.viz_grid(sprites)
