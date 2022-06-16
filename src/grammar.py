@@ -62,6 +62,8 @@ class Expr(Visited):
         return self.extract_indices(Z)
     def sprites(self):
         return self.extract_indices(Sprite)
+    def csprites(self):
+        return self.extract_indices(ColorSprite)
     def count_leaves(self):
         def f_map(type, *args): return 1
         def f_reduce(type, *children): return sum(children)
@@ -104,7 +106,8 @@ class Expr(Visited):
     def simplify_indices(self):
         zs = self.zs()
         sprites = self.sprites()
-        return self.accept(SimplifyIndices(zs, sprites))
+        csprites = self.csprites()
+        return self.accept(SimplifyIndices(zs, sprites, csprites))
     def serialize(self): return self.accept(Serialize())
     def well_formed(self):
         try:
@@ -299,6 +302,15 @@ class Sprite(Expr):
         self.color = color
     def accept(self, v): return v.visit_Sprite(self.i, self.x, self.y, self.color)
 
+class ColorSprite(Expr):
+    in_types = ['int', 'int', 'int']
+    out_type = 'bitmap'
+    def __init__(self, i, x=Num(0), y=Num(0)):
+        self.i = i
+        self.x = x
+        self.y = y
+    def accept(self, v): return v.visit_ColorSprite(self.i, self.x, self.y)
+
 class Seq(Expr):
     in_types = ['list(bitmap)']
     out_type = 'bitmap'
@@ -392,6 +404,7 @@ class Visitor:
     def visit_CornerRect(self, x_min, y_min, x_max, y_max, color): self.fail('CornerRect')
     def visit_SizeRect(self, x, y, w, h, color): self.fail('SizeRect')
     def visit_Sprite(self, i, x, y, color): self.fail('Sprite')
+    def visit_ColorSprite(self, i, x, y): self.fail('MulticolorSprite')
     def visit_Join(self, bmp1, bmp2): self.fail('Join')
     def visit_Seq(self, bmps): self.fail('Seq')
     # def visit_Intersect(self, bmp): self.fail('Intersect')
@@ -521,6 +534,10 @@ class Eval(Visitor):
         x, y, c = x.accept(self), y.accept(self), color.accept(self)
         return self.translate(self.env['sprites'][i] * c, x, y)
 
+    def visit_ColorSprite(self, i, x, y):
+        x, y = x.accept(self), y.accept(self)
+        return self.translate(self.env['multicolor-sprites'][i], x, y)
+
     def visit_Seq(self, bmps):
         bmps = [bmp.accept(self) for bmp in bmps]
         assert all(isinstance(bmp, T.FloatTensor) for bmp in bmps), f"Seq contains unexpected type: {[type(bmp) for bmp in bmps]}"
@@ -619,6 +636,8 @@ class Print(Visitor):
                f'{w.accept(self)} {h.accept(self)})'
     def visit_Sprite(self, i, x, y, color):
         return f'(Sprite_{i}[{color}] {x.accept(self)} {y.accept(self)})'
+    def visit_ColorSprite(self, i, x, y):
+        return f'(CSprite_{i}[{color}] {x.accept(self)} {y.accept(self)})'
     def visit_Seq(self, bmps): return '(seq ' + ' '.join([bmp.accept(self) for bmp in bmps]) + ')'
     def visit_Join(self, bmp1, bmp2): return f'(join {bmp1.accept(self)} {bmp2.accept(self)})'
     # def visit_Intersect(self, bmp): return f'(intersect {bmp.accept(self)})'
@@ -649,6 +668,8 @@ def deserialize(tokens):
                 return [Z(int(h[2:]))] + t
             if h.startswith('S'):
                 return [Sprite(int(h[2:]), t[1], t[2], color=t[0])] + t[3:]
+            if h.startswith('CS'):
+                return [ColorSprite(int(h[3:]), t[0], t[1])] + t[2:]
             if h == 'x_max':
                 return [XMax()] + t
             if h == 'y_max':
@@ -732,6 +753,8 @@ class Serialize(Visitor):
         return ['SR'] + color.accept(self) + x.accept(self) + y.accept(self) + w.accept(self) + h.accept(self)
     def visit_Sprite(self, i, x, y, color):
         return [f'S_{i}'] + color.accept(self) + x.accept(self) + y.accept(self)
+    def visit_ColorSprite(self, i, x, y):
+        return [f'CS_{i}'] + x.accept(self) + y.accept(self)
     def visit_Seq(self, bmps):
         tokens = ['{']  # start
         for bmp in bmps:
@@ -750,18 +773,21 @@ class Serialize(Visitor):
     def visit_Repeat(self, f, n): return ['!'] + f.accept(self) + n.accept(self)
 
 class SimplifyIndices(Visitor):
-    def __init__(self, zs, sprites):
+    def __init__(self, zs, sprites, csprites):
         """
         zs: the indices of zs in the whole expression
         sprites: the indices of sprites in the whole expression
         """
         self.z_mapping = {z: i for i, z in enumerate(zs)}
         self.sprite_mapping = {sprite: i for i, sprite in enumerate(sprites)}
+        self.csprite_mapping = {csprite: i for i, csprite in enumerate(csprites)}
     # Base cases
     def visit_Z(self, i):
         return Z(self.z_mapping[i])
     def visit_Sprite(self, i, x, y, color):
         return Sprite(self.sprite_mapping[i], x.accept(self), y.accept(self), color=color.accept(self))
+    def visit_ColorSprite(self, i, x, y):
+        return ColorSprite(self.csprite_mapping[i], x.accept(self), y.accept(self))
     
     # Recursive cases
     def visit_Nil(self): return Nil()
@@ -829,6 +855,8 @@ class WellFormed(Visitor):
         return all(v.out_type == 'int' and v.accept(self) for v in [x, y, w, h, color])
     def visit_Sprite(self, i, x, y, color):
         return isinstance(i, int) and all(v.out_type == 'int' and v.accept(self) for v in [x, y, color])
+    def visit_ColorSprite(self, i, x, y):
+        return isinstance(i, int) and all(v.out_type == 'int' and v.accept(self) for v in [x, y])
     def visit_Seq(self, bmps): return all(bmp.out_type == 'bitmap' and bmp.accept(self) for bmp in bmps)
     def visit_Join(self, bmp1, bmp2): return all(bmp.out_type == 'bitmap' and bmp.accept(self) for bmp in [bmp1, bmp2])
     # def visit_Intersect(self, bmp):
@@ -877,6 +905,8 @@ class MapReduce(Visitor):
     # Map and reduce
     def visit_Sprite(self, i, x, y, color):
         return self.reduce(Sprite, self.f(Sprite, i), x.accept(self), y.accept(self), color.accept(self))
+    def visit_ColorSprite(self, i, x, y):
+        return self.reduce(ColorSprite, self.f(ColorSprite, i), x.accept(self), y.accept(self))
 
     # Reduce
     def visit_Not(self, b): return self.reduce(Not, b.accept(self))
@@ -1288,6 +1318,45 @@ def test_eval_sprite():
             f" out=\n{out}"
     print(" [+] passed test_sprite")
 
+def test_eval_colorsprite():
+    tests = [
+        ([["12_2",
+           "1_35",
+           "_45_",]],
+         ColorSprite(0),
+         ["12_2",
+           "1_35",
+           "_45_",]),
+        ([["21",
+           "1_"],
+          ["12",
+           "_1"]],
+         ColorSprite(1),
+         ["12",
+          "_1"]),
+        ([["1",
+           "2"],
+          ["12",
+           "21"]],
+         ColorSprite(1, x=Num(1), y=Num(2)),
+         ["___",
+          "___",
+          "_12",
+          "_21"]),
+    ]
+    for sprites, expr, correct_semantics in tests:
+        env = {'z': [],
+               'sprites': [],
+               'multicolor-sprites': [util.img_to_tensor(s, w=B_W, h=B_H) for s in sprites]}
+        out = expr.eval(env)
+        expected = util.img_to_tensor(correct_semantics, w=B_W, h=B_H)
+        assert T.equal(out, expected), \
+            f"failed test:\n" \
+            f" expr=\n{expr}\n" \
+            f" expected=\n{expected}\n" \
+            f" out=\n{out}"
+    print(" [+] passed test_csprite")
+
 def test_eval_color():
     tests = [
         (CornerRect(Num(0), Num(0),
@@ -1577,6 +1646,7 @@ if __name__ == '__main__':
     test_eval_bitmap()
     test_eval_color()
     test_eval_sprite()
+    test_eval_colorsprite()
     test_sprites()
     test_simplify_indices()
     test_range()
