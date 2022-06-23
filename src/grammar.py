@@ -62,6 +62,8 @@ class Expr(Visited):
         return self.extract_indices(Z)
     def sprites(self):
         return self.extract_indices(Sprite)
+    def csprites(self):
+        return self.extract_indices(ColorSprite)
     def count_leaves(self):
         def f_map(type, *args): return 1
         def f_reduce(type, *children): return sum(children)
@@ -99,12 +101,13 @@ class Expr(Visited):
             return []
     def add_line(self, line):
         assert isinstance(self, Seq)
-        assert type(line) in [Point, Line, CornerRect, Sprite]
+        assert type(line) in [Point, CornerLine, CornerRect, Sprite]
         return Seq(*self.bmps, line)
     def simplify_indices(self):
         zs = self.zs()
         sprites = self.sprites()
-        return self.accept(SimplifyIndices(zs, sprites))
+        csprites = self.csprites()
+        return self.accept(SimplifyIndices(zs, sprites, csprites))
     def serialize(self): return self.accept(Serialize())
     def well_formed(self):
         try:
@@ -241,7 +244,12 @@ class If(Expr):
         self.y = y
     def accept(self, v): return v.visit_If(self.b, self.x, self.y)
 
-class Line(Expr):
+class CornerLine(Expr):
+    """
+    A corner-to-corner representation of a line. The line is represented by two corners (x_1, y_1) and (x_2, y_2)
+    and includes the corner points and the line between them.  Taken together, the two points must form a
+    horizontal, vertical, or diagonal line.
+    """
     in_types = ['int', 'int', 'int', 'int', 'int']
     out_type = 'bitmap'
     def __init__(self, x1, y1, x2, y2, color=Num(1)):
@@ -250,7 +258,23 @@ class Line(Expr):
         self.x2 = x2
         self.y2 = y2
         self.color = color
-    def accept(self, v): return v.visit_Line(self.x1, self.y1, self.x2, self.y2, self.color)
+    def accept(self, v): return v.visit_CornerLine(self.x1, self.y1, self.x2, self.y2, self.color)
+
+class LengthLine(Expr):
+    """
+    A corner-direction-length representation of a line. The line is represented by a point (x, y),
+    a direction (dx, dy), and a length l.  The resulting line must be horizontal, vertical, or diagonal.
+    """
+    in_types = ['int', 'int', 'int', 'int', 'int', 'int']
+    out_types = 'bitmap'
+    def __init__(self, x, y, dx, dy, l, color=Num(1)):
+        self.x = x
+        self.y = y
+        self.dx = dx
+        self.dy = dy
+        self.l = l
+        self.color = color
+    def accept(self, v): return v.visit_LengthLine(self.x, self.y, self.dx, self.dy, self.l, self.color)
 
 class Point(Expr):
     in_types = ['int', 'int', 'int']
@@ -298,6 +322,15 @@ class Sprite(Expr):
         self.y = y
         self.color = color
     def accept(self, v): return v.visit_Sprite(self.i, self.x, self.y, self.color)
+
+class ColorSprite(Expr):
+    in_types = ['int', 'int', 'int']
+    out_type = 'bitmap'
+    def __init__(self, i, x=Num(0), y=Num(0)):
+        self.i = i
+        self.x = x
+        self.y = y
+    def accept(self, v): return v.visit_ColorSprite(self.i, self.x, self.y)
 
 class Seq(Expr):
     in_types = ['list(bitmap)']
@@ -388,10 +421,11 @@ class Visitor:
     def visit_And(self, x, y): self.fail('And')
     def visit_If(self, b, x, y): self.fail('If')
     def visit_Point(self, x, y, color): self.fail('Point')
-    def visit_Line(self, x1, y1, x2, y2, color): self.fail('Line')
+    def visit_CornerLine(self, x1, y1, x2, y2, color): self.fail('Line')
     def visit_CornerRect(self, x_min, y_min, x_max, y_max, color): self.fail('CornerRect')
     def visit_SizeRect(self, x, y, w, h, color): self.fail('SizeRect')
     def visit_Sprite(self, i, x, y, color): self.fail('Sprite')
+    def visit_ColorSprite(self, i, x, y): self.fail('ColorSprite')
     def visit_Join(self, bmp1, bmp2): self.fail('Join')
     def visit_Seq(self, bmps): self.fail('Seq')
     # def visit_Intersect(self, bmp): self.fail('Intersect')
@@ -419,6 +453,17 @@ class Eval(Visitor):
         return T.tensor([[f((x, y))
                           for x in range(self.width)]
                           for y in range(self.height)]).float()
+
+    def make_line(self, ax, ay, bx, by, c):
+        if ax == bx:  # vertical
+            return self.make_bitmap(lambda p: (ax == p[0] and ay <= p[1] <= by) * c)
+        elif ay == by:  # horizontal
+            return self.make_bitmap(lambda p: (ax <= p[0] <= bx and ay == p[1]) * c)
+        elif abs(bx - ax) == abs(by - ay):  # diagonal
+            return self.make_bitmap(lambda p: (ax <= p[0] <= bx and
+                                               ay <= p[1] <= by and
+                                               p[1] == ay + (p[0] - ax)) * c)
+        assert False, "Line must be vertical, horizontal, or diagonal"
 
     def overlay(self, *bmps):
         def overlay_pt(p):
@@ -486,40 +531,44 @@ class Eval(Visitor):
         assert isinstance(x, int) and isinstance(y, int)
         return self.make_bitmap(lambda p: (p[0] == x and p[1] == y) * c)
 
-    def visit_Line(self, x1, y1, x2, y2, color):
+    def visit_CornerLine(self, x1, y1, x2, y2, color):
         c = color.accept(self)
-        x1, y1, x2, y2 = (x1.accept(self), y1.accept(self),
-                          x2.accept(self), y2.accept(self))
+        x1, y1, x2, y2 = (x1.accept(self), y1.accept(self), x2.accept(self), y2.accept(self))
         assert all(isinstance(v, int) for v in [x1, y1, x2, y2])
-        assert 0 <= x1 <= x2 < self.width and 0 <= y1 <= y2 < self.height
         assert abs(x2 - x1) >= 1 or abs(y2 - y1) >= 1
-        if x1 == x2:            # vertical
-            return self.make_bitmap(lambda p: (x1 == p[0] and y1 <= p[1] <= y2) * c)
-        elif y1 == y2:          # horizontal
-            return self.make_bitmap(lambda p: (x1 <= p[0] <= x2 and y1 == p[1]) * c)
-        elif abs(x2 - x1) == abs(y2 - y1): # diagonal
-            return self.make_bitmap(lambda p: (x1 <= p[0] <= x2 and
-                                               y1 <= p[1] <= y2 and
-                                               p[1] == y1 + (p[0] - x1)) * c)
-        assert False, "Line must be vertical, horizontal, or diagonal"
+        return self.make_line(x1, y1, x2, y2, c)
+
+    def visit_LengthLine(self, x, y, dx, dy, l, color):
+        x, y, dx, dy, l, color = (v.accept(self) for v in [x, y, dx, dy, l, color])
+        assert all(isinstance(v, int) for v in [x, y, dx, dy, l])
+        assert dx in [-1, 0, 1] and dy in [-1, 0, 1], f'Found unexpected dx, dy=({dx}, {dy})'
+        assert l > 0
+        x2, y2 = x + dx * (l - 1), y + dy * (l - 1)
+        points = sorted([(x, y), (x2, y2)])
+        coords = [v for x, y in points for v in [x, y]]
+        return self.make_line(*coords, color)
 
     def visit_CornerRect(self, x_min, y_min, x_max, y_max, color):
         c = color.accept(self)
         x_min, y_min, x_max, y_max = (x_min.accept(self), y_min.accept(self),
                                       x_max.accept(self), y_max.accept(self))
         assert all(isinstance(v, int) for v in [x_min, y_min, x_max, y_max])
-        assert 0 <= x_min <= x_max < self.width and 0 <= y_min <= y_max < self.height
+        assert x_min <= x_max and y_min <= y_max
         return self.make_bitmap(lambda p: (x_min <= p[0] <= x_max and y_min <= p[1] <= y_max) * c)
 
     def visit_SizeRect(self, x, y, w, h, color):
         x, y, w, h, c = (x.accept(self), y.accept(self), w.accept(self), h.accept(self), color.accept(self))
         assert all(isinstance(v, int) for v in [x, y, w, h])
-        assert 0 <= x and x + w <= self.width and 0 <= y and y + h <= self.height
+        assert w > 0 and h > 0
         return self.make_bitmap(lambda p: (x <= p[0] < x + w and y <= p[1] < y + h) * c)
 
     def visit_Sprite(self, i, x, y, color):
         x, y, c = x.accept(self), y.accept(self), color.accept(self)
         return self.translate(self.env['sprites'][i] * c, x, y)
+
+    def visit_ColorSprite(self, i, x, y):
+        x, y = x.accept(self), y.accept(self)
+        return self.translate(self.env['color-sprites'][i], x, y)
 
     def visit_Seq(self, bmps):
         bmps = [bmp.accept(self) for bmp in bmps]
@@ -609,8 +658,10 @@ class Print(Visitor):
     def visit_If(self, b, x, y): return f'(if {b.accept(self)} {x.accept(self)} {y.accept(self)})'
     def visit_Point(self, x, y, color):
         return f'(Point[{color.accept(self)}] {x.accept(self)} {y.accept(self)})'
-    def visit_Line(self, x1, y1, x2, y2, color):
-        return f'(Line[{color.accept(self)}] {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
+    def visit_CornerLine(self, x1, y1, x2, y2, color):
+        return f'(CLine[{color.accept(self)}] {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
+    def visit_LengthLine(self, x, y, dx, dy, l, color):
+        return f'(LLine[{color.accept(self)}] {x.accept(self)} {y.accept(self)} {dx.accept(self)} {dy.accept(self)} {l.accept(self)})'
     def visit_CornerRect(self, x_min, y_min, x_max, y_max, color):
         return f'(CRect[{color.accept(self)}] {x_min.accept(self)} {y_min.accept(self)} ' \
                f'{x_max.accept(self)} {y_max.accept(self)})'
@@ -619,6 +670,8 @@ class Print(Visitor):
                f'{w.accept(self)} {h.accept(self)})'
     def visit_Sprite(self, i, x, y, color):
         return f'(Sprite_{i}[{color}] {x.accept(self)} {y.accept(self)})'
+    def visit_ColorSprite(self, i, x, y):
+        return f'(CSprite_{i}[{color}] {x.accept(self)} {y.accept(self)})'
     def visit_Seq(self, bmps): return '(seq ' + ' '.join([bmp.accept(self) for bmp in bmps]) + ')'
     def visit_Join(self, bmp1, bmp2): return f'(join {bmp1.accept(self)} {bmp2.accept(self)})'
     # def visit_Intersect(self, bmp): return f'(intersect {bmp.accept(self)})'
@@ -649,6 +702,8 @@ def deserialize(tokens):
                 return [Z(int(h[2:]))] + t
             if h.startswith('S'):
                 return [Sprite(int(h[2:]), t[1], t[2], color=t[0])] + t[3:]
+            if h.startswith('CS'):
+                return [ColorSprite(int(h[3:]), t[0], t[1])] + t[2:]
             if h == 'x_max':
                 return [XMax()] + t
             if h == 'y_max':
@@ -669,8 +724,10 @@ def deserialize(tokens):
             return [If(t[0], t[1], t[2])] + t[3:]
         if h == 'P':
             return [Point(t[1], t[2], color=t[0])] + t[3:]
-        if h == 'L':
-            return [Line(t[1], t[2], t[3], t[4], color=t[0])] + t[5:]
+        if h == 'CL':
+            return [CornerLine(t[1], t[2], t[3], t[4], color=t[0])] + t[5:]
+        if h == 'LL':
+            return [LengthLine(t[1], t[2], t[3], t[4], t[5], color=t[0])] + t[6:]
         if h == 'CR':
             return [CornerRect(t[1], t[2], t[3], t[4], color=t[0])] + t[5:]
         if h == 'SR':
@@ -723,8 +780,10 @@ class Serialize(Visitor):
     def visit_And(self, x, y): return ['&'] + x.accept(self) + y.accept(self)
     def visit_If(self, b, x, y): return ['?'] + b.accept(self) + x.accept(self) + y.accept(self)
     def visit_Point(self, x, y, color): return ['P'] + color.accept(self) + x.accept(self) + y.accept(self)
-    def visit_Line(self, x1, y1, x2, y2, color):
-        return ['L'] + color.accept(self) + x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self)
+    def visit_CornerLine(self, x1, y1, x2, y2, color):
+        return ['CL'] + color.accept(self) + x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self)
+    def visit_LengthLine(self, x, y, dx, dy, l, color):
+        return ['LL'] + color.accept(self) + x.accept(self) + y.accept(self) + dx.accept(self) + dy.accept(self) + l.accept(self)
     def visit_CornerRect(self, x_min, y_min, x_max, y_max, color):
         return ['CR'] + color.accept(self) + x_min.accept(self) + y_min.accept(self) +\
                x_max.accept(self) + y_max.accept(self)
@@ -732,6 +791,8 @@ class Serialize(Visitor):
         return ['SR'] + color.accept(self) + x.accept(self) + y.accept(self) + w.accept(self) + h.accept(self)
     def visit_Sprite(self, i, x, y, color):
         return [f'S_{i}'] + color.accept(self) + x.accept(self) + y.accept(self)
+    def visit_ColorSprite(self, i, x, y):
+        return [f'CS_{i}'] + x.accept(self) + y.accept(self)
     def visit_Seq(self, bmps):
         tokens = ['{']  # start
         for bmp in bmps:
@@ -750,18 +811,21 @@ class Serialize(Visitor):
     def visit_Repeat(self, f, n): return ['!'] + f.accept(self) + n.accept(self)
 
 class SimplifyIndices(Visitor):
-    def __init__(self, zs, sprites):
+    def __init__(self, zs, sprites, csprites):
         """
         zs: the indices of zs in the whole expression
         sprites: the indices of sprites in the whole expression
         """
         self.z_mapping = {z: i for i, z in enumerate(zs)}
         self.sprite_mapping = {sprite: i for i, sprite in enumerate(sprites)}
+        self.csprite_mapping = {csprite: i for i, csprite in enumerate(csprites)}
     # Base cases
     def visit_Z(self, i):
         return Z(self.z_mapping[i])
     def visit_Sprite(self, i, x, y, color):
         return Sprite(self.sprite_mapping[i], x.accept(self), y.accept(self), color=color.accept(self))
+    def visit_ColorSprite(self, i, x, y):
+        return ColorSprite(self.csprite_mapping[i], x.accept(self), y.accept(self))
     
     # Recursive cases
     def visit_Nil(self): return Nil()
@@ -776,8 +840,10 @@ class SimplifyIndices(Visitor):
     def visit_And(self, x, y): return And(x.accept(self), y.accept(self))
     def visit_If(self, b, x, y): return If(b.accept(self), x.accept(self), y.accept(self))
     def visit_Point(self, x, y, color): return Point(x.accept(self), y.accept(self), color.accept(self))
-    def visit_Line(self, x1, y1, x2, y2, color):
-        return Line(x1.accept(self), y1.accept(self), x2.accept(self), y2.accept(self), color.accept(self))
+    def visit_CornerLine(self, x1, y1, x2, y2, color):
+        return CornerLine(x1.accept(self), y1.accept(self), x2.accept(self), y2.accept(self), color.accept(self))
+    def visit_LengthLine(self, x, y, dx, dy, l, color):
+        return LengthLine(x.accept(self), y.accept(self), dx.accept(self), dy.accept(self), l.accept(self), color.accept(self))
     def visit_CornerRect(self, x_min, y_min, x_max, y_max, color):
         return CornerRect(x_min.accept(self), y_min.accept(self), x_max.accept(self), y_max.accept(self),
                           color.accept(self))
@@ -821,14 +887,18 @@ class WellFormed(Visitor):
     def visit_Point(self, x, y, color):
         return x.out_type == 'int' and y.out_type == 'int' and color.out_type == 'int' and \
            x.accept(self) and y.accept(self) and color.accept(self)
-    def visit_Line(self, x1, y1, x2, y2, color):
+    def visit_CornerLine(self, x1, y1, x2, y2, color):
         return all(v.out_type == 'int' and v.accept(self) for v in [x1, y1, x2, y2, color])
+    def visit_LengthLine(self, x, y, dx, dy, l, color):
+        return all(v.out_type == 'int' and v.accept(self) for v in [x, y, dx, dy, l, color])
     def visit_CornerRect(self, x_min, y_min, x_max, y_max, color):
         return all(v.out_type == 'int' and v.accept(self) for v in [x_min, y_min, x_max, y_max, color])
     def visit_SizeRect(self, x, y, w, h, color):
         return all(v.out_type == 'int' and v.accept(self) for v in [x, y, w, h, color])
     def visit_Sprite(self, i, x, y, color):
         return isinstance(i, int) and all(v.out_type == 'int' and v.accept(self) for v in [x, y, color])
+    def visit_ColorSprite(self, i, x, y):
+        return isinstance(i, int) and all(v.out_type == 'int' and v.accept(self) for v in [x, y])
     def visit_Seq(self, bmps): return all(bmp.out_type == 'bitmap' and bmp.accept(self) for bmp in bmps)
     def visit_Join(self, bmp1, bmp2): return all(bmp.out_type == 'bitmap' and bmp.accept(self) for bmp in [bmp1, bmp2])
     # def visit_Intersect(self, bmp):
@@ -877,6 +947,8 @@ class MapReduce(Visitor):
     # Map and reduce
     def visit_Sprite(self, i, x, y, color):
         return self.reduce(Sprite, self.f(Sprite, i), x.accept(self), y.accept(self), color.accept(self))
+    def visit_ColorSprite(self, i, x, y):
+        return self.reduce(ColorSprite, self.f(ColorSprite, i), x.accept(self), y.accept(self))
 
     # Reduce
     def visit_Not(self, b): return self.reduce(Not, b.accept(self))
@@ -887,8 +959,10 @@ class MapReduce(Visitor):
     def visit_And(self, x, y): return self.reduce(And, x.accept(self), y.accept(self))
     def visit_If(self, b, x, y): return self.reduce(If, x.accept(self), y.accept(self))
     def visit_Point(self, x, y, color): return self.reduce(Point, x.accept(self), y.accept(self), color.accept(self))
-    def visit_Line(self, x1, y1, x2, y2, color):
-        return self.reduce(Line, x1.accept(self), y1.accept(self), x2.accept(self), y2.accept(self), color.accept(self))
+    def visit_CornerLine(self, x1, y1, x2, y2, color):
+        return self.reduce(CornerLine, x1.accept(self), y1.accept(self), x2.accept(self), y2.accept(self), color.accept(self))
+    def visit_LengthLine(self, x, y, dx, dy, l, color):
+        return self.reduce(LengthLine, x.accept(self), y.accept(self), dx.accept(self), dy.accept(self), l.accept(self), color.accept(self))
     def visit_CornerRect(self, x_min, y_min, x_max, y_max, color):
         return self.reduce(CornerRect, x_min.accept(self), y_min.accept(self), x_max.accept(self), y_max.accept(self),
                            color.accept(self))
@@ -1018,47 +1092,70 @@ def test_eval():
 def test_eval_bitmap():
     tests = [
         # Line tests
-        (Line(Num(0), Num(0),
-              Num(1), Num(1)),
+        (CornerLine(Num(0), Num(0),
+                    Num(1), Num(1)),
          ["#___",
           "_#__",
           "____",
           "____"]),
-        (Line(Num(0), Num(0),
-              Num(3), Num(3)),
+        (CornerLine(Num(0), Num(0),
+                    Num(3), Num(3)),
          ["#___",
           "_#__",
           "__#_",
           "___#"]),
-        (Line(Num(1), Num(0),
-              Num(3), Num(2)),
+        (CornerLine(Num(1), Num(0),
+                    Num(3), Num(2)),
          ["_#__",
           "__#_",
           "___#",
           "____"]),
-        (Line(Num(1), Num(2),
-              Num(2), Num(3)),
+        (CornerLine(Num(1), Num(2),
+                    Num(2), Num(3)),
          ["____",
           "____",
           "_#__",
           "__#_"]),
-        (Line(Num(1), Num(0),
-              Num(3), Num(0)),
+        (CornerLine(Num(1), Num(0),
+                    Num(3), Num(0)),
          ["_###",
           "____",
           "____",
           "____"]),
-        (Line(Num(1), Num(2),
-              Num(1), Num(3)),
+        (CornerLine(Num(1), Num(2),
+                    Num(1), Num(3)),
          ["____",
           "____",
           "_#__",
           "_#__"]),
-
+        (LengthLine(Num(0), Num(0), Num(1), Num(1), Num(3)),
+         ["#__",
+          "_#_",
+          "__#"]),
+        (LengthLine(Num(0), Num(0), Num(1), Num(1), Num(2)),
+         ["#__",
+          "_#_",
+          "___"]),
+        (LengthLine(Num(1), Num(0), Num(0), Num(1), Num(3)),
+         ["_#_",
+          "_#_",
+          "_#_"]),
+        (LengthLine(Num(1), Num(0), Num(0), Num(1), Num(5)),
+         ["_#_",
+          "_#_",
+          "_#_",
+          "_#_",
+          "_#_",]),
+        (LengthLine(Num(3), Num(2), Num(0), Num(-1), Num(2)),
+         ["____",
+          "___#",
+          "___#",
+          "____",]),
+        
         # Reflection
         (Apply(HFlip(),
-               Line(Num(0), Num(0),
-                    Num(3), Num(3))),
+               CornerLine(Num(0), Num(0),
+                          Num(3), Num(3))),
          ["#___" + "_"*(B_W-8) + "___#",
           "_#__" + "_"*(B_W-8) + "__#_",
           "__#_" + "_"*(B_W-8) + "_#__",
@@ -1089,8 +1186,8 @@ def test_eval_bitmap():
         # Joining
         (Join(CornerRect(Num(0), Num(0),
                          Num(1), Num(1)),
-              Line(Num(2), Num(3),
-                   Num(3), Num(3))),
+              CornerLine(Num(2), Num(3),
+                         Num(3), Num(3))),
          ["##__",
           "##__",
           "____",
@@ -1107,59 +1204,59 @@ def test_eval_bitmap():
 
         # Translate
         (Apply(Translate(Num(0), Num(0)),
-               Line(Num(0), Num(0),
-                    Num(3), Num(3))),
+               CornerLine(Num(0), Num(0),
+                          Num(3), Num(3))),
          ["#___",
           "_#__",
           "__#_",
           "___#"]),
         (Apply(Compose(Translate(Num(1), Num(0)), Recolor(Num(2))),
-               Line(Num(0), Num(0),
-                    Num(3), Num(3))),
+               CornerLine(Num(0), Num(0),
+                          Num(3), Num(3))),
          ["12___",
           "_12__",
           "__12_",
           "___12"]),
         (Apply(Compose(Translate(Num(-1), Num(0)), Recolor(Num(2))),
-               Line(Num(0), Num(0),
-                    Num(3), Num(3))),
+               CornerLine(Num(0), Num(0),
+                          Num(3), Num(3))),
          ["1____",
           "21___",
           "_21__",
           "__21_"]),
         (Apply(Compose(Translate(Num(0), Num(1)), Recolor(Num(2))),
-               Line(Num(0), Num(0),
-                    Num(3), Num(3))),
+               CornerLine(Num(0), Num(0),
+                          Num(3), Num(3))),
          ["1___",
           "21__",
           "_21_",
           "__21",
           "___2"]),
         (Apply(Compose(Translate(Num(0), Num(-1)), Recolor(Num(2))),
-               Line(Num(0), Num(0),
-                    Num(3), Num(3))),
+               CornerLine(Num(0), Num(0),
+                          Num(3), Num(3))),
          ["12___",
           "_12__",
           "__12_",
           "___1_"]),
         (Apply(Compose(Translate(Num(-1), Num(-1)), Recolor(Num(2))),
-               Line(Num(0), Num(0),
-                    Num(3), Num(3))),
+               CornerLine(Num(0), Num(0),
+                          Num(3), Num(3))),
          ["2___",
           "_2__",
           "__2_",
           "___1"]),
         (Apply(Compose(Translate(Num(1), Num(1)), Recolor(Num(2))),
-               Line(Num(0), Num(0),
-                    Num(3), Num(3))),
+               CornerLine(Num(0), Num(0),
+                          Num(3), Num(3))),
          ["1____",
           "_2___",
           "__2__",
           "___2_",
           "____2"]),
         (Apply(Compose(Translate(Num(2), Num(3)), Recolor(Num(2))),
-               Line(Num(0), Num(0),
-                    Num(3), Num(3))),
+               CornerLine(Num(0), Num(0),
+                          Num(3), Num(3))),
          ["1_____",
           "_1____",
           "__1___",
@@ -1176,8 +1273,8 @@ def test_eval_bitmap():
           "____#_",
           "_____#"]),
         (Apply(Repeat(Translate(Num(2), Num(0)), Num(2)),
-               Line(Num(0), Num(0),
-                    Num(3), Num(3))),
+               CornerLine(Num(0), Num(0),
+                          Num(3), Num(3))),
          ["#_#_#___",
           "_#_#_#__",
           "__#_#_#_",
@@ -1185,8 +1282,8 @@ def test_eval_bitmap():
         (Apply(Repeat(Compose(Translate(Num(2), Num(0)),
                               Recolor(Num(2))),
                       Num(2)),
-               Line(Num(0), Num(0),
-                    Num(3), Num(3))),
+               CornerLine(Num(0), Num(0),
+                          Num(3), Num(3))),
          ["1_2_2___",
           "_1_2_2__",
           "__1_2_2_",
@@ -1196,7 +1293,7 @@ def test_eval_bitmap():
           "###_",
           "###_",
           "____"]),
-        (Line(Num(0), Num(0), Num(3), Num(3)),
+        (CornerLine(Num(0), Num(0), Num(3), Num(3)),
          ["#___",
           "_#__",
           "__#_",
@@ -1288,6 +1385,45 @@ def test_eval_sprite():
             f" out=\n{out}"
     print(" [+] passed test_sprite")
 
+def test_eval_colorsprite():
+    tests = [
+        ([["12_2",
+           "1_35",
+           "_45_",]],
+         ColorSprite(0),
+         ["12_2",
+           "1_35",
+           "_45_",]),
+        ([["21",
+           "1_"],
+          ["12",
+           "_1"]],
+         ColorSprite(1),
+         ["12",
+          "_1"]),
+        ([["1",
+           "2"],
+          ["12",
+           "21"]],
+         ColorSprite(1, x=Num(1), y=Num(2)),
+         ["___",
+          "___",
+          "_12",
+          "_21"]),
+    ]
+    for sprites, expr, correct_semantics in tests:
+        env = {'z': [],
+               'sprites': [],
+               'color-sprites': [util.img_to_tensor(s, w=B_W, h=B_H) for s in sprites]}
+        out = expr.eval(env)
+        expected = util.img_to_tensor(correct_semantics, w=B_W, h=B_H)
+        assert T.equal(out, expected), \
+            f"failed test:\n" \
+            f" expr=\n{expr}\n" \
+            f" expected=\n{expected}\n" \
+            f" out=\n{out}"
+    print(" [+] passed test_csprite")
+
 def test_eval_color():
     tests = [
         (CornerRect(Num(0), Num(0),
@@ -1296,14 +1432,14 @@ def test_eval_color():
           "22__",
           "____",
           "____"]),
-        (Line(Num(1), Num(0),
-              Num(3), Num(2), Num(3)),
+        (CornerLine(Num(1), Num(0),
+                    Num(3), Num(2), Num(3)),
          ["_3__",
           "__3_",
           "___3",
           "____"]),
-        (Line(Num(1), Num(0),
-              Num(3), Num(0), Num(2)),
+        (CornerLine(Num(1), Num(0),
+                    Num(3), Num(0), Num(2)),
          ["_222",
           "____",
           "____",
@@ -1432,10 +1568,10 @@ def test_deserialize_breaking():
         (['P', 'g', 1, 2], True),
         (['P', 'CR', 0, 1, 2, 3, 4, 5, 6], True),
         (['{', 'P', 0, 1, 2, '}'], False),
-        (['L', 1, 1, 3, 3, 2], False),
-        (['L', 'g', 1, 1, 3, 3], True),
+        (['CL', 1, 1, 3, 3, 2], False),
+        (['CL', 'g', 1, 1, 3, 3], True),
         (['CR', 0, 9, 'CR', 11, 6, 8, '}', '}', 4, 2, 8, 15, 9, 9, 7, 13, 4, '}', 2, 8], True),
-        (['L', 'CR', 4, 8, 2, 4, 3, 2, '}', 9, 1, '}', 2, 6, '}', 6, 4, 8], True),
+        (['CL', 'CR', 4, 8, 2, 4, 3, 2, '}', 9, 1, '}', 2, 6, '}', 6, 4, 8], True),
     ]
     for case, should_fail in test_cases:
         try:
@@ -1457,7 +1593,7 @@ def test_well_formed():
         (XMax(), True),
         (Point(Num(0), Num(1)), True),
         (Point(0, 1), False),
-        (Line(Num(1), Num(1), Num(3), Num(3), Num(1)), True),
+        (CornerLine(Num(1), Num(1), Num(3), Num(3), Num(1)), True),
     ]
     for expr, ans in test_cases:
         out = expr.well_formed()
@@ -1577,6 +1713,7 @@ if __name__ == '__main__':
     test_eval_bitmap()
     test_eval_color()
     test_eval_sprite()
+    test_eval_colorsprite()
     test_sprites()
     test_simplify_indices()
     test_range()
