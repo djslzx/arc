@@ -764,16 +764,16 @@ if __name__ == '__main__':
     # sample_model_on_bitmaps(model, bitmaps)
 
     # pretraining model
-    model = make_model('10-R-5e20l0z')
+    model = make_model('50k-R-5e1~20l0z')
     model.pretrain_policy(
         save_dir='../models',
         tloader=model.make_policy_dataloader(
-            f'../data/policy-pretraining/10-R-5e20l1~3z/today/train/deltas_*.dat',
-            batch_size=16
+            f'/home/djl328/arc/data/50k-R-5e*l0z/2022-06-15T20:16:18-04:00/train/deltas_*.dat',
+            batch_size=32
         ),
         vloader=model.make_policy_dataloader(
-            f'../data/policy-pretraining/10-R-5e20l1~3z/today/train/deltas_*.dat',
-            batch_size=16
+            f'/home/djl328/arc/data/500-R-5e*l0z/2022-06-15T20:16:18-04:00/test/deltas_*.dat',
+            batch_size=32
         ),
         epochs=100_000,
         lr=10 ** -5,
