@@ -566,21 +566,19 @@ if __name__ == '__main__':
     # demo_gen_policy_data()
     # test_reorder_envs()
 
-    demo_flat_scenes()
-    exit(0)
-
-    if len(sys.argv) - 1 != 6:
-        print("Usage: data.py dir mode min_zs max_zs n_lines t")
+    args = ['dir', 'mode', 'min_zs', 'max_zs', 'n_lines', 'n_programs', 'n_workers', 't']
+    if len(sys.argv) - 1 != len(args):
+        print("Usage: data.py", " ".join(args))
         exit(1)
     
-    dir, mode, min_zs, max_zs, n_lines, t = sys.argv[1:]
+    dir, mode, min_zs, max_zs, n_lines, n_programs, n_workers, t = sys.argv[1:]
     min_zs = int(min_zs)
     max_zs = int(max_zs)
     n_lines = int(n_lines)
+    n_programs = int(n_programs)
+    n_workers = int(n_workers)
     n_envs = 5
-    n_programs = 10
-    s_n_programs = '10'
-    n_workers = 1
+    s_n_programs = util.num_to_str(n_programs)
     z_code = f'{min_zs}~{max_zs}' if min_zs < max_zs else f'{min_zs}'
     code = f'{s_n_programs}-R-{n_envs}e{n_lines}l{z_code}z'
 
