@@ -766,7 +766,7 @@ if __name__ == '__main__':
     # pretraining model
     model = make_model('50k-R-5e1~20l0z')
     model.pretrain_policy(
-        save_dir='../models',
+        save_dir='/home/djl328/arc/models',
         tloader=model.make_policy_dataloader(
             f'/home/djl328/arc/data/50k-R-5e*l0z/2022-06-15T20:16:18-04:00/train/deltas_*.dat',
             batch_size=32
