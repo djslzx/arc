@@ -22,7 +22,7 @@ def filter_zs(env, zs):
     return {'z': T.tensor([z if i in zs else Z_IGNORE
                            for i, z in enumerate(env['z'])])}
 
-def mask_envs(f, envs):
+def mask_unused_zs(f, envs):
     """
     Mask out z's that aren't used by setting them to Z_IGNORE
     """
@@ -36,6 +36,7 @@ def mask_envs(f, envs):
 def reorder_envs(f: Expr, envs: List[Dict]):
     z_indices = f.zs()
     sprite_indices = f.sprites()
+    csprite_indices = f.csprites()
 
     # reorder envs to place used indices at the front (to where they will be remapped)
     return [
@@ -43,7 +44,9 @@ def reorder_envs(f: Expr, envs: List[Dict]):
               [util.unwrap_tensor(env['z'][i]) for i in range(LIB_SIZE) if i not in z_indices],
          'sprites': [env['sprites'][i] for i in sprite_indices] +
                     [env['sprites'][i] for i in range(LIB_SIZE) if i not in sprite_indices],
-        }
+         'color-sprites': [env['color-sprites'][i] for i in csprite_indices] +
+                          [env['color-sprites'][i] for i in range(LIB_SIZE) if i not in csprite_indices],
+         }
         for env in envs
     ]
 
@@ -79,21 +82,6 @@ def gen_closures(n_envs: int, n_programs: int, n_lines: int,
         if debug: print(f'[{i}/{n_programs}]: {p}, {extract_zs(envs)}')
         yield p, envs
 
-def compute_value(expr, bitmaps):
-    """
-    Compute vector of values outputted by value function.
-    - log P(B|f')
-    - I[f' is a prefix of f]
-    - min{g: f'g ~ f} |g|
-      - meaning: minimum number of lines that need to be added to f' to yield the same behavior as f
-    - min{ d1..dk st f'd1..dk ~ f} -log (
-        P(d1 | B, f', B'(f')) *
-        P(d2 | B, f'd1, B'(f'd1)) *
-        P(d3 | B, f'd1d2, B'(f'd1d2)) *
-        ...)
-    """
-    pass
-
 def is_valid(expr: Expr, envs: List[Dict]):
     for env in envs:
         try:
@@ -118,10 +106,13 @@ def choose_random_sprite(envs: List[Dict], render_height: int, render_width: int
         width_bound -= 1
     raise UnimplementedError("Shouldn't get here")
 
-def make_rect(x, y, width, height, color=1):
-    assert width >= 1 and height >= 1
-    # assert x >= 0 and y >= 0
-    return CornerRect(Num(x), Num(y), Num(x + width - 1), Num(y + height - 1), color=Num(color))
+def make_line(x, y, dx, dy, length, color=1):
+    assert length >= 1
+    assert dx in [-1, 0, 1] and dy in [-1, 0, 1] and not (dx == dy == 0)
+    p1 = x, y
+    p2 = x + length * dx, y + length * dy
+    corners = sorted([p1, p2])
+    return CornerLine(*corners, color=Num(color))
 
 def roll_size(mu=3, sigma=2):
     return max(0, int(random.normalvariate(mu, sigma)))  # slower than random.gauss, but thread-safe
@@ -140,15 +131,15 @@ def max_dimensions(pos: Tuple[int, int], positions: List[Tuple[int, int]], heigh
     return nearest_x - px, nearest_y - py
 
 def plot_max_dimensions(positions, height, width):
-    lines = [make_rect(x, y, 1, 1, color=1) for x, y in positions]
+    lines = [SizeRect(x, y, 1, 1) for x, y in positions]
     for x, y in positions:
         w, h = max_dimensions((x, y), positions, height, width)
-        box = make_rect(x, y, w, h, color=3)
+        box = SizeRect(x, y, w, h, color=Num(3))
         lines.append(box)
     viz.viz(Seq(*lines).eval(), title="Points with bounds")
 
 def plot_points(points):
-    viz.viz(Seq(*[make_rect(x, y, 1, 1, color=1) for x, y in points]).eval(),
+    viz.viz(Seq(*[SizeRect(x, y, 1, 1) for x, y in points]).eval(),
             title="Points")
 
 def dist(ax, ay, bx, by):
@@ -197,6 +188,40 @@ def max_space_positions(n_points, height, width, perturb, debug):
             points.append((x, y))
     return points
 
+def random_line(x, y, width, height):
+    dx, dy = random.choice([(dx, dy)
+                            for dx, dy in it.product([-1, 0, 1], [-1, 0, 1])
+                            if not (dx == 0 and dy == 0)])
+    max_width = dx * ((width - 1 if dx > 0 else 0) - x) + 1
+    max_height = dy * ((height - 1 if dy > 0 else 0) - x) + 1
+    max_length = min(max_width, max_height) \
+        if max_width > 1 and max_height > 1 \
+        else max(max_width, max_height)
+    length = random.choice(range(1, max_length))
+    return make_line(x, y, dx, dy, length)
+
+def random_rect(x, y, width, height, include_zs):
+    return SizeRect(
+        Num(x) if not include_zs or random.randint(0, 4) > 0 else random_z(),
+        Num(y) if not include_zs or random.randint(0, 4) > 0 else random_z(),
+        Num(util.clamp(roll_size(mu=2, sigma=2), 1, width - x)),
+        Num(util.clamp(roll_size(mu=2, sigma=2), 1, height - y))
+    )
+
+def make_flat_scene_shape(envs, x, y, height, width, include_zs, debug=True):
+    obj_type = random.choices(population=[CornerLine, SizeRect], weights=[1, 1], k=1)[0]
+    make_obj = {
+        CornerLine:     lambda: random_line(x, y, width, height),
+        SizeRect: lambda: random_rect(x, y, width, height, include_zs),
+    }
+    n_tries = 0
+    while True:
+        n_tries += 1
+        if debug and n_tries % 100 == 0: print(f'[SRect, Line]: {n_tries} tries')
+        obj = make_obj[obj_type]()
+        if is_valid(obj, envs):
+            return obj
+
 def make_flat_scene(n_objs, envs, height, width, include_zs=False, debug=True):
     """Compose a program that generates rectangle/sprite scenes with minimal occlusion"""
     # seed a bunch of random positions and only keep the ones that have some distance between each other
@@ -204,7 +229,7 @@ def make_flat_scene(n_objs, envs, height, width, include_zs=False, debug=True):
     positions = max_space_positions(n_objs, height, width, perturb=False, debug=debug)
     
     # choose random sizes that err towards being small
-    lines = []
+    program_lines = []
     for x, y in positions:
         if random.randint(0, 9) < 3:
             line = choose_random_sprite(envs, height-1, width-1)
@@ -212,7 +237,7 @@ def make_flat_scene(n_objs, envs, height, width, include_zs=False, debug=True):
             n_tries = 0
             while True:
                 n_tries += 1
-                if debug and n_tries % 100 == 0: print(f'[SRect]: {n_tries} tries')
+                if debug and n_tries % 100 == 0: print(f'[SRect, Line]: {n_tries} tries')
                 line = SizeRect(
                     Num(x) if not include_zs or random.randint(0, 4) > 0 else random_z(),
                     Num(y) if not include_zs or random.randint(0, 4) > 0 else random_z(),
@@ -223,15 +248,15 @@ def make_flat_scene(n_objs, envs, height, width, include_zs=False, debug=True):
                     break
         
         # choose a relatively unused color to help variety
-        line.color = choose_color(lines)
-        lines.append(line)
-        lines = canonical_ordering(lines)
-        # lines = rm_dead_code(lines, envs, strict=True)
+        line.color = choose_color(program_lines)
+        program_lines.append(line)
+        program_lines = canonical_ordering(program_lines)
+        program_lines = rm_dead_code(program_lines, envs, strict=True)
         
-        if debug: print(lines)
+        if debug: print(program_lines)
 
     # favor putting random args as positions instead of dimensions
-    return Seq(*lines)
+    return Seq(*program_lines)
 
 def make_shape(shape_type: Type[Expr], envs: List[Dict],
                min_zs: int, max_zs: int,
@@ -319,7 +344,7 @@ def canonical_ordering(lines: List[Expr]):
     def destructure(e):
         if isinstance(e, Point):
             return 0, e.x, e.y
-        elif isinstance(e, Line):
+        elif isinstance(e, CornerLine):
             return 1, e.x1, e.y1, e.x2, e.y2
         elif isinstance(e, CornerRect):
             return 2, e.x_min, e.y_min, e.x_max, e.y_max, e.color
@@ -338,7 +363,7 @@ def demo_create_program():
     p = make_program(envs=envs,
                      arg_exprs=[Z(i) for i in range(LIB_SIZE)] + [Num(i) for i in range(0, 10)],
                      n_lines=3,
-                     line_types=[CornerRect, Line, Point],
+                     line_types=[CornerRect, CornerLine, Point],
                      line_type_weights=[4, 3, 1],
                      n_zs=(0, 2),
                      debug=True)
@@ -357,7 +382,7 @@ def demo_gen_closures():
     with mp.Pool(processes=n_workers) as pool:
         pool.starmap(gen_closures,
                      [(f'{fname}{i}.dat', n_envs, n_programs_per_worker, n_lines,
-                       arg_exprs, (0, 2), [CornerRect, Line, Point], [4, 3, 1], True)
+                       arg_exprs, (0, 2), [CornerRect, CornerLine, Point], [4, 3, 1], True)
                       for i in range(workload_sz)])
 
     for i, (f, envs) in enumerate(util.load_incremental(f'{fname}*.dat')):
@@ -461,7 +486,7 @@ def collect_stats(dataset: Iterable, max_line_count=3):
             "overlap": 0}  # overlap between rendered lines
         for i in range(1, max_line_count+1)
     }
-    n_of_type = {t: 0 for t in [Point, Line, CornerRect]}  # track number of lines by type
+    n_of_type = {t: 0 for t in [Point, CornerLine, CornerRect]}  # track number of lines by type
     seen_lines = set()  # track unique lines
 
     n_items = 0

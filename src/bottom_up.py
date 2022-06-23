@@ -117,7 +117,7 @@ def integer_partitions(target_value, number_of_arguments):
 
 def test_bottom_up():
     grammar = Grammar(
-        ops=[Join, CornerRect, Line, Point, Plus, Minus, Times, If, And, Not],
+        ops=[Join, CornerRect, CornerLine, Point, Plus, Minus, Times, If, And, Not],
         consts=[Num(i) for i in range(LIB_SIZE)] + [Z(i) for i in range(LIB_SIZE)],
     )
 
