@@ -36,6 +36,11 @@ SELECTED_TASK_NAMES = [
     '6c434453', '6e82a1ae', '7c008303', '7ddcd7ec', '99b1bc43',
     'a3325580',
 ]
+SEQ_FEASIBLE_TASK_NAMES = [
+    '025d127b', '150deff5', '1caeab9d', '3af2c5a8', '47c1f68c', '5c0a986e',
+    '6150a2bd', '62c24649', '6c434453', '7c008303', '7ddcd7ec', '99b1bc43',
+    'b8cdaf2b', 'b94a9452', 'c8f0f002', 'd631b094', 'e179c5f4', 'f76d97a5',
+]
 
 def read_arc_file(filename: str) -> Tuple[str, Task]:
     with open(filename, 'r') as f:
@@ -116,17 +121,16 @@ def n_tasks_within_dim(height: int, width: int, dims: List[Dict]) -> int:
         n += dim['height'] <= height and dim['width'] <= width
     return n
 
-def plot_arc_dimensions():
+def get_dims(names: List[str], domain: List[str]):
     filenames = [name
-                 for task_name in SELECTED_TASK_NAMES
+                 for task_name in names
                  for name in glob(f'{ARC_DIR}/{task_name}.json')]
     tasks = [task for name, task in read_arc_files(filenames)]
-    dimensions = dims(tasks, domain=['input', 'output'])
-    print(plot_dims(dimensions))
-    n_dims = len(dimensions)
-    for n in range(18, 32):
-        n_filtered = n_tasks_within_dim(n, n, dimensions)
-        print(n, n_filtered)
+    return dims(tasks, domain)
+
+def plot_arc_dimensions(names: List[str]):
+    dimensions = get_dims(names, domain=['input', 'output'])
+    plot_dims(dimensions)
 
 def selected_task_bitmaps() -> List[T.Tensor]:
     filenames = [name
@@ -146,7 +150,11 @@ def survey_colors():
     tasks = [task for name, task in read_arc_files(filenames)]
     print(colors(tasks, ['input', 'output']))
 
+
 if __name__ == '__main__':
     # print(selected_task_bitmaps())
     # survey_colors()
-    plot_arc_dimensions()
+    plot_arc_dimensions(names=SEQ_FEASIBLE_TASK_NAMES)
+    dims = get_dims(names=SEQ_FEASIBLE_TASK_NAMES, domain=['input', 'output'])
+    print(n_tasks_within_dim(10, 10, dims))
+    print(n_tasks_within_dim(14, 14, dims))
