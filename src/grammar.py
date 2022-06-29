@@ -29,9 +29,9 @@ SIMPLE_LEXICON = (
     [i for i in range(Z_LO, Z_HI+1)] +
     [f'z_{i}' for i in range(LIB_SIZE)] +
     [f'S_{i}' for i in range(LIB_SIZE)] +
-    ['x_max', 'y_max', 'P', 'L', 'CR', 'SR', '{', '}', '(', ')']
+    [f'CS_{i}' for i in range(LIB_SIZE)] +
+    ['x_max', 'y_max', 'P', 'CL', 'LL', 'CR', 'SR', '{', '}', '(', ')']
 )
-SEQ_END = "SEQ_END"
 
 class Visited:
     def accept(self, visitor):
@@ -101,7 +101,7 @@ class Expr(Visited):
             return []
     def add_line(self, line):
         assert isinstance(self, Seq)
-        assert type(line) in [Point, CornerLine, CornerRect, Sprite]
+        assert type(line) in [Point, CornerLine, LengthLine, CornerRect, SizeRect, Sprite, ColorSprite]
         return Seq(*self.bmps, line)
     def simplify_indices(self):
         zs = self.zs()
@@ -150,8 +150,22 @@ def seed_sprites(n_sprites=LIB_SIZE, height=B_H, width=B_W):
                                     H=height)
                     for _ in range(n_sprites)])
 
+def seed_color_sprites(n_sprites=LIB_SIZE, height=B_H, width=B_W):
+    width_popn = list(range(2, min(width, SPRITE_MAX_SIZE)))
+    height_popn = list(range(2, min(height, SPRITE_MAX_SIZE)))
+    return T.stack([ant.make_multicolored_sprite(
+        w=random.choices(population=width_popn, weights=[1/(1+w) for w in width_popn], k=1)[0],
+        h=random.choices(population=height_popn, weights=[1/(1+h) for h in height_popn], k=1)[0],
+        W=width,
+        H=height)
+        for _ in range(n_sprites)])
+
 def seed_envs(n_envs):
-    return [{'z': seed_zs(), 'sprites': seed_sprites()}
+    # FIXME: add color sprites (make normal sprites then apply colors)
+    return [{'z': seed_zs(),
+             'sprites': seed_sprites(),
+             'color-sprites': seed_color_sprites()
+             }
             for _ in range(n_envs)]
 
 # class IllFormedError(Exception): pass
@@ -543,8 +557,7 @@ class Eval(Visitor):
         assert all(isinstance(v, int) for v in [x, y, dx, dy, l])
         assert dx in [-1, 0, 1] and dy in [-1, 0, 1], f'Found unexpected dx, dy=({dx}, {dy})'
         assert l > 0
-        x2, y2 = x + dx * (l - 1), y + dy * (l - 1)
-        points = sorted([(x, y), (x2, y2)])
+        points = sorted([(x, y), (x + dx * (l - 1), y + dy * (l - 1))])
         coords = [v for x, y in points for v in [x, y]]
         return self.make_line(*coords, color)
 
@@ -669,9 +682,9 @@ class Print(Visitor):
         return f'(SRect[{color.accept(self)}] {x.accept(self)} {y.accept(self)} ' \
                f'{w.accept(self)} {h.accept(self)})'
     def visit_Sprite(self, i, x, y, color):
-        return f'(Sprite_{i}[{color}] {x.accept(self)} {y.accept(self)})'
+        return f'(Sprite_{i}[{color.accept(self)}] {x.accept(self)} {y.accept(self)})'
     def visit_ColorSprite(self, i, x, y):
-        return f'(CSprite_{i}[{color}] {x.accept(self)} {y.accept(self)})'
+        return f'(CSprite_{i} {x.accept(self)} {y.accept(self)})'
     def visit_Seq(self, bmps): return '(seq ' + ' '.join([bmp.accept(self) for bmp in bmps]) + ')'
     def visit_Join(self, bmp1, bmp2): return f'(join {bmp1.accept(self)} {bmp2.accept(self)})'
     # def visit_Intersect(self, bmp): return f'(intersect {bmp.accept(self)})'
@@ -696,13 +709,11 @@ def deserialize(tokens):
         if isinstance(h, int):
             return [Num(h)] + t
         if isinstance(h, str):
-            # if h == SEQ_END:
-            #     return t
-            if h.startswith('z'):
+            if h.startswith('z_'):
                 return [Z(int(h[2:]))] + t
-            if h.startswith('S'):
+            if h.startswith('S_'):
                 return [Sprite(int(h[2:]), t[1], t[2], color=t[0])] + t[3:]
-            if h.startswith('CS'):
+            if h.startswith('CS_'):
                 return [ColorSprite(int(h[3:]), t[0], t[1])] + t[2:]
             if h == 'x_max':
                 return [XMax()] + t
