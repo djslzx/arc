@@ -4,13 +4,115 @@ import pickle
 import pdb
 import os
 from glob import glob
-from math import floor, ceil, log10
+from math import floor, ceil, log10, sqrt
 from pathlib import Path
 import random
 from datetime import datetime
-from typing import List
+from typing import List, Tuple, Optional
+from collections import namedtuple
 
 dirname = os.path.dirname(__file__)
+
+Rect = namedtuple(typename='Rect', field_names=['x', 'y', 'w', 'h'])
+
+def transpose_all(rects: List[Rect]) -> List[Rect]:
+    return [
+        Rect(x=r.y, y=r.x, w=r.h, h=r.w)
+        for r in rects
+    ]
+
+def split_sum(n: int, k: int, bounds: Optional[Tuple[int, int]]) -> List[int]:
+    """Split n into nonzero s1,...,sk such that sum(s1,...,sk) = n."""
+    assert n >= k, f'Too many splits: n={n}, k={k}'
+    if bounds:
+        lo_bound, hi_bound = bounds
+    else:
+        lo_bound, hi_bound = 1, n
+    assert hi_bound * k >= n, f'Bound is too low to reach n={n} in k={k} steps'
+    summands = []
+    while len(summands) < k - 1:
+        n_remaining = k - len(summands)
+        summand = random.randint(lo_bound, min(hi_bound, n - sum(summands) - n_remaining + 1))
+        summands.append(summand)
+    summands.append(n - sum(summands))
+    assert sum(summands) == n, f"Summands sum to {sum(summands)} instead of n={n}"
+    assert len(summands) == k, f"Number of summands isn't k: {len(summands)}"
+    return summands
+
+def split_sum_centered(n: int, k: int,
+                       n_picks: Optional[int] = None,
+                       bounds: Optional[Tuple[int, int]] = None) -> List[int]:
+    """
+    Split n into bounded s1,...,sk such that sum(s1,...,sk) = n, but make summands relatively close to one another.
+    `n_picks` controls how many adds/subtracts are performed; higher `n_picks` moves the summands further away from
+    an equal split.
+    """
+    assert n >= k
+    
+    # Handle singleton
+    if k < 2: return [n]
+    
+    # Handle optional bounds
+    if bounds:
+        lo_bound, hi_bound = bounds
+    else:
+        lo_bound, hi_bound = 1, n
+    assert hi_bound * k >= n, f'Bound is too low to reach n={n} in k={k} steps'
+    
+    # Handle optional n_picks
+    if not n_picks:
+        n_picks = k
+    
+    # Initialize summands to equal split
+    summands = [n // k for _ in range(k)]
+    
+    # Ensure that split sums to n
+    if sum(summands) != n:
+        i = 0
+        while sum(summands) != n:
+            summands[i % len(summands)] += 1
+            i += 1
+    
+    # Perturb summands
+    for _ in range(n_picks):
+        i, j = random.choices(population=range(0, k-1), k=2)
+        if summands[j] - 1 >= lo_bound and summands[i] + 1 <= hi_bound:  # keep summands within bounds
+            summands[i] += 1
+            summands[j] -= 1
+
+    # Check invariants
+    assert sum(summands) == n, f"Summands sum to {sum(summands)} instead of n={n}"
+    assert len(summands) == k, f"Number of summands isn't k: {len(summands)}"
+    return summands
+
+def random_grid(n_cells: int, height: int, width: int) -> List[Rect]:
+    # split mat into randomly-sized rows
+    n_rows = floor(sqrt(n_cells))
+    row_heights = split_sum_centered(n=height, k=n_rows, n_picks=height//2, bounds=(1, height))
+
+    # allocate n_cells across the rows
+    n_cols_per_row = split_sum_centered(n=n_cells, k=n_rows, n_picks=n_cells, bounds=(1, width))
+    
+    # split rows into randomly-sized columns
+    row_widths = [
+        split_sum_centered(n=width, k=n_cols, n_picks=width, bounds=(1, width))
+        for n_cols in n_cols_per_row
+    ]
+
+    # make rectangles using row heights and cell widths
+    rects = []
+    y_offset = 0
+    for cell_height, cell_widths in zip(row_heights, row_widths):
+        x_offset = 0
+        for cell_width in cell_widths:
+            rects.append(
+                Rect(x=x_offset, y=y_offset, w=cell_width, h=cell_height)
+            )
+            x_offset += cell_width
+        y_offset += cell_height
+
+    # transpose at random
+    return rects if random.randint(0, 1) > 0 else transpose_all(rects)
 
 def num_to_str(n: int):
     n_digits = log10(n)
@@ -107,7 +209,7 @@ def to_toks(s):
     return [tonum(c) for c in s]
 
 def clamp(x, lo, hi):
-    assert hi >= lo
+    assert hi >= lo, f'hi < lo: hi={hi}, lo={lo}'
     if x > hi: return hi
     if x < lo: return lo
     return x

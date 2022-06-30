@@ -280,7 +280,7 @@ class LengthLine(Expr):
     a direction (dx, dy), and a length l.  The resulting line must be horizontal, vertical, or diagonal.
     """
     in_types = ['int', 'int', 'int', 'int', 'int', 'int']
-    out_types = 'bitmap'
+    out_type = 'bitmap'
     def __init__(self, x, y, dx, dy, l, color=Num(1)):
         self.x = x
         self.y = y
@@ -474,9 +474,11 @@ class Eval(Visitor):
         elif ay == by:  # horizontal
             return self.make_bitmap(lambda p: (ax <= p[0] <= bx and ay == p[1]) * c)
         elif abs(bx - ax) == abs(by - ay):  # diagonal
-            return self.make_bitmap(lambda p: (ax <= p[0] <= bx and
-                                               ay <= p[1] <= by and
-                                               p[1] == ay + (p[0] - ax)) * c)
+            min_x, max_x = (ax, bx) if ax < bx else (bx, ax)
+            min_y, max_y = (ay, by) if ay < by else (by, ay)
+            return self.make_bitmap(lambda p: (min_x <= p[0] <= max_x and
+                                               min_y <= p[1] <= max_y and
+                                               p[1] - ay == (ay - by)//(ax - bx) * (p[0] - ax)) * c)
         assert False, "Line must be vertical, horizontal, or diagonal"
 
     def overlay(self, *bmps):
@@ -555,7 +557,8 @@ class Eval(Visitor):
     def visit_LengthLine(self, x, y, dx, dy, l, color):
         x, y, dx, dy, l, color = (v.accept(self) for v in [x, y, dx, dy, l, color])
         assert all(isinstance(v, int) for v in [x, y, dx, dy, l])
-        assert dx in [-1, 0, 1] and dy in [-1, 0, 1], f'Found unexpected dx, dy=({dx}, {dy})'
+        assert dx in [-1, 0, 1] and dy in [-1, 0, 1] and not (dx == 0 and dy == 0), \
+            f'Found unexpected dx, dy=({dx}, {dy})'
         assert l > 0
         points = sorted([(x, y), (x + dx * (l - 1), y + dy * (l - 1))])
         coords = [v for x, y in points for v in [x, y]]
@@ -1046,6 +1049,13 @@ def test_eval():
                                        "##__",
                                        "##__",
                                        "____"], w=B_W, h=B_H)),
+        (LengthLine(Num(2), Num(3), Num(-1), Num(1), Num(3)),
+         lambda z: util.img_to_tensor(["_____",
+                                       "_____",
+                                       "_____",
+                                       "__#__",
+                                       "_#___",
+                                       "#____",], w=B_W, h=B_H)),
         (SizeRect(Num(0), Num(1), Num(2), Num(2)),
          lambda z: util.img_to_tensor(["____",
                                        "##__",
@@ -1157,11 +1167,21 @@ def test_eval_bitmap():
           "_#_",
           "_#_",
           "_#_",]),
-        (LengthLine(Num(3), Num(2), Num(0), Num(-1), Num(2)),
-         ["____",
-          "___#",
-          "___#",
-          "____",]),
+        (LengthLine(Num(3), Num(2), Num(1), Num(-1), Num(2)),
+         ["_______",
+          "____#__",
+          "___#___",
+          "_______",]),
+        (LengthLine(Num(3), Num(2), Num(-1), Num(1), Num(2)),
+         ["_______",
+          "_______",
+          "___#___",
+          "__#____",]),
+        (LengthLine(Num(3), Num(2), Num(-1), Num(-1), Num(2)),
+         ["_______",
+          "__#____",
+          "___#___",
+          "_______",]),
         
         # Reflection
         (Apply(HFlip(),

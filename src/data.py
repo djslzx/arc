@@ -4,7 +4,7 @@ Generate data to train value & policy nets
 import pdb
 import pickle
 import random
-from typing import Optional, List, Tuple, Iterable, Generator, Dict
+from typing import Optional, List, Tuple, Iterable, Generator, Dict, Sequence
 import multiprocessing as mp
 import torch.utils.tensorboard as tb
 import math
@@ -69,13 +69,16 @@ def gen_closures(n_envs: int, n_programs: int, n_lines: int,
                  arg_exprs: List[Expr],
                  n_zs: Tuple[int, int],
                  line_types: List[type], line_type_weights: List[float],
+                 include_zs: bool,
                  debug=False):
     """
     Generate `(f, z)` pairs with associated training outputs (value, policy).
     """
     for i in range(n_programs):
         envs = seed_envs(n_envs)
-        p = make_flat_scene(n_objs=n_lines, envs=envs, height=B_H, width=B_W, include_zs=False, debug=False)
+        p = make_flat_scene(n_objs=n_lines, envs=envs, height=B_H, width=B_W,
+                            line_types=line_types, line_type_weights=line_type_weights,
+                            include_zs=include_zs, debug=False)
         # p = make_program(envs=envs, arg_exprs=arg_exprs, n_lines=n_lines, n_zs=n_zs,
         #                  line_types=line_types, line_type_weights=line_type_weights,
         #                  debug=debug)
@@ -90,29 +93,26 @@ def is_valid(expr: Expr, envs: List[Dict]):
             return False
     return True
 
-def choose_random_sprite(envs: List[Dict], render_height: int, render_width: int):
-    # Choose one of the sprites at random and position it in a random location
+def random_sprite(envs: List[Dict], colored: bool, render_height: int, render_width: int):
+    # Choose one of the sprites
     sprite_index = random.randint(0, LIB_SIZE - 1)
-    
-    # Progressively bound the random location closer to the origin (0, 0) to
-    # ensure that we eventually find a good place to put the sprite
-    # -- this should terminate b/c all sprites are smaller than (B_H, B_W)
+
+    # Bound the random position of the sprite
     height_bound, width_bound = render_height, render_width
     while height_bound >= 0 and width_bound >= 0:
+        # Choose a random position and place the sprite
         x, y = Num(random.randint(0, height_bound)), Num(random.randint(0, width_bound))
-        if is_valid((sprite := Sprite(sprite_index, x, y)), envs):
+        sprite = ColorSprite(sprite_index, x, y) if colored else Sprite(sprite_index, x, y)
+        
+        # Check the sprite
+        if is_valid(sprite, envs):
             return sprite
+        
+        # Iteratively bound the random location so we eventually get a valid sprite
+        # (this should terminate b/c all sprites are smaller than (B_H, B_W))
         height_bound -= 1
         width_bound -= 1
     raise UnimplementedError("Shouldn't get here")
-
-def make_line(x, y, dx, dy, length, color=1):
-    assert length >= 1
-    assert dx in [-1, 0, 1] and dy in [-1, 0, 1] and not (dx == dy == 0)
-    p1 = x, y
-    p2 = x + length * dx, y + length * dy
-    corners = sorted([p1, p2])
-    return CornerLine(*corners, color=Num(color))
 
 def roll_size(mu=3, sigma=2):
     return max(0, int(random.normalvariate(mu, sigma)))  # slower than random.gauss, but thread-safe
@@ -130,17 +130,21 @@ def max_dimensions(pos: Tuple[int, int], positions: List[Tuple[int, int]], heigh
             nearest_y = y
     return nearest_x - px, nearest_y - py
 
+def plot_rects(rects: List[SizeRect]):
+    viz.viz(Seq(*rects).eval())
+
 def plot_max_dimensions(positions, height, width):
-    lines = [SizeRect(x, y, 1, 1) for x, y in positions]
-    for x, y in positions:
+    def bounding_box(x, y):
         w, h = max_dimensions((x, y), positions, height, width)
-        box = SizeRect(x, y, w, h, color=Num(3))
-        lines.append(box)
-    viz.viz(Seq(*lines).eval(), title="Points with bounds")
+        return SizeRect(Num(x), Num(y), Num(w), Num(h), color=Num(3))
+
+    rects = [SizeRect(Num(x), Num(y), Num(1), Num(1)) for x, y in positions]
+    rects.extend([bounding_box(x, y) for x, y in positions])
+    plot_rects(rects)
 
 def plot_points(points):
-    viz.viz(Seq(*[SizeRect(x, y, 1, 1) for x, y in points]).eval(),
-            title="Points")
+    rects = [SizeRect(Num(x), Num(y), Num(1), Num(1)) for x, y in points]
+    plot_rects(rects)
 
 def dist(ax, ay, bx, by):
     return math.sqrt((ax - bx) ** 2 + (ay - by) ** 2)
@@ -188,72 +192,138 @@ def max_space_positions(n_points, height, width, perturb, debug):
             points.append((x, y))
     return points
 
-def random_line(x, y, width, height):
-    dx, dy = random.choice([(dx, dy)
-                            for dx, dy in it.product([-1, 0, 1], [-1, 0, 1])
-                            if not (dx == 0 and dy == 0)])
-    max_width = dx * ((width - 1 if dx > 0 else 0) - x) + 1
-    max_height = dy * ((height - 1 if dy > 0 else 0) - x) + 1
-    max_length = min(max_width, max_height) \
-        if max_width > 1 and max_height > 1 \
-        else max(max_width, max_height)
-    length = random.choice(range(1, max_length))
-    return make_line(x, y, dx, dy, length)
+def random_nonzero_direction():
+    return 1, -1
+    # return random.choice([(dx, dy)
+    #                       for dx, dy in it.product([-1, 0, 1], [-1, 0, 1])
+    #                       if not (dx == 0 and dy == 0)])
 
-def random_rect(x, y, width, height, include_zs):
-    return SizeRect(
-        Num(x) if not include_zs or random.randint(0, 4) > 0 else random_z(),
-        Num(y) if not include_zs or random.randint(0, 4) > 0 else random_z(),
-        Num(util.clamp(roll_size(mu=2, sigma=2), 1, width - x)),
-        Num(util.clamp(roll_size(mu=2, sigma=2), 1, height - y))
-    )
+def or_z(v, p, incl_z):
+    return random_z() if incl_z and random.random() < p else v
 
-def make_flat_scene_shape(envs, x, y, height, width, include_zs, debug=True):
-    obj_type = random.choices(population=[CornerLine, SizeRect], weights=[1, 1], k=1)[0]
+def random_line(x, y, width, height, line_type: str, include_zs, debug=False):
+    """Returns a random line of type `line_type`, at the position (x, y)"""
+    assert line_type in ['corner', 'length'], f'Received an unexpected line type: {line_type}'
+
+    nonzero_directions = [(dx, dy)
+                          for dx, dy in it.product([-1, 0, 1], [-1, 0, 1])
+                          if not (dx == 0 and dy == 0)]
+
+    def max_length(dx, dy):
+        max_width = (width - x) if dx > 0 else (x + 1)
+        max_height = (height - y) if dy > 0 else (y + 1)
+        return min(max_width, max_height) if dx != 0 and dy != 0 else max(max_width, max_height)
+    
+    # favor directions with more available length
+    max_lengths = [max_length(dx, dy) for dx, dy in nonzero_directions]
+    if debug:
+        for (dx, dy), max_len in zip(nonzero_directions, max_lengths):
+            print(f'({x}, {y}) @ ({dx}, {dy}): max length = {max_len}')
+
+    (dx, dy), max_length = random.choices(population=list(zip(nonzero_directions, max_lengths)),
+                                          weights=max_lengths,
+                                          k=1)[0]
+    if debug: print(f'chose ({dx}, {dy}) with max length {max_length}')
+    length = util.clamp(int(random.normalvariate(mu=max_length, sigma=3)), 1, max_length)
+    if line_type == 'length':
+        return LengthLine(
+            or_z(Num(x), 0.2, include_zs),
+            or_z(Num(y), 0.2, include_zs),
+            Num(dx), Num(dy),  # TODO: random directions
+            or_z(Num(length), 0.2, include_zs),
+        )
+    elif line_type == 'corner':
+        return CornerLine(
+            or_z(Num(x), 0.2, include_zs),
+            or_z(Num(y), 0.2, include_zs),
+            Num(x + dx * length),
+            Num(y + dy * length),
+        )
+    else:
+        raise ValueError(f'Received an unexpected line type: {line_type}')
+
+def random_rect(x, y, width, height, rect_type: str, include_zs):
+    """Returns a random rectangle at (x, y) of type `rect_type`"""
+    assert rect_type in ['corner', 'size'], f'Received an unexpected rect type: {rect_type}'
+    # NB: Ignore 1x1 rects b/c we want the system to learn that some points can be interpreted as lines
+    w = util.clamp(roll_size(mu=3, sigma=2), 1, width)
+    h = util.clamp(roll_size(mu=3, sigma=2), 1, height)
+    if rect_type == 'size':
+        return SizeRect(
+            or_z(Num(x), 0.2, include_zs),
+            or_z(Num(y), 0.2, include_zs),
+            or_z(Num(w), 0.2, include_zs),
+            or_z(Num(h), 0.2, include_zs),
+        )
+    elif rect_type == 'corner':
+        return CornerRect(
+            or_z(Num(x), 0.2, include_zs),
+            or_z(Num(y), 0.2, include_zs),
+            or_z(Num(x + w), 0.2, include_zs),
+            or_z(Num(y + h), 0.2, include_zs),
+        )
+    else:
+        raise ValueError(f'Received an unexpected rect type: {rect_type}')
+
+def make_flat_scene_shape(envs, x, y, height, width,
+                          line_types, line_type_weights,
+                          include_zs, debug=False):
+    obj_type = random.choices(population=line_types, weights=line_type_weights, k=1)[0]
     make_obj = {
-        CornerLine:     lambda: random_line(x, y, width, height),
-        SizeRect: lambda: random_rect(x, y, width, height, include_zs),
+        Sprite: lambda: random_sprite(envs, colored=False, render_height=height - 1, render_width=width - 1),
+        ColorSprite: lambda: random_sprite(envs, colored=True, render_height=height - 1, render_width=width - 1),
+        CornerLine: lambda: random_line(x, y, width=width, height=height, line_type='corner',
+                                        include_zs=include_zs, debug=debug),
+        LengthLine: lambda: random_line(x, y, width=width, height=height, line_type='length',
+                                        include_zs=include_zs, debug=debug),
+        CornerRect: lambda: random_rect(x, y, width=width, height=height, rect_type='corner', include_zs=include_zs),
+        SizeRect: lambda: random_rect(x, y, width=width, height=height, rect_type='size', include_zs=include_zs),
     }
     n_tries = 0
     while True:
         n_tries += 1
         if debug and n_tries % 100 == 0: print(f'[SRect, Line]: {n_tries} tries')
         obj = make_obj[obj_type]()
+        if debug:
+            # visualize individual lines
+            viz.viz_mult([obj.eval(env) for env in envs], text=obj)
         if is_valid(obj, envs):
             return obj
 
-def make_flat_scene(n_objs, envs, height, width, include_zs=False, debug=True):
+def plot_grid_rects(grid):
+    plot_rects([SizeRect(x=Num(r.x), y=Num(r.y), w=Num(1), h=Num(1), color=Num(1))
+                for r in grid] +
+               [SizeRect(x=Num(r.x), y=Num(r.y), w=Num(r.w), h=Num(r.h), color=Num(random.randint(2, 9)))
+                for r in grid])
+
+def make_flat_scene(n_objs, envs, height, width,
+                    line_types, line_type_weights,
+                    include_zs=False, debug=True):
     """Compose a program that generates rectangle/sprite scenes with minimal occlusion"""
+    obj_types = set(line_types)
+    assert obj_types.issubset({LengthLine, CornerLine, SizeRect, CornerRect, Sprite, ColorSprite})
+    
     # seed a bunch of random positions and only keep the ones that have some distance between each other
     # positions = uniform_random_points(n_objs, 1, height, width, debug)
     positions = max_space_positions(n_objs, height, width, perturb=False, debug=debug)
-    
+    # positions = util.random_grid(n_objs, height, width)
+    if debug: plot_points(positions)
+
     # choose random sizes that err towards being small
     program_lines = []
     for x, y in positions:
-        if random.randint(0, 9) < 3:
-            line = choose_random_sprite(envs, height-1, width-1)
-        else:
-            n_tries = 0
-            while True:
-                n_tries += 1
-                if debug and n_tries % 100 == 0: print(f'[SRect, Line]: {n_tries} tries')
-                line = SizeRect(
-                    Num(x) if not include_zs or random.randint(0, 4) > 0 else random_z(),
-                    Num(y) if not include_zs or random.randint(0, 4) > 0 else random_z(),
-                    Num(util.clamp(roll_size(2, 2), 1, width - x)),
-                    Num(util.clamp(roll_size(2, 2), 1, height - y))
-                )
-                if is_valid(line, envs):
-                    break
-        
+        line = make_flat_scene_shape(envs, x=x, y=y, height=height, width=width,
+                                     line_types=line_types, line_type_weights=line_type_weights,
+                                     include_zs=include_zs, debug=debug)
+
         # choose a relatively unused color to help variety
-        line.color = choose_color(program_lines)
+        if debug: print('pre:', program_lines)
+        line.color = choose_color(program_lines, colors=list(range(1, 10)))
         program_lines.append(line)
         program_lines = canonical_ordering(program_lines)
-        program_lines = rm_dead_code(program_lines, envs, strict=True)
+        # program_lines = rm_dead_code(program_lines, envs, strict=True)
         
-        if debug: print(program_lines)
+        if debug: print('post:', program_lines)
 
     # favor putting random args as positions instead of dimensions
     return Seq(*program_lines)
@@ -280,11 +350,11 @@ def make_shape(shape_type: Type[Expr], envs: List[Dict],
         if is_valid(shape, envs):
             return shape
 
-def choose_color(lines: List[Expr]):
+def choose_color(lines: List[Expr], colors: Sequence[int]):
     # counts[i] = (the inverse of) the number of times Num(i-1) is used as a color in lines
     counts = [1 / (1 + sum(line.color == i for line in lines))
-              for i in range(1, 10)]
-    return Num(random.choices(population=range(1, 10), weights=counts, k=1)[0])
+              for i in colors]
+    return Num(random.choices(population=colors, weights=counts, k=1)[0])
 
 def make_program(envs: List[dict], arg_exprs: List[Expr],
                  n_lines: int, n_zs: Tuple[int, int],
@@ -300,7 +370,7 @@ def make_program(envs: List[dict], arg_exprs: List[Expr],
     while len(lines) < n_lines:
         is_sprite = random.choices(population=[True, False], weights=[1, len(line_types) * 2], k=1)[0]
         if is_sprite:
-            line = choose_random_sprite(envs, render_height - 1, render_width - 1)
+            line = random_sprite(envs, render_height - 1, render_width - 1)
         else:
             shape_type = random.choices(population=line_types, weights=line_type_weights)[0]
             line = make_shape(
@@ -343,15 +413,19 @@ def rm_dead_code(lines: List[Expr], envs, strict=False):
 def canonical_ordering(lines: List[Expr]):
     def destructure(e):
         if isinstance(e, Point):
-            return 0, e.x, e.y
+            return 0, e.x, e.y, e.color
         elif isinstance(e, CornerLine):
-            return 1, e.x1, e.y1, e.x2, e.y2
+            return 1, e.x1, e.y1, e.x2, e.y2, e.color
+        elif isinstance(e, LengthLine):
+            return 2, e.x, e.y, e.dx, e.dy, e.l, e.color
         elif isinstance(e, CornerRect):
-            return 2, e.x_min, e.y_min, e.x_max, e.y_max, e.color
+            return 3, e.x_min, e.y_min, e.x_max, e.y_max, e.color
         elif isinstance(e, SizeRect):
-            return 3, e.x, e.y, e.w, e.h, e.color
-        if isinstance(e, Sprite):
-            return 4, e.i, e.x, e.y
+            return 4, e.x, e.y, e.w, e.h, e.color
+        elif isinstance(e, Sprite):
+            return 5, e.i, e.x, e.y, e.color
+        elif isinstance(e, ColorSprite):
+            return 6, e.i, e.x, e.y
     
     return sorted(lines, key=destructure)
 
@@ -361,7 +435,7 @@ def extract_zs(envs):
 def demo_create_program():
     envs = seed_envs(5)
     p = make_program(envs=envs,
-                     arg_exprs=[Z(i) for i in range(LIB_SIZE)] + [Num(i) for i in range(0, 10)],
+                     arg_exprs=[Z(i) for i in range(LIB_SIZE)] + [Num(i) for i in range(-9, 10)],
                      n_lines=3,
                      line_types=[CornerRect, CornerLine, Point],
                      line_type_weights=[4, 3, 1],
@@ -373,7 +447,7 @@ def demo_create_program():
 
 def demo_gen_closures():
     fname = '../data/policy-test-closures/'
-    arg_exprs = [Z(i) for i in range(LIB_SIZE)] + [Num(i) for i in range(0, 10)]
+    arg_exprs = [Z(i) for i in range(LIB_SIZE)] + [Num(i) for i in range(-9, 10)]
     n_envs = 6
     n_workers = 10
     n_programs_per_worker = 10
@@ -382,7 +456,7 @@ def demo_gen_closures():
     with mp.Pool(processes=n_workers) as pool:
         pool.starmap(gen_closures,
                      [(f'{fname}{i}.dat', n_envs, n_programs_per_worker, n_lines,
-                       arg_exprs, (0, 2), [CornerRect, CornerLine, Point], [4, 3, 1], True)
+                       arg_exprs, (0, 2), [CornerRect, CornerLine, Point], [4, 3, 1], True, True)
                       for i in range(workload_sz)])
 
     for i, (f, envs) in enumerate(util.load_incremental(f'{fname}*.dat')):
@@ -394,6 +468,7 @@ def gen_closures_and_deltas(worker_id: int, closures_loc: str, deltas_loc: str,
                             n_zs: Tuple[int, int],
                             line_types: List[type], line_type_weights: List[float],
                             hetero_zs=False,
+                            include_zs=True,
                             debug=False):
     util.make_parent_dir(closures_loc)
     util.make_parent_dir(deltas_loc)
@@ -406,6 +481,7 @@ def gen_closures_and_deltas(worker_id: int, closures_loc: str, deltas_loc: str,
             n_zs=n_zs,
             line_types=line_types,
             line_type_weights=line_type_weights,
+            include_zs=include_zs,
             debug=debug
         )
         for i, (f, envs) in enumerate(gen):
@@ -432,6 +508,7 @@ def gen_closures_and_deltas_mp(closures_loc_prefix: str, deltas_loc_prefix: str,
                                n_envs: int, n_programs: int, n_lines_bounds: Tuple[int, int], n_zs: Tuple[int, int],
                                line_types: List[type], line_type_weights: Optional[List[float]] = None,
                                hetero_zs=False,
+                               include_zs=True,
                                debug=False,
                                n_workers: int = 1):
     """
@@ -456,6 +533,7 @@ def gen_closures_and_deltas_mp(closures_loc_prefix: str, deltas_loc_prefix: str,
                        n_envs, n_programs_per_worker, n_lines,
                        arg_exprs, n_zs, line_types, line_type_weights,
                        hetero_zs,
+                       include_zs,
                        debug)
                       for n_lines in range(n_lines_lo, n_lines_hi + 1)
                       for i in range(n_workers)])
@@ -572,10 +650,14 @@ def test_reorder_envs():
         assert equal(expected, out), f'Expected={expected}, but got {out}'
     print(" [+] passed test_reorder_envs")
 
-def demo_flat_scenes():
-    for i in range(10):
+def demo_flat_scenes(n_scenes, n_objs, line_types, line_weights):
+    for i in range(n_scenes):
         envs = seed_envs(3)
-        p = make_flat_scene(n_objs=10, width=B_W, height=B_H, envs=envs, include_zs=False, debug=True)
+        p = make_flat_scene(n_objs=n_objs, width=B_W, height=B_H, envs=envs,
+                            line_types=line_types,
+                            line_type_weights=line_weights,
+                            include_zs=False,
+                            debug=False)
         renders = [p.eval(env) for env in envs]
         viz.viz_mult(renders, text=p)
 
@@ -584,19 +666,31 @@ def demo_positions():
         points = max_space_positions(30, B_H, B_W, perturb=False, debug=True)
         plot_points(points)
 
+def demo_grid():
+    for grid in [util.random_grid(9, 16, 16),
+                 util.random_grid(9, 16, 16),
+                 util.random_grid(9, 16, 16)]:
+        plot_grid_rects(grid)
+
 
 if __name__ == '__main__':
     # demo_gen_program()
     # demo_gen_closures()
     # demo_gen_policy_data()
     # test_reorder_envs()
-
-    args = ['dir', 'mode', 'min_zs', 'max_zs', 'n_lines', 'n_programs', 'n_workers', 't']
+    
+    demo_flat_scenes(3, 10,
+                     line_types=[LengthLine],
+                     line_weights=[1])
+    exit(0)
+    
+    args = ['dir', 'mode', 'sprites?', 'min_zs', 'max_zs', 'n_lines', 'n_programs', 'n_workers', 't']
     if len(sys.argv) - 1 != len(args):
         print("Usage: data.py", " ".join(args))
         exit(1)
     
-    dir, mode, min_zs, max_zs, n_lines, n_programs, n_workers, t = sys.argv[1:]
+    dir, mode, incl_sprites, min_zs, max_zs, n_lines, n_programs, n_workers, t = sys.argv[1:]
+    incl_sprites = bool(incl_sprites)
     min_zs = int(min_zs)
     max_zs = int(max_zs)
     n_lines = int(n_lines)
@@ -615,9 +709,10 @@ if __name__ == '__main__':
         n_programs=n_programs,
         n_lines_bounds=(n_lines, n_lines),
         n_zs=(min_zs, max_zs),
-        line_types=[CornerRect],
-        line_type_weights=[1],
+        line_types=[SizeRect, Sprite],
+        line_type_weights=[1, 1],
         n_workers=n_workers,
+        include_zs=False,
         hetero_zs=False,
         debug=True,
     )
