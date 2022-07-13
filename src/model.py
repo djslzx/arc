@@ -91,7 +91,7 @@ class Model(nn.Module):
                  n_tf_encoder_layers=6,
                  n_tf_decoder_layers=6,
                  n_value_heads=3,
-                 max_program_length=53,
+                 max_program_length=203,
                  max_line_length=17):
         super().__init__()
         self.name = name
@@ -673,6 +673,8 @@ class PolicyDataset(IterableDataset):
 def sample_model_on_policy_data(model: Model, dataloader: DataLoader):
     for (p, p_bmps), (f, f_bmps), d in dataloader:
         batch_size = f.size(0)
+        print(f[0])
+        print(model.to_tokens(f[0]))
         n_lines = len(model.to_program(f[0]).lines())
         rollouts = model.sample_program_rollouts(f_bmps, line_cap=n_lines)
         envs = g.seed_envs(model.N ** 2)
@@ -697,46 +699,47 @@ def sample_model_on_policy_data(model: Model, dataloader: DataLoader):
                    f'actual={output}'
             viz.viz_grid(bmps, text)
 
-def sample_model_on_bitmaps(model: Model, bitmaps: Iterable[T.Tensor]):
+def sample_model_on_bitmaps(model: Model, bitmaps: Iterable[T.Tensor], line_cap=8):
     for bitmap in bitmaps:
         # reshape bitmaps -> [b=1, N, H, W, C]
         bitmap_stack = T.stack([util.pad_mat(bitmap, h=model.H, w=model.W, padding_token=0)
                                 for _ in range(model.N)]).unsqueeze(0).to(dev)
-        rollout = model.sample_program_rollouts(bitmap_stack, line_cap=8)[0]
+        rollout = model.sample_program_rollouts(bitmap_stack, line_cap=line_cap)[0]
         envs = g.seed_envs(3 ** 2 - 1)
         out_program = model.to_program(rollout)
         out_bitmaps = model.render(rollout, envs=envs, check_env_size=False).cpu()
         bmps = T.cat((bitmap.unsqueeze(0), out_bitmaps)).reshape(3, 3, model.H, model.W)
         viz.viz_grid(bmps, text=out_program)
         
-def make_model(model_code: str) -> Model:
+def make_model(model_code: str, lexicon: List[str]) -> Model:
     return Model(
         name=model_code,
         N=5, H=g.B_H, W=g.B_W,
         Z_HI=g.Z_HI, Z_LO=g.Z_LO,
-        lexicon=g.SIMPLE_LEXICON,
+        lexicon=lexicon,
         d_model=512,
         n_conv_channels=12,
         n_tf_encoder_layers=6,
         n_tf_decoder_layers=6,
         n_value_heads=5,
-        max_program_length=53,
+        max_program_length=53, # FIXME: this should be longer to account b/c we added more items
         max_line_length=17
     ).to(dev)
 
-def recover_model(code: str, dir: str, n_steps: int,
-                  test_with: Optional[Tuple[str, int]]) -> Model:
+def recover_model(code: str, lexicon: List[str], directory: str, n_steps: int,
+                  test_with: Optional[Tuple[str, int]] = None) -> Model:
     """
     Loads in a pretrained model.
     :param code: Identifies the model.
-    :param dir: The directory where the model is stored.
+    :param lexicon: The lexicon used by the model
+    :param directory: The directory where the model is stored.
     :param n_steps: The number of steps the model was trained
     :param test_with: Optional: If provided, will be used to test the recovered model on a few examples (100).
            This is a tuple (src, batch_size) that specifies the filename and batch size of the dataloader to make.
     :return: The pretrained model.
     """
-    model = make_model(code)
-    model.load_model(f'{dir}/model_{code}_{n_steps}.pt')
+    model = make_model(code, lexicon)
+    model.load_model(f'{directory}/model_{code}_{n_steps}.pt')
     if test_with:
         data_src, batch_size = test_with
         dataloader = model.make_policy_dataloader(data_src, batch_size)
@@ -746,44 +749,47 @@ def recover_model(code: str, dir: str, n_steps: int,
     
 
 if __name__ == '__main__':
-    # model = recover_model(
-    #     code='100k-R-5e1~5l0~1z',
-    #     dir='../models',
-    #     n_steps=300_000,
-    #     test_with=('../data/policy-pretraining/10-R-5e3l0~1z/May30_22_23-53-37/validation/deltas_*.dat', 16)
-    # )
+    n = 10
+    model = recover_model(
+        code='50k-R-5e1~20l0z',
+        lexicon=g.OLD_LEXICON,
+        directory='../models',
+        n_steps=200_000,
+        # test_with=(f'../data/10-R-5e{n}l0z/june-24-1-16x16/test/deltas_*.dat', 16)
+    )
     # sample_model_on_policy_data(
     #     model,
     #     model.make_policy_dataloader(
-    #         '../data/policy-pretraining/10-R-5e[4-6]l0~1z/May30_22_23-53-37/validation/deltas_*.dat',
+    #         f'../data/10-R-5e{n}l0z/june-24-1-16x16/test/deltas_*.dat',
     #         batch_size=16
     #     ))
 
-    # # test on ARC data
-    # bitmaps = arc_data.selected_task_bitmaps()
-    # sample_model_on_bitmaps(model, bitmaps)
+    # test on ARC data
+    bitmaps = arc_data.task_bitmaps(arc_data.SEQ_FEASIBLE_TASK_NAMES)
+    for cap in [3, 6, 9]:
+        sample_model_on_bitmaps(model, bitmaps, line_cap=cap)
 
     # pretraining model
-    model = make_model('50k-R-5e1~20l0z')
-    model.pretrain_policy(
-        save_dir='/home/djl328/arc/models',
-        tloader=model.make_policy_dataloader(
-            f'/home/djl328/arc/data/50k-R-5e*l0z/2022-06-15T20:16:18-04:00/train/deltas_*.dat',
-            batch_size=32
-        ),
-        vloader=model.make_policy_dataloader(
-            f'/home/djl328/arc/data/500-R-5e*l0z/2022-06-15T20:16:18-04:00/test/deltas_*.dat',
-            batch_size=32
-        ),
-        epochs=100_000,
-        lr=10 ** -5,
-        assess_freq=10_000,
-        checkpoint_freq=100_000,
-        tloss_thresh=10 ** -4,
-        vloss_thresh=10 ** -3,
-        check_vloss_gap=False,
-        # vloss_gap=2
-    )
+    # model = make_model('50k-R-5e1~20l0z')
+    # model.pretrain_policy(
+    #     save_dir='/home/djl328/arc/models',
+    #     tloader=model.make_policy_dataloader(
+    #         f'/home/djl328/arc/data/50k-R-5e*l0z/2022-06-15T20:16:18-04:00/train/deltas_*.dat',
+    #         batch_size=32
+    #     ),
+    #     vloader=model.make_policy_dataloader(
+    #         f'/home/djl328/arc/data/500-R-5e*l0z/2022-06-15T20:16:18-04:00/test/deltas_*.dat',
+    #         batch_size=32
+    #     ),
+    #     epochs=100_000,
+    #     lr=10 ** -5,
+    #     assess_freq=10_000,
+    #     checkpoint_freq=100_000,
+    #     tloss_thresh=10 ** -4,
+    #     vloss_thresh=10 ** -3,
+    #     check_vloss_gap=False,
+    #     # vloss_gap=2
+    # )
 
     # # training value function
     # model.train_value(

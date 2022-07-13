@@ -25,6 +25,12 @@ FULL_LEXICON = ([i for i in range(Z_LO, Z_HI+1)] +
                  '~', '+', '-', '*', '<', '&', '?',
                  'P', 'L', 'CR', 'SR'
                  'H', 'V', 'T', '#', 'o', '@', '!', '{', '}', '(', ')'])
+OLD_LEXICON = (
+    [i for i in range(Z_LO, Z_HI+1)] +
+    [f'z_{i}' for i in range(LIB_SIZE)] +
+    [f'S_{i}' for i in range(LIB_SIZE)] +
+    ['x_max', 'y_max', 'P', 'L', 'CR', 'SR', '{', '}', '(', ')']
+)
 SIMPLE_LEXICON = (
     [i for i in range(Z_LO, Z_HI+1)] +
     [f'z_{i}' for i in range(LIB_SIZE)] +

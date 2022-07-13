@@ -75,6 +75,7 @@ def gen_closures(n_envs: int, n_programs: int, n_lines: int,
     Generate `(f, z)` pairs with associated training outputs (value, policy).
     """
     for i in range(n_programs):
+        # TODO: choose f, then fit z
         envs = seed_envs(n_envs)
         p = make_flat_scene(max_n_objs=n_lines, envs=envs, height=B_H, width=B_W,
                             line_types=line_types, line_type_weights=line_type_weights,
@@ -171,7 +172,7 @@ def uniform_random_points(n_points, gap, height, width, debug):
         x = random.randint(0, width - 1)
         y = random.randint(0, height - 1)
         if debug: print(points, x, y)
-        if dist_from_points(x, y, points) >= gap:
+        if not points or dist_from_points(x, y, points) >= gap:
             points.append((x, y))
     return points
 
@@ -285,10 +286,11 @@ def make_flat_scene_shape(envs, x, y, height, width,
         n_tries += 1
         if debug and n_tries % 100 == 0: print(f'[SRect, Line]: {n_tries} tries')
         obj = make_obj[obj_type]()
-        if debug:
-            # visualize individual lines
-            viz.viz_mult([obj.eval(env) for env in envs], text=obj)
         if is_valid(obj, envs):
+            if debug:
+                # visualize individual lines
+                print(f'type: {obj_type}, obj: {obj}')
+                viz.viz_mult([obj.eval(env) for env in envs], text=obj)
             return obj
 
 def plot_grid_rects(grid):
@@ -299,14 +301,14 @@ def plot_grid_rects(grid):
 
 def make_flat_scene(max_n_objs, envs, height, width,
                     line_types, line_type_weights,
-                    include_zs=False, debug=True):
+                    margin=2, include_zs=False, debug=True):
     """Compose a program that generates rectangle/sprite scenes with minimal occlusion"""
     obj_types = set(line_types)
     assert obj_types.issubset({LengthLine, CornerLine, SizeRect, CornerRect, Sprite, ColorSprite})
     
     # seed a bunch of random positions and only keep the ones that have some distance between each other
-    # positions = uniform_random_points(n_objs, 1, height, width, debug)
-    positions = max_space_positions(max_n_objs, height, width, perturb=False, debug=debug)
+    # positions = uniform_random_points(max_n_objs, 1, height, width, debug)
+    positions = max_space_positions(max_n_objs, height=height - margin, width=width - margin, perturb=True, debug=debug)
     # positions = util.random_grid(n_objs, height, width)
     if debug: plot_points(positions)
 
@@ -318,13 +320,10 @@ def make_flat_scene(max_n_objs, envs, height, width,
                                      include_zs=include_zs, debug=debug)
 
         # choose a relatively unused color to help variety
-        if debug: print('pre:', program_lines)
         line.color = choose_color(program_lines, colors=list(range(1, 10)))
         program_lines.append(line)
         program_lines = canonical_ordering(program_lines)
         program_lines = rm_dead_code(program_lines, envs, strict=True)
-        
-        if debug: print('post:', program_lines)
 
     # favor putting random args as positions instead of dimensions
     return Seq(*program_lines)
@@ -679,17 +678,17 @@ if __name__ == '__main__':
     # demo_gen_policy_data()
     # test_reorder_envs()
     
-    demo_flat_scenes(
-        n_scenes=10,
-        n_objs=3,
-        line_types=[ColorSprite],
-        line_weights=[1],
-        # line_types=[LengthLine, SizeRect, ],
-        # line_weights=[1, 1],
-        include_zs=True,
-        debug=False,
-    )
-    exit(0)
+    # demo_flat_scenes(
+    #     n_scenes=10,
+    #     n_objs=6,
+    #     line_types=[ColorSprite, Sprite, SizeRect, LengthLine],
+    #     line_weights=[0.5, 1, 2, 2],
+    #     # line_types=[LengthLine, SizeRect, ],
+    #     # line_weights=[1, 1],
+    #     include_zs=True,
+    #     debug=True,
+    # )
+    # exit(0)
     
     args = ['dir', 'mode', 'sprites?', 'min_zs', 'max_zs', 'n_lines', 'n_programs', 'n_workers', 't']
     if len(sys.argv) - 1 != len(args):
@@ -716,8 +715,8 @@ if __name__ == '__main__':
         n_programs=n_programs,
         n_lines_bounds=(n_lines, n_lines),
         n_zs=(min_zs, max_zs),
-        line_types=[SizeRect, Sprite],
-        line_type_weights=[1, 1],
+        line_types=[ColorSprite, Sprite, SizeRect, LengthLine],
+        line_type_weights=[0.3, 1, 2, 2],
         n_workers=n_workers,
         include_zs=False,
         hetero_zs=False,

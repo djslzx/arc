@@ -132,9 +132,9 @@ def plot_arc_dimensions(names: List[str]):
     dimensions = get_dims(names, domain=['input', 'output'])
     plot_dims(dimensions)
 
-def selected_task_bitmaps() -> List[T.Tensor]:
+def task_bitmaps(names: List[str]) -> List[T.Tensor]:
     filenames = [name
-                 for task_name in SELECTED_TASK_NAMES
+                 for task_name in names
                  for name in glob(f'{ARC_DIR}/{task_name}.json')]
     out_bitmaps = []
     for name, task in read_arc_files(filenames):
