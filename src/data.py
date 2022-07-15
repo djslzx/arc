@@ -690,13 +690,12 @@ if __name__ == '__main__':
     # )
     # exit(0)
     
-    args = ['dir', 'mode', 'sprites?', 'min_zs', 'max_zs', 'n_lines', 'n_programs', 'n_workers', 't']
+    args = ['dir', 'mode', 'min_zs', 'max_zs', 'n_lines', 'n_programs', 'n_workers', 't']
     if len(sys.argv) - 1 != len(args):
         print("Usage: data.py", " ".join(args))
         exit(1)
     
-    dir, mode, incl_sprites, min_zs, max_zs, n_lines, n_programs, n_workers, t = sys.argv[1:]
-    incl_sprites = bool(incl_sprites)
+    dir, mode, min_zs, max_zs, n_lines, n_programs, n_workers, t = sys.argv[1:]
     min_zs = int(min_zs)
     max_zs = int(max_zs)
     n_lines = int(n_lines)
