@@ -21,6 +21,7 @@ IMG_IGNORE = -1                 # ignore pixels that have this value
 FULL_LEXICON = ([i for i in range(Z_LO, Z_HI+1)] +
                 [f'z_{i}' for i in range(LIB_SIZE)] +
                 [f'S_{i}' for i in range(LIB_SIZE)] +
+                [f'CS_{i}' for i in range(LIB_SIZE)] +
                 ['x_max', 'y_max',
                  '~', '+', '-', '*', '<', '&', '?',
                  'P', 'L', 'CR', 'SR'

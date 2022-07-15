@@ -1,22 +1,22 @@
 """
 Implement a two-headed model (value, policy)
 """
-import pdb
+# import pdb
 import math
 import pickle
 import time
 from glob import glob
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 
 import torch as T
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, IterableDataset
 import torch.utils.tensorboard as tb
-from typing import Optional, Iterable, List, Dict, Callable, Tuple
+from typing import Optional, Iterable, List, Callable, Tuple
 from collections import namedtuple
 
-import arc_data
+# import arc_data
 import grammar as g
 import util
 import viz
@@ -29,18 +29,19 @@ PADDING = "PADDING"
 PROGRAM_START = "PROGRAM_START"
 PROGRAM_END = "PROGRAM_END"
 
+
 class SrcEncoding(nn.Module):
-    """
-    Add learned encoding to identify data sources
-    """
+    """Add learned encoding to identify data sources."""
+
     def __init__(self, d_model: int, source_sizes: List[int], dropout=0.1):
         super().__init__()
         n_sources = len(source_sizes)
         self.d_model = d_model
         self.source_sizes = source_sizes
         self.dropout = nn.Dropout(p=dropout)
-        self.src_embedding = nn.Embedding(num_embeddings=n_sources, embedding_dim=d_model)
-        
+        self.src_embedding = nn.Embedding(num_embeddings=n_sources,
+                                          embedding_dim=d_model)
+
     def encoding(self):
         encoding = T.zeros(sum(self.source_sizes), 1, self.d_model).to(dev)
         start = 0
@@ -48,27 +49,26 @@ class SrcEncoding(nn.Module):
             encoding[start:start + source_sz, :] = self.src_embedding(T.tensor([i]).to(dev))
             start += source_sz
         return encoding
-        
+
     def forward(self, x):
         # need to cut off end b/c program might not be full length
         return self.dropout(x + self.encoding()[:x.size(0)])
 
 
 class PositionalEncoding(nn.Module):
-    """
-    Positional encoding from 'Attention is All You Need'
-    """
+    """Positional encoding from 'Attention is All You Need'."""
+
     def __init__(self, d_model, dropout=0.1, max_len=5000):
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
-        
+
         pos = T.arange(max_len).unsqueeze(1)
         div = T.exp(T.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
         pe = T.zeros(max_len, 1, d_model)
         pe[:, 0, 0::2] = T.sin(pos * div)
         pe[:, 0, 1::2] = T.cos(pos * div)
         self.register_buffer('pe', pe)
-    
+
     def forward(self, x):
         # x: (sequence length, batch size, d_model)
         # x.size(0) -> sequence length
@@ -80,7 +80,7 @@ Rollout = namedtuple('Result', 'indices completed well_formed')
 
 
 class Model(nn.Module):
-    
+
     def __init__(self,
                  name: str,
                  N: int, H: int, W: int,
@@ -112,7 +112,7 @@ class Model(nn.Module):
         self.n_value_heads = n_value_heads
         self.max_line_length = max_line_length
         self.max_program_length = max_program_length
-        
+
         # program embedding: embed program tokens as d_model-size tensors
         # lexicon includes both the program alphabet and the range of valid z's
         self.lexicon        = [PADDING, PROGRAM_START, PROGRAM_END, g.Z_IGNORE] + lexicon
@@ -734,8 +734,10 @@ def recover_model(code: str, lexicon: List[str], directory: str, n_steps: int,
     :param lexicon: The lexicon used by the model
     :param directory: The directory where the model is stored.
     :param n_steps: The number of steps the model was trained
-    :param test_with: Optional: If provided, will be used to test the recovered model on a few examples (100).
-           This is a tuple (src, batch_size) that specifies the filename and batch size of the dataloader to make.
+    :param test_with: Optional: If provided, will be used to test the recovered
+                      model on a few examples (100).
+                      This is a tuple (src, batch_size) that specifies the
+                      filename and batch size of the dataloader to make.
     :return: The pretrained model.
     """
     model = make_model(code, lexicon)
@@ -746,50 +748,53 @@ def recover_model(code: str, lexicon: List[str], directory: str, n_steps: int,
         loss = model.pretrain_validate(dataloader, n_examples=100)
         print(f"Model loaded. Loss={loss}")
     return model
-    
+
 
 if __name__ == '__main__':
-    n = 10
-    model = recover_model(
-        code='50k-R-5e1~20l0z',
-        lexicon=g.OLD_LEXICON,
-        directory='../models',
-        n_steps=200_000,
-        # test_with=(f'../data/10-R-5e{n}l0z/june-24-1-16x16/test/deltas_*.dat', 16)
-    )
-    # sample_model_on_policy_data(
-    #     model,
-    #     model.make_policy_dataloader(
-    #         f'../data/10-R-5e{n}l0z/june-24-1-16x16/test/deltas_*.dat',
-    #         batch_size=16
-    #     ))
+    # n = 10
+    # model = recover_model(
+    #     code='50k-R-5e1~20l0z',
+    #     lexicon=g.SIMPLE_LEXICON,
+    #     directory='../models',
+    #     n_steps=200_000,
+    #     test_with=(f'../data/10-R-5e{n}l0~5z/july15/train/deltas_*.dat', 16)
+    # )
 
-    # test on ARC data
-    bitmaps = arc_data.task_bitmaps(arc_data.SEQ_FEASIBLE_TASK_NAMES)
-    for cap in [3, 6, 9]:
-        sample_model_on_bitmaps(model, bitmaps, line_cap=cap)
+    # # test on ARC data
+    # bitmaps = arc_data.task_bitmaps(arc_data.SEQ_FEASIBLE_TASK_NAMES)
+    # for cap in [3, 6, 9]:
+    #     sample_model_on_bitmaps(model, bitmaps, line_cap=cap)
 
     # pretraining model
-    # model = make_model('50k-R-5e1~20l0z')
-    # model.pretrain_policy(
-    #     save_dir='/home/djl328/arc/models',
-    #     tloader=model.make_policy_dataloader(
-    #         f'/home/djl328/arc/data/50k-R-5e*l0z/2022-06-15T20:16:18-04:00/train/deltas_*.dat',
-    #         batch_size=32
-    #     ),
-    #     vloader=model.make_policy_dataloader(
-    #         f'/home/djl328/arc/data/500-R-5e*l0z/2022-06-15T20:16:18-04:00/test/deltas_*.dat',
-    #         batch_size=32
-    #     ),
-    #     epochs=100_000,
-    #     lr=10 ** -5,
-    #     assess_freq=10_000,
-    #     checkpoint_freq=100_000,
-    #     tloss_thresh=10 ** -4,
-    #     vloss_thresh=10 ** -3,
-    #     check_vloss_gap=False,
-    #     # vloss_gap=2
-    # )
+    # data_dir = '/home/djl328/arc/data'
+    data_dir = '../data'
+    # model_dir = '/home/djl328/arc/models'
+    model_dir = '../models'
+    data_code = '10-R-5e6l0~5z'
+    data_t = 'july15'
+    model = make_model(
+        model_code='CS,S,SR,LL-5e6l0~5z',
+        lexicon=g.SIMPLE_LEXICON,
+    )
+    model.pretrain_policy(
+        save_dir=model_dir,
+        tloader=model.make_policy_dataloader(
+            f'{data_dir}/{data_code}/{data_t}/train/deltas_*.dat',
+            batch_size=32
+        ),
+        vloader=model.make_policy_dataloader(
+            f'{data_dir}/{data_code}/{data_t}/test/deltas_*.dat',
+            batch_size=32
+        ),
+        epochs=100_000,
+        lr=10 ** -5,
+        assess_freq=10_000,
+        checkpoint_freq=100_000,
+        tloss_thresh=10 ** -4,
+        vloss_thresh=10 ** -3,
+        check_vloss_gap=False,
+        # vloss_gap=2
+    )
 
     # # training value function
     # model.train_value(
