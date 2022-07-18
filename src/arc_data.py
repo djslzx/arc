@@ -19,7 +19,7 @@ Mat = List[List]
 TaskPair = Dict[str, Mat]
 Task = Dict[str, List[TaskPair]]
 
-ARC_DIR = '../ARC/data/*'
+ARC_DATA_DIR = '/home/djsl/Research/arc/ARC/data/*'
 TASK_NAMES = [
     "025d127b", "150deff5", "1caeab9d", "1e0a9b12", "1f876c06",
     "1fad071e", "2281f1f4", "228f6490", "31aa019c", "39a8645d",
@@ -42,11 +42,11 @@ SEQ_FEASIBLE_TASK_NAMES = [
     'b8cdaf2b', 'b94a9452', 'c8f0f002', 'd631b094', 'e179c5f4', 'f76d97a5',
 ]
 
-def read_arc_file(filename: str) -> Tuple[str, Task]:
+def read_arc_file(filename: str) -> Task:
     with open(filename, 'r') as f:
-        return filename, json.load(f)
+        return json.load(f)
 
-def read_arc_files(filenames: List[str]) -> List[Tuple[str, Task]]:
+def read_arc_files(filenames: List[str]) -> List[Task]:
     return [read_arc_file(filename) for filename in filenames]
 
 def arc_task_as_tensors(task: Task) -> List[T.Tensor]:
@@ -121,32 +121,43 @@ def n_tasks_within_dim(height: int, width: int, dims: List[Dict]) -> int:
         n += dim['height'] <= height and dim['width'] <= width
     return n
 
+def get_fnames(names: List[str]) -> List[str]:
+    return [name
+            for task_name in names
+            for name in glob(f'{ARC_DATA_DIR}/{task_name}.json')]
+
 def get_dims(names: List[str], domain: List[str]):
-    filenames = [name
-                 for task_name in names
-                 for name in glob(f'{ARC_DIR}/{task_name}.json')]
-    tasks = [task for name, task in read_arc_files(filenames)]
+    filenames = get_fnames(names)
+    tasks = read_arc_files(filenames)
     return dims(tasks, domain)
 
 def plot_arc_dimensions(names: List[str]):
     dimensions = get_dims(names, domain=['input', 'output'])
     plot_dims(dimensions)
 
+def pad_bitmaps(bitmaps: List[T.Tensor]) -> List[T.Tensor]:
+    return [util.pad_mat(bitmap, h=grammar.B_H, w=grammar.B_W)
+            for bitmap in bitmaps]
+
 def task_bitmaps(names: List[str]) -> List[T.Tensor]:
-    filenames = [name
-                 for task_name in names
-                 for name in glob(f'{ARC_DIR}/{task_name}.json')]
-    out_bitmaps = []
-    for name, task in read_arc_files(filenames):
-        bitmaps = arc_task_as_tensors(task)
-        padded_bitmaps = [util.pad_mat(bitmap, h=grammar.B_H, w=grammar.B_W, padding_token=0)
-                          for bitmap in bitmaps]
-        out_bitmaps.extend(padded_bitmaps)
-    return out_bitmaps
+    filenames = get_fnames(names)
+    bitmaps = []
+    for task in read_arc_files(filenames):
+        bitmaps.extend(pad_bitmaps(arc_task_as_tensors(task)))
+    return bitmaps
+
+def named_task_bitmaps(task_names: List[str]) -> Tuple[List[T.Tensor], List[str]]:
+    bitmaps = []
+    bitmap_names = []
+    for task_name, task in zip(task_names, read_arc_files(get_fnames(task_names))):
+        task_tensors = arc_task_as_tensors(task)
+        bitmaps.extend(pad_bitmaps(task_tensors))
+        bitmap_names.extend([f'{task_name}-{i}' for i in range(len(task_tensors))])
+    return bitmaps, bitmap_names
 
 def survey_colors():
     filenames = [name for task_name in TASK_NAMES
-                 for name in glob(f'{ARC_DIR}/{task_name}.json')]
+                 for name in glob(f'{ARC_DATA_DIR}/{task_name}.json')]
     tasks = [task for name, task in read_arc_files(filenames)]
     print(colors(tasks, ['input', 'output']))
 
