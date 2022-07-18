@@ -80,7 +80,7 @@ def viz(t, title='', subtitle='', fname=None, label=False):
     show(ax, t, label=label)
     output(fname, show=True)
 
-def viz_grid(grid, text=''):
+def viz_grid(grid, text='', fname=None, do_show=True):
     """Visualize a grid of samples"""
     h, w = grid.shape[:2]
     f, ax = plt.subplots(w, h)
@@ -88,7 +88,7 @@ def viz_grid(grid, text=''):
     for r, row in enumerate(grid):
         for c, cell in enumerate(row):
             show(ax[c, r], cell)
-    output()
+    output(fname, do_show)
 
 
 if __name__ == '__main__':
