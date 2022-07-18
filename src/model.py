@@ -6,7 +6,6 @@ import math
 import pickle
 import time
 from glob import glob
-# import matplotlib.pyplot as plt
 
 import torch as T
 import torch.nn as nn
@@ -16,7 +15,7 @@ import torch.utils.tensorboard as tb
 from typing import Optional, Iterable, List, Callable, Tuple
 from collections import namedtuple
 
-# import arc_data
+import arc_data
 import grammar as g
 import util
 import viz
@@ -336,7 +335,8 @@ class Model(nn.Module):
                     tloss = round_tloss / assess_freq
                     vloss = self.pretrain_validate(vloader, n_examples=assess_freq)
                     self.train()
-                    if vloss < min_vloss: min_vloss = vloss
+                    if vloss < min_vloss:
+                        min_vloss = vloss
                     
                     # record losses
                     print(f" [step={step}, epoch={epoch}]: "
@@ -363,7 +363,8 @@ class Model(nn.Module):
                             }, self.model_path(save_dir, step))
             
             # TODO: sample from model during training and record using tensorboard
-            if training_complete: break
+            if training_complete:
+                break
         
         path = self.model_path(save_dir, step)
         print(f"Finished training at step {step} with tloss={tloss}, vloss={vloss},"
@@ -388,7 +389,8 @@ class Model(nn.Module):
         total_toks = 0
         for (p, p_bmps), (f, f_bmps), d in dataloader:
             i += 1
-            if i > n_examples: break
+            if i > n_examples:
+                break
             d_in = d[:, :-1]
             d_out = d[:, 1:]
             policy_out, _ = self.forward(f_bmps, p_bmps, p, d_in)
@@ -400,7 +402,7 @@ class Model(nn.Module):
             total_toks += T.ne(f, self.PADDING).sum()
         
         avg_toks = total_toks / (n_examples * dataloader.batch_size)
-        avg_lines = (avg_toks - 4)/6  # remove START, END, {, }; each rect takes 6 tokens (R, color, 2 corners)
+        avg_lines = (avg_toks - 4) / 6  # remove START, END, {, }; each rect takes 6 tokens (R, color, 2 corners)
         print(f"Validation loss computed with {avg_toks:.2f} tokens per example, "
               f"or about {avg_lines:.2f} lines")
         return epoch_loss / n_examples
@@ -477,7 +479,7 @@ class Model(nn.Module):
                     assess_freq=10_000, checkpoint_freq=100_000):
         self.train()
         optimizer = T.optim.Adam(self.parameters(), lr=lr)
-        writer = tb.SummaryWriter(comment=f'_{self.name}_value')
+        # writer = tb.SummaryWriter(comment=f'_{self.name}_value')
         
         step = 0
         t_start = time.time()
@@ -541,7 +543,8 @@ class Model(nn.Module):
                 f'len(envs)={len(envs)}, while self.N={self.N}.'
         n_envs = len(envs)
         program = self.to_program(indices)
-        if program is None: program = g.Seq()
+        if program is None:
+            program = g.Seq()
 
         bitmaps = []
         for env in envs:
@@ -661,55 +664,79 @@ class PolicyDataset(IterableDataset):
                         #                                   for env in f_envs for z in env['z']], False).to(dev)
                         
                         # convert program tokens into padded vectors of indices
-                        p_indices = util.pad(self.to_indices(p_toks, True), self.program_length, self.padding).to(dev)
-                        f_indices = util.pad(self.to_indices(f_toks, True), self.program_length, self.padding).to(dev)
-                        d_indices = util.pad(self.to_indices(d_toks, True), self.line_length, self.padding).to(dev)
+                        p_indices = util.pad(self.to_indices(p_toks, True),
+                                             self.program_length,
+                                             self.padding).to(dev)
+                        f_indices = util.pad(self.to_indices(f_toks, True),
+                                             self.program_length,
+                                             self.padding).to(dev)
+                        d_indices = util.pad(self.to_indices(d_toks, True),
+                                             self.line_length,
+                                             self.padding).to(dev)
 
                         yield (p_indices, p_bmps), (f_indices, f_bmps), d_indices
 
                     except EOFError:
                         break
 
-def sample_model_on_policy_data(model: Model, dataloader: DataLoader):
+def filter_full_bitmaps(dataloader: DataLoader):
+    """
+    Removes policy pre-training data points that have incomplete prefix bitmaps.
+    In other words, filters the 5-tuple (p, p_bmps, f, f_bmps, d) for tuples where p_bmps = f_bmps.
+    """
+    # TODO: test
     for (p, p_bmps), (f, f_bmps), d in dataloader:
-        batch_size = f.size(0)
+        if p != f:
+            continue
+        else:
+            yield f, f_bmps, d
+
+def sample_model_on_policy_data(model: Model, dataloader: DataLoader):
+    for f, f_bmps, d in filter_full_bitmaps(dataloader):
+        # Print out program tokens
         print(f[0])
         print(model.to_tokens(f[0]))
-        n_lines = len(model.to_program(f[0]).lines())
+
+        # Take rollouts from model
+        n_lines = len(model.to_program(f[0]).lines())  # count lines in reference f
         rollouts = model.sample_program_rollouts(f_bmps, line_cap=n_lines)
         envs = g.seed_envs(model.N ** 2)
         print(f'envs={envs}')
-        # batched_envs = [[{'z': t} for t in batch.split(g.LIB_SIZE)]
-        #                 for batch in f_envs]
-        current_bmps = None
+
+        batch_size = f.size(0)
         for i in range(batch_size):
-            output = model.to_program(rollouts[i])
-            expected = model.to_program(f[i])
-            print(f'expected={expected}, actual={output}')
-            
-            in_bmps = f_bmps.cpu()[i]
-            if current_bmps is not None and T.equal(in_bmps, current_bmps):
-                continue
-            else:
-                current_bmps = in_bmps
-            
-            out_bmps = model.render(rollouts[i], envs=envs, check_env_size=False).cpu()
-            bmps = T.cat((in_bmps, out_bmps)).reshape(-1, model.N, model.H, model.W)
-            text = f'expected={expected}\n'\
-                   f'actual={output}'
+            rollout_program = model.to_program(rollouts[i])
+            f_program = model.to_program(f[i])
+            print(f'expected={f_program}, got={rollout_program}')
+            rollout_bmps = model.render(rollouts[i], envs=envs, check_env_size=False).cpu()
+            bmps = T.cat((f_bmps, rollout_bmps)).reshape(-1, model.N, model.H, model.W)
+            text = (f'expected={f_program}\n'
+                    f'actual={rollout_program}')
             viz.viz_grid(bmps, text)
 
-def sample_model_on_bitmaps(model: Model, bitmaps: Iterable[T.Tensor], line_cap=8):
-    for bitmap in bitmaps:
+def sample_model_on_bitmaps(model: Model,
+                            bitmaps: Iterable[T.Tensor],
+                            bitmap_names: Optional[Iterable[str]],
+                            line_cap=8):
+    grid_size = 3
+    for name, bitmap in zip(bitmap_names, bitmaps):
         # reshape bitmaps -> [b=1, N, H, W, C]
         bitmap_stack = T.stack([util.pad_mat(bitmap, h=model.H, w=model.W, padding_token=0)
                                 for _ in range(model.N)]).unsqueeze(0).to(dev)
-        rollout = model.sample_program_rollouts(bitmap_stack, line_cap=line_cap)[0]
-        envs = g.seed_envs(3 ** 2 - 1)
-        out_program = model.to_program(rollout)
-        out_bitmaps = model.render(rollout, envs=envs, check_env_size=False).cpu()
-        bmps = T.cat((bitmap.unsqueeze(0), out_bitmaps)).reshape(3, 3, model.H, model.W)
-        viz.viz_grid(bmps, text=out_program)
+        rollouts = model.sample_program_rollouts(bitmap_stack, line_cap=line_cap)
+        envs = g.seed_envs(grid_size ** 2 - 1) # 3x3 - 1
+
+        for rollout in rollouts:
+            rollout_program = model.to_program(rollout)
+            rollout_bitmaps = model.render(rollout, envs, check_env_size=False).cpu()
+            
+            # vizualize rollouts compared to reference
+            print(f'Visualizing ref={name}\n'
+                  f'   with rollout={rollout_program}...')
+            viz_bitmaps = (T
+                           .cat((bitmap.unsqueeze(0), rollout_bitmaps))
+                           .reshape(grid_size, grid_size, model.H, model.W))
+            viz.viz_grid(viz_bitmaps, text=rollout_program, fname=f'/home/djsl/Research/arc/imgs/jul16/{name}', do_show=False)
         
 def make_model(model_code: str, lexicon: List[str]) -> Model:
     return Model(
@@ -751,50 +778,51 @@ def recover_model(code: str, lexicon: List[str], directory: str, n_steps: int,
 
 
 if __name__ == '__main__':
-    # n = 10
-    # model = recover_model(
-    #     code='50k-R-5e1~20l0z',
-    #     lexicon=g.SIMPLE_LEXICON,
-    #     directory='../models',
-    #     n_steps=200_000,
-    #     test_with=(f'../data/10-R-5e{n}l0~5z/july15/train/deltas_*.dat', 16)
-    # )
-
-    # # test on ARC data
-    # bitmaps = arc_data.task_bitmaps(arc_data.SEQ_FEASIBLE_TASK_NAMES)
-    # for cap in [3, 6, 9]:
-    #     sample_model_on_bitmaps(model, bitmaps, line_cap=cap)
-
-    # pretraining model
-    # data_dir = '/home/djl328/arc/data'
-    data_dir = '../data'
-    # model_dir = '/home/djl328/arc/models'
-    model_dir = '../models'
-    data_code = '10-R-5e6l0~5z'
-    data_t = 'july15'
-    model = make_model(
-        model_code='CS,S,SR,LL-5e6l0~5z',
+    ARC_DIR = '.'
+    model = recover_model(
+        code='CS,S,SR,LL-5e1~8l0z',
         lexicon=g.SIMPLE_LEXICON,
+        directory=f'{ARC_DIR}/models',
+        n_steps=200_000,
+        test_with=(f'{ARC_DIR}/data/10-R-5e6l0~5z/july15/test/deltas_*.dat', 16)
     )
-    model.pretrain_policy(
-        save_dir=model_dir,
-        tloader=model.make_policy_dataloader(
-            f'{data_dir}/{data_code}/{data_t}/train/deltas_*.dat',
-            batch_size=32
-        ),
-        vloader=model.make_policy_dataloader(
-            f'{data_dir}/{data_code}/{data_t}/test/deltas_*.dat',
-            batch_size=32
-        ),
-        epochs=100_000,
-        lr=10 ** -5,
-        assess_freq=10_000,
-        checkpoint_freq=100_000,
-        tloss_thresh=10 ** -4,
-        vloss_thresh=10 ** -3,
-        check_vloss_gap=False,
-        # vloss_gap=2
-    )
+
+    # test on ARC data
+    bitmaps, names = arc_data.named_task_bitmaps(arc_data.SEQ_FEASIBLE_TASK_NAMES)
+    sample_model_on_bitmaps(model, bitmaps, names, line_cap=10)
+    exit(0)
+
+    # bitmaps = arc_data.task_bitmaps(arc_data.SEQ_FEASIBLE_TASK_NAMES)
+    # for bitmap in bitmaps:
+    #     viz.viz(bitmap)
+    # exit(0)
+
+    # # pretraining model
+    # data_code = '10-R-5e6l0~5z'
+    # data_t = 'july15'
+    # model = make_model(
+    #     model_code='CS,S,SR,LL-5e6l0~5z',
+    #     lexicon=g.SIMPLE_LEXICON,
+    # )
+    # model.pretrain_policy(
+    #     save_dir=f'{ARC_DIR}/models',
+    #     tloader=model.make_policy_dataloader(
+    #         f'{ARC_DIR}/data/{data_code}/{data_t}/train/deltas_*.dat',
+    #         batch_size=32
+    #     ),
+    #     vloader=model.make_policy_dataloader(
+    #         f'{ARC_DIR}/data/{data_code}/{data_t}/test/deltas_*.dat',
+    #         batch_size=32
+    #     ),
+    #     epochs=100_000,
+    #     lr=10 ** -5,
+    #     assess_freq=10_000,
+    #     checkpoint_freq=100_000,
+    #     tloss_thresh=10 ** -4,
+    #     vloss_thresh=10 ** -3,
+    #     check_vloss_gap=False,
+    #     # vloss_gap=2
+    # )
 
     # # training value function
     # model.train_value(
