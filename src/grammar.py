@@ -1,9 +1,9 @@
-import pdb
+# import pdb
 import itertools as it
 import torch as T
 import torch.nn.functional as F
 import random
-from typing import List, Tuple, Dict, Callable, Type
+from typing import Type
 
 import util
 import ant
@@ -18,7 +18,7 @@ Z_LO = 0                        # min poss value in z_n
 Z_HI = max(B_W, B_H)            # max poss value in z_n
 Z_IGNORE = -1                   # ignore z's that have this value
 IMG_IGNORE = -1                 # ignore pixels that have this value
-FULL_LEXICON = ([i for i in range(Z_LO, Z_HI+1)] +
+FULL_LEXICON = ([i for i in range(Z_LO, Z_HI + 1)] +
                 [f'z_{i}' for i in range(LIB_SIZE)] +
                 [f'S_{i}' for i in range(LIB_SIZE)] +
                 [f'CS_{i}' for i in range(LIB_SIZE)] +
@@ -27,13 +27,13 @@ FULL_LEXICON = ([i for i in range(Z_LO, Z_HI+1)] +
                  'P', 'L', 'CR', 'SR'
                  'H', 'V', 'T', '#', 'o', '@', '!', '{', '}', '(', ')'])
 OLD_LEXICON = (
-    [i for i in range(Z_LO, Z_HI+1)] +
+    [i for i in range(Z_LO, Z_HI + 1)] +
     [f'z_{i}' for i in range(LIB_SIZE)] +
     [f'S_{i}' for i in range(LIB_SIZE)] +
     ['x_max', 'y_max', 'P', 'L', 'CR', 'SR', '{', '}', '(', ')']
 )
 SIMPLE_LEXICON = (
-    [i for i in range(Z_LO, Z_HI+1)] +
+    [i for i in range(Z_LO, Z_HI + 1)] +
     [f'z_{i}' for i in range(LIB_SIZE)] +
     [f'S_{i}' for i in range(LIB_SIZE)] +
     [f'CS_{i}' for i in range(LIB_SIZE)] +
@@ -148,10 +148,10 @@ def seed_sprites(n_sprites=LIB_SIZE, height=B_H, width=B_W):
     width_popn = list(range(2, min(width, SPRITE_MAX_SIZE)))
     height_popn = list(range(2, min(height, SPRITE_MAX_SIZE)))
     return T.stack([ant.make_sprite(w=random.choices(population=width_popn,
-                                                     weights=[1/(1+w) for w in width_popn],
+                                                     weights=[1 / (1 + w) for w in width_popn],
                                                      k=1)[0],
                                     h=random.choices(population=height_popn,
-                                                     weights=[1/(1+h) for h in height_popn],
+                                                     weights=[1 / (1 + h) for h in height_popn],
                                                      k=1)[0],
                                     W=width,
                                     H=height)
@@ -161,8 +161,8 @@ def seed_color_sprites(n_sprites=LIB_SIZE, height=B_H, width=B_W):
     width_popn = list(range(2, min(width, SPRITE_MAX_SIZE)))
     height_popn = list(range(2, min(height, SPRITE_MAX_SIZE)))
     return T.stack([ant.make_multicolored_sprite(
-        w=random.choices(population=width_popn, weights=[1/(1+w) for w in width_popn], k=1)[0],
-        h=random.choices(population=height_popn, weights=[1/(1+h) for h in height_popn], k=1)[0],
+        w=random.choices(population=width_popn, weights=[1 / (1 + w) for w in width_popn], k=1)[0],
+        h=random.choices(population=height_popn, weights=[1 / (1 + h) for h in height_popn], k=1)[0],
         W=width,
         H=height)
         for _ in range(n_sprites)])
@@ -288,14 +288,14 @@ class LengthLine(Expr):
     """
     in_types = ['int', 'int', 'int', 'int', 'int', 'int']
     out_type = 'bitmap'
-    def __init__(self, x, y, dx, dy, l, color=Num(1)):
+    def __init__(self, x, y, dx, dy, length, color=Num(1)):
         self.x = x
         self.y = y
         self.dx = dx
         self.dy = dy
-        self.l = l
+        self.length = length
         self.color = color
-    def accept(self, v): return v.visit_LengthLine(self.x, self.y, self.dx, self.dy, self.l, self.color)
+    def accept(self, v): return v.visit_LengthLine(self.x, self.y, self.dx, self.dy, self.length, self.color)
 
 class Point(Expr):
     in_types = ['int', 'int', 'int']
@@ -473,7 +473,7 @@ class Eval(Visitor):
     def make_bitmap(self, f):
         return T.tensor([[f((x, y))
                           for x in range(self.width)]
-                          for y in range(self.height)]).float()
+                         for y in range(self.height)]).float()
 
     def make_line(self, ax, ay, bx, by, c):
         if ax == bx:  # vertical
@@ -485,7 +485,7 @@ class Eval(Visitor):
             min_y, max_y = (ay, by) if ay < by else (by, ay)
             return self.make_bitmap(lambda p: (min_x <= p[0] <= max_x and
                                                min_y <= p[1] <= max_y and
-                                               p[1] - ay == (ay - by)//(ax - bx) * (p[0] - ax)) * c)
+                                               p[1] - ay == (ay - by) // (ax - bx) * (p[0] - ax)) * c)
         assert False, "Line must be vertical, horizontal, or diagonal"
 
     def overlay(self, *bmps):
@@ -561,8 +561,8 @@ class Eval(Visitor):
         assert abs(x2 - x1) >= 1 or abs(y2 - y1) >= 1
         return self.make_line(x1, y1, x2, y2, c)
 
-    def visit_LengthLine(self, x, y, dx, dy, l, color):
-        x, y, dx, dy, l, color = (v.accept(self) for v in [x, y, dx, dy, l, color])
+    def visit_LengthLine(self, x, y, dx, dy, length, color):
+        x, y, dx, dy, l, color = (v.accept(self) for v in [x, y, dx, dy, length, color])
         assert all(isinstance(v, int) for v in [x, y, dx, dy, l])
         assert dx in [-1, 0, 1] and dy in [-1, 0, 1] and not (dx == 0 and dy == 0), \
             f'Found unexpected dx, dy=({dx}, {dy})'
@@ -683,8 +683,8 @@ class Print(Visitor):
         return f'(Point[{color.accept(self)}] {x.accept(self)} {y.accept(self)})'
     def visit_CornerLine(self, x1, y1, x2, y2, color):
         return f'(CLine[{color.accept(self)}] {x1.accept(self)} {y1.accept(self)} {x2.accept(self)} {y2.accept(self)})'
-    def visit_LengthLine(self, x, y, dx, dy, l, color):
-        return f'(LLine[{color.accept(self)}] {x.accept(self)} {y.accept(self)} {dx.accept(self)} {dy.accept(self)} {l.accept(self)})'
+    def visit_LengthLine(self, x, y, dx, dy, length, color):
+        return f'(LLine[{color.accept(self)}] {x.accept(self)} {y.accept(self)} {dx.accept(self)} {dy.accept(self)} {length.accept(self)})'
     def visit_CornerRect(self, x_min, y_min, x_max, y_max, color):
         return f'(CRect[{color.accept(self)}] {x_min.accept(self)} {y_min.accept(self)} ' \
                f'{x_max.accept(self)} {y_max.accept(self)})'
@@ -803,11 +803,10 @@ class Serialize(Visitor):
     def visit_Point(self, x, y, color): return ['P'] + color.accept(self) + x.accept(self) + y.accept(self)
     def visit_CornerLine(self, x1, y1, x2, y2, color):
         return ['CL'] + color.accept(self) + x1.accept(self) + y1.accept(self) + x2.accept(self) + y2.accept(self)
-    def visit_LengthLine(self, x, y, dx, dy, l, color):
-        return ['LL'] + color.accept(self) + x.accept(self) + y.accept(self) + dx.accept(self) + dy.accept(self) + l.accept(self)
+    def visit_LengthLine(self, x, y, dx, dy, length, color):
+        return ['LL'] + color.accept(self) + x.accept(self) + y.accept(self) + dx.accept(self) + dy.accept(self) + length.accept(self)
     def visit_CornerRect(self, x_min, y_min, x_max, y_max, color):
-        return ['CR'] + color.accept(self) + x_min.accept(self) + y_min.accept(self) +\
-               x_max.accept(self) + y_max.accept(self)
+        return ['CR'] + color.accept(self) + x_min.accept(self) + y_min.accept(self) + x_max.accept(self) + y_max.accept(self)
     def visit_SizeRect(self, x, y, w, h, color):
         return ['SR'] + color.accept(self) + x.accept(self) + y.accept(self) + w.accept(self) + h.accept(self)
     def visit_Sprite(self, i, x, y, color):
@@ -863,8 +862,8 @@ class SimplifyIndices(Visitor):
     def visit_Point(self, x, y, color): return Point(x.accept(self), y.accept(self), color.accept(self))
     def visit_CornerLine(self, x1, y1, x2, y2, color):
         return CornerLine(x1.accept(self), y1.accept(self), x2.accept(self), y2.accept(self), color.accept(self))
-    def visit_LengthLine(self, x, y, dx, dy, l, color):
-        return LengthLine(x.accept(self), y.accept(self), dx.accept(self), dy.accept(self), l.accept(self), color.accept(self))
+    def visit_LengthLine(self, x, y, dx, dy, length, color):
+        return LengthLine(x.accept(self), y.accept(self), dx.accept(self), dy.accept(self), length.accept(self), color.accept(self))
     def visit_CornerRect(self, x_min, y_min, x_max, y_max, color):
         return CornerRect(x_min.accept(self), y_min.accept(self), x_max.accept(self), y_max.accept(self),
                           color.accept(self))
@@ -889,7 +888,7 @@ class WellFormed(Visitor):
     def visit_XMax(self): return True
     def visit_YMax(self): return True
     def visit_Z(self, i): return isinstance(i, int)
-    def visit_Not(self, b): 
+    def visit_Not(self, b):
         return b.out_type == 'bool' and b.accept(self)
     def visit_Plus(self, x, y):
         return x.out_type == 'int' and y.out_type == 'int' and x.accept(self) and y.accept(self)
@@ -907,11 +906,11 @@ class WellFormed(Visitor):
                x.out_type == y.out_type and x.accept(self) and y.accept(self)
     def visit_Point(self, x, y, color):
         return x.out_type == 'int' and y.out_type == 'int' and color.out_type == 'int' and \
-           x.accept(self) and y.accept(self) and color.accept(self)
+            x.accept(self) and y.accept(self) and color.accept(self)
     def visit_CornerLine(self, x1, y1, x2, y2, color):
         return all(v.out_type == 'int' and v.accept(self) for v in [x1, y1, x2, y2, color])
-    def visit_LengthLine(self, x, y, dx, dy, l, color):
-        return all(v.out_type == 'int' and v.accept(self) for v in [x, y, dx, dy, l, color])
+    def visit_LengthLine(self, x, y, dx, dy, length, color):
+        return all(v.out_type == 'int' and v.accept(self) for v in [x, y, dx, dy, length, color])
     def visit_CornerRect(self, x_min, y_min, x_max, y_max, color):
         return all(v.out_type == 'int' and v.accept(self) for v in [x_min, y_min, x_max, y_max, color])
     def visit_SizeRect(self, x, y, w, h, color):
@@ -926,7 +925,7 @@ class WellFormed(Visitor):
     #     return bmp.out_type == 'bitmap' and bmp.accept(self)
     def visit_HFlip(self): return True
     def visit_VFlip(self): return True
-    def visit_Translate(self, x, y): 
+    def visit_Translate(self, x, y):
         return x.out_type == 'int' and y.out_type == 'int' and x.accept(self) and y.accept(self)
     def visit_Recolor(self, c):
         return c.out_type == 'int' and c.accept(self)
@@ -947,7 +946,7 @@ class Perturb(Visitor):
     def visit_Plus(self, x, y):
         return Minus(x, y) if random.randint(0, 1) > 0 else Times(x, y)
     def visit_Minus(self, x, y):
-        return Times(x, y) if random.randint(0, 1) > 0 else Plus(x, y) 
+        return Times(x, y) if random.randint(0, 1) > 0 else Plus(x, y)
     def visit_Times(self, x, y):
         return Plus(x, y) if random.randint(0, 1) > 0 else Minus(x, y)
 
@@ -982,8 +981,8 @@ class MapReduce(Visitor):
     def visit_Point(self, x, y, color): return self.reduce(Point, x.accept(self), y.accept(self), color.accept(self))
     def visit_CornerLine(self, x1, y1, x2, y2, color):
         return self.reduce(CornerLine, x1.accept(self), y1.accept(self), x2.accept(self), y2.accept(self), color.accept(self))
-    def visit_LengthLine(self, x, y, dx, dy, l, color):
-        return self.reduce(LengthLine, x.accept(self), y.accept(self), dx.accept(self), dy.accept(self), l.accept(self), color.accept(self))
+    def visit_LengthLine(self, x, y, dx, dy, length, color):
+        return self.reduce(LengthLine, x.accept(self), y.accept(self), dx.accept(self), dy.accept(self), length.accept(self), color.accept(self))
     def visit_CornerRect(self, x_min, y_min, x_max, y_max, color):
         return self.reduce(CornerRect, x_min.accept(self), y_min.accept(self), x_max.accept(self), y_max.accept(self),
                            color.accept(self))
@@ -1034,7 +1033,7 @@ class Range(Visitor):
 
 def test_eval():
     tests = [
-        # Basic semantics 
+        # Basic semantics
         (Nil(),
          lambda z: False),
         (Not(Nil()),
@@ -1062,7 +1061,7 @@ def test_eval():
                                        "_____",
                                        "__#__",
                                        "_#___",
-                                       "#____",], w=B_W, h=B_H)),
+                                       "#____"], w=B_W, h=B_H)),
         (SizeRect(Num(0), Num(1), Num(2), Num(2)),
          lambda z: util.img_to_tensor(["____",
                                        "##__",
@@ -1173,31 +1172,31 @@ def test_eval_bitmap():
           "_#_",
           "_#_",
           "_#_",
-          "_#_",]),
+          "_#_"]),
         (LengthLine(Num(3), Num(2), Num(1), Num(-1), Num(2)),
          ["_______",
           "____#__",
           "___#___",
-          "_______",]),
+          "_______"]),
         (LengthLine(Num(3), Num(2), Num(-1), Num(1), Num(2)),
          ["_______",
           "_______",
           "___#___",
-          "__#____",]),
+          "__#____"]),
         (LengthLine(Num(3), Num(2), Num(-1), Num(-1), Num(2)),
          ["_______",
           "__#____",
           "___#___",
-          "_______",]),
+          "_______"]),
         
         # Reflection
         (Apply(HFlip(),
                CornerLine(Num(0), Num(0),
                           Num(3), Num(3))),
-         ["#___" + "_"*(B_W-8) + "___#",
-          "_#__" + "_"*(B_W-8) + "__#_",
-          "__#_" + "_"*(B_W-8) + "_#__",
-          "___#" + "_"*(B_W-8) + "#___"]),
+         ["#___" + "_" * (B_W - 8) + "___#",
+          "_#__" + "_" * (B_W - 8) + "__#_",
+          "__#_" + "_" * (B_W - 8) + "_#__",
+          "___#" + "_" * (B_W - 8) + "#___"]),
         (Join(Join(Point(Num(0), Num(0)),
                    Point(Num(1), Num(3))),
               Join(Point(Num(2), Num(0)),
@@ -1235,10 +1234,10 @@ def test_eval_bitmap():
                                Num(1), Num(1)),
                     CornerRect(Num(2), Num(2),
                                Num(3), Num(3)))),
-         ["##__" + "_"*(B_W-8) + "__##",
-          "##__" + "_"*(B_W-8) + "__##",
-          "__##" + "_"*(B_W-8) + "##__",
-          "__##" + "_"*(B_W-8) + "##__"]),
+         ["##__" + "_" * (B_W - 8) + "__##",
+          "##__" + "_" * (B_W - 8) + "__##",
+          "__##" + "_" * (B_W - 8) + "##__",
+          "__##" + "_" * (B_W - 8) + "##__"]),
 
         # Translate
         (Apply(Translate(Num(0), Num(0)),
@@ -1427,11 +1426,11 @@ def test_eval_colorsprite():
     tests = [
         ([["12_2",
            "1_35",
-           "_45_",]],
+           "_45_"]],
          ColorSprite(0),
          ["12_2",
-           "1_35",
-           "_45_",]),
+          "1_35",
+          "_45_"]),
         ([["21",
            "1_"],
           ["12",
@@ -1619,10 +1618,10 @@ def test_deserialize_breaking():
             failed = True
 
         if should_fail and not failed:
-            print( f"expected to fail but didn't: in={case}, got {out}")
+            print(f"expected to fail but didn't: in={case}, got {out}")
             exit(1)
         elif not should_fail and failed:
-            print( f"failed unexpectedly: in={case}")
+            print(f"failed unexpectedly: in={case}")
             exit(1)
     print(" [+] passed test_deserialize_breaking")
     
@@ -1687,11 +1686,11 @@ def test_eval_variable_sizes():
                              "______",
                              "______",
                              "______",
-                             "______",], h=6, w=6)),
+                             "______"], h=6, w=6)),
         (CornerRect(Num(0), Num(0), Num(2), Num(2)), 3, 3,
          util.img_to_tensor(["###",
                              "###",
-                             "###",], h=3, w=3)),
+                             "###"], h=3, w=3)),
         # should fail with assertion error:
         # (Rect(Num(0), Num(0), Num(2), Num(2)), 1, 1,
         #  util.img_to_tensor(["###",
@@ -1711,21 +1710,21 @@ def test_eval_using_xy_max():
                              "######",
                              "######",
                              "######",
-                             "######",], h=6, w=6)),
+                             "######"], h=6, w=6)),
         (CornerRect(Num(0), Num(0), XMax(), YMax()), 3, 3,
          util.img_to_tensor(["###",
                              "###",
-                             "###",], h=3, w=3)),
+                             "###"], h=3, w=3)),
         (CornerRect(Num(1), Num(1), XMax(), YMax()), 3, 3,
          util.img_to_tensor(["___",
                              "_##",
-                             "_##",], h=3, w=3)),
+                             "_##"], h=3, w=3)),
         (CornerRect(Num(1), Num(1), XMax(), YMax()), 5, 5,
          util.img_to_tensor(["_____",
                              "_####",
                              "_####",
                              "_####",
-                             "_####",], h=5, w=5)),
+                             "_####"], h=5, w=5)),
     ]
     for expr, h, w, ans in cases:
         render = expr.eval(height=h, width=w)
@@ -1743,8 +1742,9 @@ def demo_perturb_leaves():
     for expr in cases:
         size = expr.count_leaves()
         out = expr.perturb_leaves(1)
-        print(expr, out)
+        print(expr, size, out)
         # assert out != expr, f"perturb_leaves failed: in={expr}, out={out}"
+
 
 if __name__ == '__main__':
     test_eval()
